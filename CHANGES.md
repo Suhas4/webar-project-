@@ -392,6 +392,47 @@ This appears in **development only**. Safe to ignore — production build uses o
 
 ---
 
+## Deployment Details
+
+### Live URLs
+| Service | URL |
+|---|---|
+| Frontend (Netlify) | https://web-ar-suhas.netlify.app |
+| Backend (Render) | https://webar-project-8jbi.onrender.com |
+| Health Check | https://webar-project-8jbi.onrender.com/health |
+| Custom Domain | https://memoera.in (pending DNS propagation) |
+
+### GitHub Repository
+- URL: https://github.com/Suhas4/webar-project-.git
+- Branch: `main`
+
+### Render Environment Variables
+| Key | Value |
+|---|---|
+| `JWT_SECRET` | `memoera-secret-key-2024-xyz` |
+| `FRONTEND_ORIGIN` | `https://web-ar-suhas.netlify.app` |
+
+### Netlify Build Settings
+| Field | Value |
+|---|---|
+| Base directory | `webar-app` |
+| Build command | `npm run build` |
+| Publish directory | `webar-app/dist` |
+
+### Custom Domain Setup (memoera.in) — ⏳ IN PROGRESS
+- Domain purchased from GoDaddy
+- Netlify nameservers added in GoDaddy
+- DNS propagation in progress (can take up to 24 hours)
+
+#### ✅ Pending Next Steps:
+1. Check DNS propagation at https://dnschecker.org/#NS/memoera.in
+2. Wait until Netlify nameservers (dns1.p0X.nsone.net) show green ✅ globally
+3. Go to Netlify → Domain management → HTTPS → Click "Verify DNS configuration"
+4. Click "Provision certificate" to enable HTTPS on memoera.in
+5. Update `FRONTEND_ORIGIN` on Render to `https://memoera.in`
+
+---
+
 ## Playwright Test Results
 
 | Test | Result |
