@@ -1,0 +1,23 @@
+{
+  "name": "webar-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:https": "vite --https",
+    "build": "vite build",
+    "preview": "vite preview",
+    "preview:https": "vite preview --https"
+  },
+  "dependencies": {
+    "idb-keyval": "^6.2.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.150.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.3.1"
+  }
+}

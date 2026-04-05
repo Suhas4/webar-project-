@@ -1,0 +1,20 @@
+# Node / Frontend
+webar-app/node_modules/
+webar-app/dist/
+webar-app/.env
+webar-app/.env.local
+webar-app/.env.production
+
+# Go / Backend
+backend/webar-backend
+backend/*.exe
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.suo
+*.user

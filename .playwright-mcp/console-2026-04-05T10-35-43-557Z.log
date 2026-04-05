@@ -1,0 +1,2 @@
+[     449ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://localhost:5173/node_modules/.vite/deps/chunk-NGODP64W.js?v=87b4564b:21550
+[   46817ms] [ERROR] Failed to load resource: the server responded with a status of 409 (Conflict) @ http://localhost:8181/api/auth/signup:0

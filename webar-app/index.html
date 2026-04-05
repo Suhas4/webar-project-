@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+
+    <!--
+      Import map — MUST be first in <head>, before any <script type="module">.
+
+      MindAR's dist files are ES modules that do `import { ... } from "three"`.
+      Browsers cannot resolve bare specifiers like "three" without an import map.
+      Without this, dynamic import() of MindAR fails with:
+        "Failed to resolve module specifier 'three'"
+
+      WHY three@0.150.0:
+      MindAR 1.2.5 uses `sRGBEncoding` which was removed in Three.js r152.
+      r150 is the last compatible version. Our app's three npm package also
+      uses 0.150.0 to stay in sync.
+    -->
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.150.0/examples/jsm/"
+      }
+    }
+    </script>
+
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <!-- iOS fullscreen / status bar -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <title>WebAR Experience</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

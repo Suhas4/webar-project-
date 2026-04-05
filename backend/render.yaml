@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: webar-backend
+    runtime: go
+    # Render auto-detects Go projects; these commands are explicit for clarity
+    buildCommand: go build -o webar-backend .
+    startCommand: ./webar-backend
+    healthCheckPath: /health
+    envVars:
+      # Replace with your actual Netlify URL after deploying the frontend
+      - key: FRONTEND_ORIGIN
+        value: https://your-app.netlify.app
+      # PORT is provided automatically by Render — do not set it manually
+    # Render free tier spins down after 15 min of inactivity.
+    # Upgrade to a paid plan for always-on production use.

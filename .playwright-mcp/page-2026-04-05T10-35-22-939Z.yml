@@ -1,0 +1,42 @@
+- generic [ref=e35]:
+  - generic [ref=e36]:
+    - generic [ref=e37]: memo
+    - generic [ref=e38]: era
+  - paragraph [ref=e39]: Restoring Memories
+  - generic [ref=e40]:
+    - heading "SIGN UP" [level=2] [ref=e41]
+    - generic [ref=e70]: Cannot connect to server. Make sure the backend is running.
+    - generic [ref=e42]:
+      - generic [ref=e43]:
+        - generic [ref=e44]:
+          - generic [ref=e45]: First Name
+          - textbox "First name" [ref=e46]: Suhas
+        - generic [ref=e47]:
+          - generic [ref=e48]: Last Name
+          - textbox "Last name" [ref=e49]: KN
+      - generic [ref=e50]:
+        - generic [ref=e51]: Mobile Number
+        - textbox "10-digit mobile number" [ref=e52]: "9876543210"
+      - generic [ref=e53]:
+        - generic [ref=e54]: Email ID
+        - textbox "your@email.com" [ref=e55]: suhas@test.com
+      - generic [ref=e56]:
+        - generic [ref=e57]: Create Password
+        - generic [ref=e58]:
+          - textbox "Min. 6 characters" [ref=e59]: test123
+          - button "👁️" [ref=e60] [cursor=pointer]
+      - generic [ref=e61]:
+        - generic [ref=e62]: Security Question
+        - combobox [ref=e63] [cursor=pointer]:
+          - option "What was the name of your first pet?" [selected]
+          - option "What is your mother's maiden name?"
+          - option "What city were you born in?"
+          - option "What was the name of your primary school?"
+          - option "What is your oldest sibling's middle name?"
+      - generic [ref=e64]:
+        - generic [ref=e65]: Security Answer
+        - textbox "Your answer" [ref=e66]: Tommy
+      - button "Sign Up" [ref=e67] [cursor=pointer]
+  - paragraph [ref=e68]:
+    - text: Already have an account?
+    - button "Sign In" [ref=e69] [cursor=pointer]

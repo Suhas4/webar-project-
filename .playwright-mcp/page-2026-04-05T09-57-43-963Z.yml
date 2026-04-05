@@ -1,0 +1,37 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: memo
+      - generic [ref=e7]: era
+    - paragraph [ref=e8]: Restoring Memories
+    - heading "AR Setup" [level=1] [ref=e10]
+    - paragraph [ref=e11]: Upload a marker image and a video for each target
+  - generic [ref=e12]:
+    - generic [ref=e13]:
+      - generic [ref=e14]:
+        - generic [ref=e15]:
+          - generic [ref=e16]: "1"
+          - generic [ref=e17]: Target 1
+        - button "Remove target 1" [ref=e18] [cursor=pointer]: ✕
+      - paragraph [ref=e19]: Marker Image — the image your camera will detect
+      - button "Upload marker image" [ref=e20] [cursor=pointer]:
+        - generic [ref=e21]:
+          - generic [ref=e22]: 🖼️
+          - generic [ref=e23]: Drop image or tap to browse
+      - paragraph [ref=e24]: Video Overlay — plays when marker is detected
+      - button "Upload video overlay" [ref=e25] [cursor=pointer]:
+        - generic [ref=e26]:
+          - generic [ref=e27]: 🎬
+          - generic [ref=e28]: Drop video or tap to browse
+      - paragraph [ref=e29]: Video Aspect Ratio — match your video's dimensions
+      - generic [ref=e30]:
+        - button "16:9" [ref=e31] [cursor=pointer]
+        - button "4:3" [ref=e32] [cursor=pointer]
+        - button "1:1" [ref=e33] [cursor=pointer]
+        - button "9:16" [ref=e34] [cursor=pointer]
+    - button "+ Add Target" [ref=e35] [cursor=pointer]:
+      - generic [ref=e36]: +
+      - text: Add Target
+  - button "Start AR →" [ref=e38] [cursor=pointer]:
+    - text: Start AR
+    - generic [ref=e39]: →

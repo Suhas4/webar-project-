@@ -1,0 +1,21 @@
+- generic [ref=e14]:
+  - generic [ref=e15]:
+    - generic [ref=e16]: memo
+    - generic [ref=e17]: era
+  - paragraph [ref=e18]: Restoring Memories
+  - generic [ref=e19]:
+    - heading "SIGN IN" [level=2] [ref=e20]
+    - generic [ref=e21]:
+      - generic [ref=e22]:
+        - generic [ref=e23]: Email or Mobile Number
+        - textbox "Enter email or mobile" [ref=e24]
+      - generic [ref=e25]:
+        - generic [ref=e26]: Password
+        - generic [ref=e27]:
+          - textbox "Enter password" [ref=e28]
+          - button "👁️" [ref=e29] [cursor=pointer]
+      - button "Forgot Password?" [ref=e30] [cursor=pointer]
+      - button "Sign In" [ref=e31] [cursor=pointer]
+  - paragraph [ref=e32]:
+    - text: Don't have an account?
+    - button "Sign Up" [ref=e33] [cursor=pointer]
