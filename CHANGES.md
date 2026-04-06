@@ -1,7 +1,87 @@
 # WebAR App — Complete Project Documentation
 
 ## Overview
-A mobile-friendly WebAR application where users sign up/sign in, upload marker images and videos via a Setup Screen. When the camera detects a marker, the corresponding video plays (with audio) anchored to it in real time. Assets are compiled in-browser and persisted in IndexedDB. Authentication is handled by a Go backend with in-memory user store.
+A mobile-friendly WebAR application where users sign up/sign in, upload marker images and videos via a Setup Screen. When the camera detects a marker, the corresponding video plays fullscreen. Assets are compiled in-browser and persisted in IndexedDB. Authentication is handled by a Go backend with in-memory user store.
+
+---
+
+## Changelog
+
+### Latest Changes (Session 2)
+
+#### 🖼️ Logo
+- Replaced all text-based "memo**era**" logos with `App Memo Era New.png` (transparent RGBA PNG)
+- Logo used in: SplashScreen (via video), SignInScreen, SignUpScreen, WelcomeScreen, SetupScreen header
+- File: `/webar-app/public/logo.png`
+
+#### 🎬 Splash Video
+- Replaced SplashScreen text animation with fullscreen video (`/public/splash.mp4`)
+- Video plays muted, autoPlay, playsInline on every app open (when no token)
+- `playbackRate` set to `duration / 3` so video always finishes in exactly 3 seconds
+- Fallback: if autoplay blocked → 3s timeout; if video fails → 2.5s timeout
+- If user has token → skips splash, goes straight to Setup
+
+#### 📷 Camera / Files Picker (TargetCard)
+- Tapping image or video drop zone shows a bottom sheet with two options:
+  - **📷 Camera** — opens `capture="environment"` (rear camera)
+  - **📁 Files** — opens normal file picker
+- Separate hidden `<input>` elements for camera and files
+- Styled bottom sheet with backdrop blur, handle bar, Cancel button
+
+#### 🐛 Bug Fixes
+
+| # | Bug | Fix |
+|---|---|---|
+| 1 | File read permission error on scan | Re-read each `File` into fresh `ArrayBuffer → Blob` right before compilation |
+| 2 | "Scan" button label | Renamed to **"Upload →"** |
+| 3 | Progress shows 0% then jumps to 100% | Yield to browser on each progress update via `Promise + setTimeout(0)`; SVG transition reduced to `0.15s linear` |
+| 4 | File size limits | Image: 50MB hard block; Video: 100MB hard block (was just a warning) |
+| 5 | Video only on small AR plane | Replaced Three.js plane with fullscreen `<video>` overlay (`position:fixed, 100%×100%, objectFit:cover`) |
+| 6 | Video playing before target detected | `preload="none"` — video only loads/plays on `onTargetFound`, pauses on `onTargetLost` |
+| 7 | Error adding Target 2+ | Re-read all File refs into fresh blobs before `saveTargets` |
+| 8 | Splash video too long | `playbackRate = duration / 3` — always finishes in 3s |
+| 9 | AR Error: Failed to load MindAR | Load MindAR via `<script type="module" src="CDN_URL">` with 3 retries + polling for `window.MINDAR` |
+
+#### 🔐 Forgot Password (OTP Flow)
+- New 3-step screen: `ForgotPasswordScreen.jsx`
+- **Step 1**: Enter email or mobile → OTP sent to both email AND SMS
+- **Step 2**: Enter 6-digit OTP (10-min expiry, 30s resend cooldown, masked email/mobile shown)
+- **Step 3**: Set new password → auto sign-in on success
+- Backend: 3 new endpoints added to `main.go`:
+  - `POST /api/auth/forgot-password` — generates OTP, sends via SMTP + Twilio
+  - `POST /api/auth/verify-otp` — validates OTP, returns 15-min reset token
+  - `POST /api/auth/reset-password` — updates password, returns auth token
+- OTP stored in-memory with expiry; cleared after successful reset
+- In dev (no env vars): OTP printed to backend terminal log
+
+#### 🔧 IndexedDB Fix
+- `useArStorage.js`: Convert `File` objects to plain `Blob` via `arrayBuffer()` before storing
+- Fixes `InvalidBlob` error on iOS Safari and Android when saving to IndexedDB
+
+#### 🌐 Local Testing Setup
+- `API_BASE` in `SignInScreen.jsx` and `SignUpScreen.jsx` set to `http://192.168.31.193:8181` for local WiFi testing
+- Protected with `git update-index --skip-worktree` so changes are never committed
+- Production URL: `https://webar-project-8jbi.onrender.com`
+
+---
+
+## Environment Variables
+
+### Backend (Render)
+| Key | Value |
+|---|---|
+| `JWT_SECRET` | `memoera-secret-key-2024-xyz` |
+| `FRONTEND_ORIGIN` | `https://web-ar-suhas.netlify.app` |
+| `SMTP_HOST` | `smtp.gmail.com` |
+| `SMTP_PORT` | `587` |
+| `SMTP_USER` | your Gmail address |
+| `SMTP_PASS` | Gmail App Password |
+| `SMTP_FROM` | your Gmail address |
+| `TWILIO_ACCOUNT_SID` | from twilio.com/console |
+| `TWILIO_AUTH_TOKEN` | from twilio.com/console |
+| `TWILIO_FROM_NUMBER` | your Twilio number e.g. `+1234567890` |
+
+---
 
 ---
 

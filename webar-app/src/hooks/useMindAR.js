@@ -2,18 +2,85 @@ import { useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { AR_TARGETS, MINDAR_CONFIG } from '../config/arTargets.js';
 
+const MINDAR_SCRIPT_URL = 'https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js';
+
+/**
+ * loadMindAR — loads MindAR via <script type="module" src="CDN_URL">.
+ *
+ * Why not dynamic import()?
+ *   MindAR's bundle has relative chunk imports like ./controller-xxx.js.
+ *   When Vite intercepts dynamic import(), it resolves those relative paths
+ *   against localhost:5173 — the files don't exist there → 404 → AR Error.
+ *
+ * Why <script type="module" src="...">?
+ *   The browser resolves relative imports against the script's own src URL
+ *   (the CDN), so ./controller-xxx.js correctly fetches from the CDN.
+ *   MindAR sets window.MINDAR as a side effect, which we poll for.
+ */
+function loadMindAR(maxRetries = 3) {
+  return new Promise((resolve, reject) => {
+    if (window.MINDAR?.IMAGE?.MindARThree) { resolve(); return; }
+
+    let attempt = 0;
+
+    function tryLoad() {
+      attempt++;
+
+      const old = document.getElementById('mindar-three-script');
+      if (old) old.remove();
+
+      const script = document.createElement('script');
+      script.id = 'mindar-three-script';
+      script.type = 'module';
+      script.src = MINDAR_SCRIPT_URL;
+      script.crossOrigin = 'anonymous';
+
+      // Poll for window.MINDAR after script loads
+      script.onload = () => {
+        let ticks = 0;
+        const timer = setInterval(() => {
+          ticks++;
+          if (window.MINDAR?.IMAGE?.MindARThree) {
+            clearInterval(timer);
+            resolve();
+          } else if (ticks > 40) { // 4s timeout
+            clearInterval(timer);
+            if (attempt < maxRetries) {
+              console.warn(`[useMindAR] window.MINDAR not set, retry ${attempt}`);
+              setTimeout(tryLoad, 1000);
+            } else {
+              reject(new Error('MindAR loaded but window.MINDAR not initialized'));
+            }
+          }
+        }, 100);
+      };
+
+      script.onerror = () => {
+        console.warn(`[useMindAR] Script load failed (attempt ${attempt}/${maxRetries})`);
+        if (attempt < maxRetries) {
+          setTimeout(tryLoad, 1200 * attempt);
+        } else {
+          reject(new Error('Failed to load MindAR after ' + maxRetries + ' attempts. Check internet connection.'));
+        }
+      };
+
+      document.head.appendChild(script);
+    }
+
+    tryLoad();
+  });
+}
+
 export function useMindAR(containerRef, onStatusChange, targetsOverride, mindFileUrlOverride) {
   const mindarThreeRef = useRef(null);
-  const fullscreenVideosRef = useRef([]); // fullscreen overlay <video> per target
+  const fullscreenVideosRef = useRef([]);
   const isStartedRef = useRef(false);
   const activeTargetsRef = useRef(new Set());
 
-  // ── stop() ──────────────────────────────────────────────────────────────────
   const stop = useCallback(async () => {
     if (!isStartedRef.current && !mindarThreeRef.current) return;
     isStartedRef.current = false;
 
-    // Bug 6 fix: pause + remove all fullscreen video overlays from DOM
     fullscreenVideosRef.current.forEach((video) => {
       if (!video) return;
       video.pause();
@@ -37,7 +104,6 @@ export function useMindAR(containerRef, onStatusChange, targetsOverride, mindFil
     activeTargetsRef.current.clear();
   }, []);
 
-  // ── Main effect ──────────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
 
@@ -53,30 +119,17 @@ export function useMindAR(containerRef, onStatusChange, targetsOverride, mindFil
         return;
       }
 
-      // Bug 9 fix: Load MindAR with one automatic retry on failure
-      if (!window.MINDAR?.IMAGE?.MindARThree) {
-        try {
-          await import('https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js');
-        } catch {
-          try {
-            await new Promise((r) => setTimeout(r, 1500));
-            await import('https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js');
-          } catch {
-            onStatusChange('error', 'Failed to load MindAR. Check your internet connection and reload.');
-            return;
-          }
-        }
-      }
-
-      if (!window.MINDAR?.IMAGE?.MindARThree) {
-        onStatusChange('error', 'MindAR did not initialize correctly. Please reload.');
+      try {
+        await loadMindAR(3);
+      } catch (err) {
+        console.error('[useMindAR] MindAR load failed:', err);
+        onStatusChange('error', 'Failed to load MindAR. Check your internet connection and reload.');
         return;
       }
 
       if (cancelled) return;
       onStatusChange('loading');
 
-      // Create MindARThree instance
       let mindarThree;
       try {
         mindarThree = new window.MINDAR.IMAGE.MindARThree({
@@ -97,35 +150,30 @@ export function useMindAR(containerRef, onStatusChange, targetsOverride, mindFil
 
       mindarThreeRef.current = mindarThree;
       const { renderer, scene, camera } = mindarThree;
-
       scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
       resolvedTargets.forEach((targetConfig) => {
         const { targetIndex, videoUrl, planeWidth, planeHeight, planeOffsetY, label } = targetConfig;
 
-        // Bug 5 fix: Create a fullscreen <video> overlay instead of a Three.js plane.
-        // This makes the video fill the entire screen when a target is detected.
-        // Bug 6 fix: preload="none" so video does NOT play in background before detection.
         const fsVideo = document.createElement('video');
         fsVideo.src = videoUrl;
         fsVideo.loop = true;
         fsVideo.muted = false;
         fsVideo.setAttribute('playsinline', '');
         fsVideo.setAttribute('webkit-playsinline', '');
-        fsVideo.preload = 'none'; // Bug 6: don't buffer/autoplay until target found
+        fsVideo.preload = 'none';
         Object.assign(fsVideo.style, {
           position: 'fixed',
           top: '0', left: '0',
           width: '100%', height: '100%',
           objectFit: 'cover',
           zIndex: '5',
-          display: 'none', // hidden until target found
+          display: 'none',
           background: '#000',
         });
         document.body.appendChild(fsVideo);
         fullscreenVideosRef.current[targetIndex] = fsVideo;
 
-        // Invisible Three.js plane — only needed so MindAR has an anchor to track
         const geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
         const material = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 });
         const mesh = new THREE.Mesh(geometry, material);
@@ -134,12 +182,10 @@ export function useMindAR(containerRef, onStatusChange, targetsOverride, mindFil
         const anchor = mindarThree.addAnchor(targetIndex);
         anchor.group.add(mesh);
 
-        // Bug 5 & 6: Show fullscreen video ONLY when target is detected
         anchor.onTargetFound = () => {
           console.log(`[useMindAR] Target found: ${label} (index ${targetIndex})`);
           fsVideo.style.display = 'block';
           fsVideo.currentTime = 0;
-
           const playPromise = fsVideo.play();
           if (playPromise !== undefined) {
             playPromise.catch((err) => {
@@ -151,17 +197,14 @@ export function useMindAR(containerRef, onStatusChange, targetsOverride, mindFil
               }
             });
           }
-
           activeTargetsRef.current.add(targetIndex);
           onStatusChange('tracking');
         };
 
-        // Hide + pause fullscreen video when target is lost
         anchor.onTargetLost = () => {
           console.log(`[useMindAR] Target lost: ${label} (index ${targetIndex})`);
           fsVideo.pause();
           fsVideo.style.display = 'none';
-
           activeTargetsRef.current.delete(targetIndex);
           if (activeTargetsRef.current.size === 0) {
             onStatusChange('ready');
@@ -204,7 +247,6 @@ export function useMindAR(containerRef, onStatusChange, targetsOverride, mindFil
 function getCameraErrorMessage(err) {
   const name = err?.name ?? '';
   const message = (err?.message ?? String(err)).toLowerCase();
-
   if (name === 'NotAllowedError' || message.includes('permission denied')) {
     return 'Camera access was denied. Please allow camera access in your browser settings and reload.';
   }
@@ -213,9 +255,6 @@ function getCameraErrorMessage(err) {
   }
   if (name === 'NotReadableError' || message.includes('could not start')) {
     return 'Camera is in use by another app. Close other apps using the camera and reload.';
-  }
-  if (message.includes('404') || message.includes('targets.mind')) {
-    return 'AR target file not found. Make sure /public/targets/targets.mind exists.';
   }
   if (message.includes('https') || message.includes('secure context')) {
     return 'Camera requires HTTPS. Please open this page over https://.';

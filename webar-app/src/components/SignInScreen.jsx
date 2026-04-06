@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 
 const API_BASE = 'https://webar-project-8jbi.onrender.com';
 
-export default function SignInScreen({ onSuccess, onGoSignUp, successMessage }) {
+export default function SignInScreen({ onSuccess, onGoSignUp, onGoForgotPassword, successMessage }) {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword]     = useState('');
   const [showPass, setShowPass]     = useState(false);
@@ -93,7 +93,7 @@ export default function SignInScreen({ onSuccess, onGoSignUp, successMessage }) 
               </div>
             </div>
 
-            <button type="button" style={styles.forgotLink}>Forgot Password?</button>
+            <button type="button" style={styles.forgotLink} onClick={onGoForgotPassword}>Forgot Password?</button>
 
             <button type="submit" disabled={loading}
               style={{ ...styles.submitBtn, ...(loading ? styles.submitBtnDisabled : {}) }}>

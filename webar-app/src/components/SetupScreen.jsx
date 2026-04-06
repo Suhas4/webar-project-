@@ -66,9 +66,18 @@ export default function SetupScreen({ onStart, initialCards, onSignOut, user }) 
       }
       const compiler = new window.MINDAR.IMAGE.Compiler();
 
-      // Bug 3 fix: MindAR progress callback gives 0–1, multiply by 100 (not *100 again)
+      // Live progress fix: MindAR's compile callback runs synchronously on the
+      // main thread, blocking React from painting. We yield to the browser on
+      // each update using a Promise + setTimeout(0) so the ring actually animates.
+      let lastPainted = -1;
       await compiler.compileImageTargets(imageElements, (progress) => {
-        setCompileProgress(Math.min(100, Math.round(progress * 100)));
+        const pct = Math.min(100, Math.round(progress * 100));
+        if (pct !== lastPainted) {
+          lastPainted = pct;
+          setCompileProgress(pct);
+          // Yield to browser so it can paint the updated progress ring
+          return new Promise((resolve) => setTimeout(resolve, 0));
+        }
       });
 
       // Revoke fresh image URLs now that compilation is done

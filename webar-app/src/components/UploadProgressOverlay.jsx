@@ -37,7 +37,7 @@ export default function UploadProgressOverlay({ compileState, progress }) {
               stroke="url(#ring-gradient)" strokeWidth={strokeWidth}
               strokeLinecap="round" strokeDasharray={circumference}
               strokeDashoffset={offset}
-              style={{ transition: 'stroke-dashoffset 0.4s ease' }} />
+              style={{ transition: 'stroke-dashoffset 0.15s linear' }} />
           </svg>
           <div style={styles.percentWrap}>
             <span style={styles.percent}>{displayProgress}</span>

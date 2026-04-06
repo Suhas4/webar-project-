@@ -6,6 +6,7 @@ import SplashScreen from './components/SplashScreen.jsx';
 import SignInScreen from './components/SignInScreen.jsx';
 import SignUpScreen from './components/SignUpScreen.jsx';
 import WelcomeScreen from './components/WelcomeScreen.jsx';
+import ForgotPasswordScreen from './components/ForgotPasswordScreen.jsx';
 import { loadTargets } from './hooks/useArStorage.js';
 
 /**
@@ -115,6 +116,15 @@ export default function App() {
     setAppView('signup');
   }, []);
 
+  const handleGoForgotPassword = useCallback(() => {
+    setAppView('forgot');
+  }, []);
+
+  const handleForgotPasswordSuccess = useCallback((user) => {
+    setCurrentUser(user);
+    setAppView('welcome');
+  }, []);
+
   const handleGoSignIn = useCallback(() => {
     setAppView('signin');
   }, []);
@@ -174,7 +184,17 @@ export default function App() {
       <SignInScreen
         onSuccess={handleSignIn}
         onGoSignUp={handleGoSignUp}
+        onGoForgotPassword={handleGoForgotPassword}
         successMessage={signUpSuccessMsg}
+      />
+    );
+  }
+
+  if (appView === 'forgot') {
+    return (
+      <ForgotPasswordScreen
+        onBack={handleGoSignIn}
+        onSuccess={handleForgotPasswordSuccess}
       />
     );
   }
