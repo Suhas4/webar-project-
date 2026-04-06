@@ -14,15 +14,8 @@
     # Allow camera from this origin (required for getUserMedia)
     Permissions-Policy = "camera=(*), microphone=()"
 
-    # ⚠️  COEP/COOP NOTE:
-    # These two headers enable SharedArrayBuffer (used by some MindAR builds).
-    # They also require every cross-origin resource (CDN scripts, videos) to
-    # respond with `Cross-Origin-Resource-Policy: cross-origin`.
-    # jsDelivr (our MindAR CDN) does send this header, so it should be safe.
-    # If you see blank screens or CDN load failures after deploy, comment
-    # these two lines out and redeploy — MindAR 1.2.5 works without SAB.
-    Cross-Origin-Opener-Policy = "same-origin"
-    Cross-Origin-Embedder-Policy = "require-corp"
+    # NOTE: COEP/COOP removed — MindAR 1.2.5 does NOT need SharedArrayBuffer.
+    # These headers were blocking MindAR's CDN chunk files from loading in production.
 
     # Standard hardening headers
     X-Frame-Options = "DENY"
