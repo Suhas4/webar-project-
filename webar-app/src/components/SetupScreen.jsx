@@ -39,14 +39,25 @@ export default function SetupScreen({ onStart, initialCards, onSignOut, user }) 
     if (!canStart) { setShowValidation(true); return; }
     setCompileState('compiling'); setCompileProgress(0); setCompileError('');
     try {
+      // Bug 1 fix: Re-read each image file into a fresh blob URL right before use.
+      // Stored File references can become unreadable after time (permission expiry).
+      const freshImageUrls = await Promise.all(
+        cards.map(async (card) => {
+          const buf = await card.imageFile.arrayBuffer();
+          const blob = new Blob([buf], { type: card.imageFile.type || 'image/jpeg' });
+          return URL.createObjectURL(blob);
+        })
+      );
+
       const imageElements = await Promise.all(
-        cards.map((card) => new Promise((resolve, reject) => {
+        freshImageUrls.map((url, i) => new Promise((resolve, reject) => {
           const img = new Image();
           img.onload = () => resolve(img);
-          img.onerror = () => reject(new Error(`Failed to load image: ${card.imageFile.name}`));
-          img.src = card.imagePreviewUrl || URL.createObjectURL(card.imageFile);
+          img.onerror = () => reject(new Error(`Failed to load image: ${cards[i].imageFile.name}`));
+          img.src = url;
         }))
       );
+
       if (!window.MINDAR?.IMAGE?.Compiler) {
         await import('https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image.prod.js');
       }
@@ -54,21 +65,46 @@ export default function SetupScreen({ onStart, initialCards, onSignOut, user }) 
         throw new Error('MindAR Compiler failed to load. Check your internet connection and reload.');
       }
       const compiler = new window.MINDAR.IMAGE.Compiler();
+
+      // Bug 3 fix: MindAR progress callback gives 0–1, multiply by 100 (not *100 again)
       await compiler.compileImageTargets(imageElements, (progress) => {
-        setCompileProgress(Math.round(progress * 100));
+        setCompileProgress(Math.min(100, Math.round(progress * 100)));
       });
+
+      // Revoke fresh image URLs now that compilation is done
+      freshImageUrls.forEach((url) => URL.revokeObjectURL(url));
+
       const mindBuffer = await compiler.exportData();
       const targetsMeta = cards.map((card) => ({
         label: card.label, planeWidth: 1,
         planeHeight: ASPECT_MAP[card.aspectRatio] ?? 0.5625, planeOffsetY: 0,
       }));
       setCompileState('saving');
-      await saveTargets(targetsMeta, mindBuffer,
-        cards.map((c) => c.videoFile), cards.map((c) => c.imageFile));
+
+      // Bug 7 fix: Re-read video files into fresh blobs before saving to IndexedDB
+      // so that multi-target File references don't go stale
+      const freshVideoBlobs = await Promise.all(
+        cards.map(async (c) => {
+          const buf = await c.videoFile.arrayBuffer();
+          return new Blob([buf], { type: c.videoFile.type || 'video/mp4' });
+        })
+      );
+      const freshImageBlobs = await Promise.all(
+        cards.map(async (c) => {
+          const buf = await c.imageFile.arrayBuffer();
+          return new Blob([buf], { type: c.imageFile.type || 'image/jpeg' });
+        })
+      );
+
+      await saveTargets(targetsMeta, mindBuffer, freshVideoBlobs, freshImageBlobs);
+
       const mindBlob = new Blob([mindBuffer], { type: 'application/octet-stream' });
       const mindFileUrl = URL.createObjectURL(mindBlob);
+
+      // Bug 7 fix: create video blob URLs from fresh blobs (not stale File refs)
       const targets = cards.map((card, i) => ({
-        ...targetsMeta[i], targetIndex: i, videoUrl: URL.createObjectURL(card.videoFile),
+        ...targetsMeta[i], targetIndex: i,
+        videoUrl: URL.createObjectURL(freshVideoBlobs[i]),
       }));
       onStart({ targets, mindFileUrl });
     } catch (err) {
@@ -128,7 +164,7 @@ export default function SetupScreen({ onStart, initialCards, onSignOut, user }) 
         )}
         <button onClick={handleStart} disabled={isCompiling}
           style={{ ...styles.startButton, ...(isCompiling ? styles.startButtonDisabled : {}) }}>
-          Scan →
+          Upload →
         </button>
       </div>
     </div>

@@ -1,5 +1,6 @@
 export default function LoadingScreen({ status, errorMessage, onEdit }) {
   if (status === 'tracking') {
+    // Bug 5 fix: edit button must be above the fullscreen video (zIndex 10 > video zIndex 5)
     return (
       <div style={{ position: 'fixed', top: 16, right: 16, zIndex: 10, pointerEvents: 'auto' }}>
         <button onClick={onEdit} style={styles.editButton} title="Edit targets">✏️</button>

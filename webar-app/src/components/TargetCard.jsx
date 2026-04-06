@@ -44,6 +44,7 @@ export default function TargetCard({ index, data, onChange, onRemove, showValida
   const handleImageFile = useCallback((file) => {
     if (!file) return;
     if (!file.type.startsWith('image/')) { alert('Please upload a JPG, PNG, or WebP image.'); return; }
+    if (file.size > 50 * 1024 * 1024) { alert('Image is larger than 50 MB. Please use a smaller image.'); return; }
     if (data.imagePreviewUrl) URL.revokeObjectURL(data.imagePreviewUrl);
     onChange({ imageFile: file, imagePreviewUrl: URL.createObjectURL(file) });
   }, [data.imagePreviewUrl, onChange]);
@@ -56,7 +57,7 @@ export default function TargetCard({ index, data, onChange, onRemove, showValida
   const handleVideoFile = useCallback((file) => {
     if (!file) return;
     if (!file.type.startsWith('video/')) { alert('Please upload an MP4 or WebM video file.'); return; }
-    if (file.size > 100 * 1024 * 1024) alert('Video is larger than 100 MB. Please compress it first.');
+    if (file.size > 100 * 1024 * 1024) { alert('Video is larger than 100 MB. Please compress it first.'); return; }
     onChange({ videoFile: file, videoName: file.name, videoSize: formatFileSize(file.size) });
   }, [onChange]);
 

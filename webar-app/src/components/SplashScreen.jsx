@@ -9,8 +9,14 @@ export default function SplashScreen({ onDone }) {
   }, [onDone]);
 
   const handleCanPlay = useCallback(() => {
-    videoRef.current?.play().catch(() => {
-      // Autoplay blocked — advance after 3s fallback
+    const video = videoRef.current;
+    if (!video) return;
+    // Bug 8 fix: speed up video so it finishes in ~3 seconds
+    const duration = video.duration;
+    if (duration && duration > 3) {
+      video.playbackRate = duration / 3;
+    }
+    video.play().catch(() => {
       setTimeout(onDone, 3000);
     });
   }, [onDone]);
