@@ -1,10 +1,45 @@
 import { useRef, useState, useCallback } from 'react';
 
+// Bottom sheet that lets user pick Camera or Files
+function PickerSheet({ title, onCamera, onFiles, onClose }) {
+  return (
+    <>
+      {/* Backdrop */}
+      <div style={sheet.backdrop} onClick={onClose} />
+      {/* Sheet */}
+      <div style={sheet.sheet}>
+        <div style={sheet.handle} />
+        <p style={sheet.title}>{title}</p>
+        <button style={sheet.optionBtn} onClick={onCamera}>
+          <span style={sheet.optionIcon}>📷</span>
+          <div>
+            <p style={sheet.optionLabel}>Camera</p>
+            <p style={sheet.optionHint}>Take a photo / record video</p>
+          </div>
+        </button>
+        <button style={sheet.optionBtn} onClick={onFiles}>
+          <span style={sheet.optionIcon}>📁</span>
+          <div>
+            <p style={sheet.optionLabel}>Files</p>
+            <p style={sheet.optionHint}>Choose from your device</p>
+          </div>
+        </button>
+        <button style={sheet.cancelBtn} onClick={onClose}>Cancel</button>
+      </div>
+    </>
+  );
+}
+
 export default function TargetCard({ index, data, onChange, onRemove, showValidation }) {
-  const imageInputRef = useRef(null);
-  const videoInputRef = useRef(null);
+  const imageCameraRef = useRef(null);
+  const imageFilesRef  = useRef(null);
+  const videoCameraRef = useRef(null);
+  const videoFilesRef  = useRef(null);
+
   const [imageDragOver, setImageDragOver] = useState(false);
   const [videoDragOver, setVideoDragOver] = useState(false);
+  const [showImagePicker, setShowImagePicker] = useState(false);
+  const [showVideoPicker, setShowVideoPicker] = useState(false);
 
   const handleImageFile = useCallback((file) => {
     if (!file) return;
@@ -36,6 +71,24 @@ export default function TargetCard({ index, data, onChange, onRemove, showValida
 
   return (
     <div style={styles.card}>
+      {/* Camera/Files picker sheets */}
+      {showImagePicker && (
+        <PickerSheet
+          title="Select Marker Image"
+          onCamera={() => { setShowImagePicker(false); imageCameraRef.current?.click(); }}
+          onFiles={() => { setShowImagePicker(false); imageFilesRef.current?.click(); }}
+          onClose={() => setShowImagePicker(false)}
+        />
+      )}
+      {showVideoPicker && (
+        <PickerSheet
+          title="Select Video Overlay"
+          onCamera={() => { setShowVideoPicker(false); videoCameraRef.current?.click(); }}
+          onFiles={() => { setShowVideoPicker(false); videoFilesRef.current?.click(); }}
+          onClose={() => setShowVideoPicker(false)}
+        />
+      )}
+
       <div style={styles.cardTopAccent} />
 
       {/* Header */}
@@ -57,12 +110,12 @@ export default function TargetCard({ index, data, onChange, onRemove, showValida
           height: data.imagePreviewUrl ? 'auto' : 80,
           padding: data.imagePreviewUrl ? 8 : '0 16px',
         }}
-        onClick={() => imageInputRef.current?.click()}
+        onClick={() => setShowImagePicker(true)}
         onDragOver={(e) => { e.preventDefault(); setImageDragOver(true); }}
         onDragLeave={() => setImageDragOver(false)}
         onDrop={handleImageDrop}
         role="button" tabIndex={0}
-        onKeyDown={(e) => e.key === 'Enter' && imageInputRef.current?.click()}>
+        onKeyDown={(e) => e.key === 'Enter' && setShowImagePicker(true)}>
         {data.imagePreviewUrl ? (
           <div style={styles.imagePreviewRow}>
             <img src={data.imagePreviewUrl} alt="Marker preview" style={styles.imagePreview} />
@@ -74,12 +127,18 @@ export default function TargetCard({ index, data, onChange, onRemove, showValida
         ) : (
           <div style={styles.dropZoneContent}>
             <span style={styles.dropZoneIcon}>🖼️</span>
-            <span style={styles.dropZoneText}>{imageMissing ? 'Image required' : 'Drop image or tap to browse'}</span>
+            <span style={styles.dropZoneText}>{imageMissing ? 'Image required' : 'Tap to select image'}</span>
           </div>
         )}
       </div>
-      <input ref={imageInputRef} type="file" accept="image/jpeg,image/png,image/webp"
+
+      {/* Hidden image inputs — camera and files separately */}
+      <input ref={imageCameraRef} type="file" accept="image/jpeg,image/png,image/webp"
         capture="environment" style={{ display: 'none' }}
+        onChange={(e) => handleImageFile(e.target.files[0])}
+        onClick={(e) => { e.target.value = ''; }} />
+      <input ref={imageFilesRef} type="file" accept="image/jpeg,image/png,image/webp"
+        style={{ display: 'none' }}
         onChange={(e) => handleImageFile(e.target.files[0])}
         onClick={(e) => { e.target.value = ''; }} />
 
@@ -91,12 +150,12 @@ export default function TargetCard({ index, data, onChange, onRemove, showValida
           ...(videoMissing ? styles.dropZoneError : {}),
           height: 80,
         }}
-        onClick={() => videoInputRef.current?.click()}
+        onClick={() => setShowVideoPicker(true)}
         onDragOver={(e) => { e.preventDefault(); setVideoDragOver(true); }}
         onDragLeave={() => setVideoDragOver(false)}
         onDrop={handleVideoDrop}
         role="button" tabIndex={0}
-        onKeyDown={(e) => e.key === 'Enter' && videoInputRef.current?.click()}>
+        onKeyDown={(e) => e.key === 'Enter' && setShowVideoPicker(true)}>
         {data.videoFile ? (
           <div style={styles.dropZoneContent}>
             <span style={styles.dropZoneIcon}>🎬</span>
@@ -108,11 +167,17 @@ export default function TargetCard({ index, data, onChange, onRemove, showValida
         ) : (
           <div style={styles.dropZoneContent}>
             <span style={styles.dropZoneIcon}>🎬</span>
-            <span style={styles.dropZoneText}>{videoMissing ? 'Video required' : 'Drop video or tap to browse'}</span>
+            <span style={styles.dropZoneText}>{videoMissing ? 'Video required' : 'Tap to select video'}</span>
           </div>
         )}
       </div>
-      <input ref={videoInputRef} type="file" accept="video/mp4,video/webm"
+
+      {/* Hidden video inputs — camera and files separately */}
+      <input ref={videoCameraRef} type="file" accept="video/mp4,video/webm"
+        capture="environment" style={{ display: 'none' }}
+        onChange={(e) => handleVideoFile(e.target.files[0])}
+        onClick={(e) => { e.target.value = ''; }} />
+      <input ref={videoFilesRef} type="file" accept="video/mp4,video/webm"
         style={{ display: 'none' }}
         onChange={(e) => handleVideoFile(e.target.files[0])}
         onClick={(e) => { e.target.value = ''; }} />
@@ -141,6 +206,62 @@ const TEAL   = '#00C9A7';
 const CYAN   = '#00E5CC';
 const BORDER = 'rgba(0,201,167,0.25)';
 
+// ── Bottom sheet styles ───────────────────────────────────────────────────────
+const sheet = {
+  backdrop: {
+    position: 'fixed', inset: 0,
+    background: 'rgba(0,0,0,0.6)',
+    backdropFilter: 'blur(4px)',
+    WebkitBackdropFilter: 'blur(4px)',
+    zIndex: 1000,
+  },
+  sheet: {
+    position: 'fixed', bottom: 0, left: 0, right: 0,
+    background: '#0E1628',
+    border: `1px solid rgba(0,201,167,0.2)`,
+    borderBottom: 'none',
+    borderRadius: '24px 24px 0 0',
+    padding: '12px 20px 40px',
+    zIndex: 1001,
+    display: 'flex', flexDirection: 'column', gap: 10,
+  },
+  handle: {
+    width: 40, height: 4, borderRadius: 2,
+    background: 'rgba(255,255,255,0.2)',
+    alignSelf: 'center', marginBottom: 8,
+  },
+  title: {
+    fontSize: 15, fontWeight: 600, fontFamily: FONT,
+    color: 'rgba(255,255,255,0.7)', textAlign: 'center',
+    margin: '0 0 8px',
+  },
+  optionBtn: {
+    display: 'flex', alignItems: 'center', gap: 16,
+    background: 'rgba(0,201,167,0.06)',
+    border: `1px solid rgba(0,201,167,0.2)`,
+    borderRadius: 16, padding: '14px 18px',
+    cursor: 'pointer', textAlign: 'left', width: '100%',
+  },
+  optionIcon: { fontSize: 28, flexShrink: 0 },
+  optionLabel: {
+    fontSize: 15, fontWeight: 600, fontFamily: FONT,
+    color: '#ffffff', margin: 0,
+  },
+  optionHint: {
+    fontSize: 12, fontFamily: FONT,
+    color: 'rgba(255,255,255,0.35)', margin: '2px 0 0',
+  },
+  cancelBtn: {
+    marginTop: 4,
+    background: 'transparent',
+    border: `1px solid rgba(255,255,255,0.1)`,
+    borderRadius: 16, padding: '14px',
+    color: 'rgba(255,255,255,0.4)', fontSize: 15,
+    fontFamily: FONT, cursor: 'pointer', width: '100%',
+  },
+};
+
+// ── Card styles ───────────────────────────────────────────────────────────────
 const styles = {
   card: {
     background: 'rgba(0,201,167,0.04)', border: `1px solid ${BORDER}`,

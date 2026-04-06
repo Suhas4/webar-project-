@@ -21,10 +21,14 @@ import { loadTargets } from './hooks/useArStorage.js';
  */
 export default function App() {
   // ── Determine initial view ────────────────────────────────────────────────────
-  // If a valid token exists in localStorage, skip auth screens entirely.
+  // If a valid token exists, skip auth and go straight to setup.
+  // Otherwise always play the splash video before signin.
   const hasToken = !!localStorage.getItem('memoera_token');
 
-  const [appView, setAppView] = useState(hasToken ? 'setup' : 'splash');
+  const [appView, setAppView] = useState(() => {
+    if (hasToken) return 'setup';
+    return 'splash';
+  });
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const stored = localStorage.getItem('memoera_user');

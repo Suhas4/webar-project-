@@ -67,11 +67,7 @@ export default function SignUpScreen({ onSuccess, onGoSignIn }) {
       <div style={styles.orb2} />
 
       <div style={styles.container}>
-        <div style={styles.logoWrap}>
-          <span style={styles.logoMemo}>memo</span>
-          <span style={styles.logoEra}>era</span>
-        </div>
-        <p style={styles.tagline}>Restoring Memories</p>
+        <img src="/logo.png" alt="Memoera" style={styles.logo} />
 
         <div style={styles.card}>
           <h2 style={styles.heading}>SIGN UP</h2>
@@ -194,18 +190,10 @@ const styles = {
     display: 'flex', flexDirection: 'column', alignItems: 'center',
     animation: 'signup-fade-in 0.5s ease-out forwards', zIndex: 1,
   },
-  logoWrap: { display: 'flex', alignItems: 'baseline', marginBottom: 4 },
-  logoMemo: {
-    fontSize: 36, fontWeight: 700, fontFamily: FONT,
-    color: '#ffffff', letterSpacing: '-0.5px', lineHeight: 1,
-  },
-  logoEra: {
-    fontSize: 36, fontWeight: 300, fontFamily: FONT,
-    color: TEAL, letterSpacing: '-0.5px', lineHeight: 1, fontStyle: 'italic',
-  },
-  tagline: {
-    fontSize: 10, fontFamily: FONT, color: 'rgba(255,255,255,0.35)',
-    letterSpacing: '2.5px', textTransform: 'uppercase', marginBottom: 24,
+  logo: {
+    width: 200, maxWidth: '60vw',
+    objectFit: 'contain',
+    marginBottom: 16,
   },
   card: {
     width: '100%', background: 'rgba(0,201,167,0.04)',

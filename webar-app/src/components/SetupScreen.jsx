@@ -89,12 +89,8 @@ export default function SetupScreen({ onStart, initialCards, onSignOut, user }) 
       <div style={styles.header}>
         <div style={styles.headerRow}>
           <div>
-            <div style={styles.logoRow}>
-              <span style={styles.logoText}>memo</span>
-              <span style={styles.logoAccent}>era</span>
+              <img src="/logo.png" alt="Memoera" style={{ width: 130, objectFit: 'contain' }} />
             </div>
-            <p style={styles.logoTagline}>Restoring Memories</p>
-          </div>
           {onSignOut && (
             <button onClick={onSignOut} style={styles.signOutBtn}>Sign Out</button>
           )}

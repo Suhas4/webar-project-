@@ -20,12 +20,20 @@ import { get, set, del } from 'idb-keyval';
  * @param {Blob[]} videoBlobs — one Blob per target (same order as targetsMeta)
  * @param {Blob[]} imageBlobs — one Blob per target (same order as targetsMeta)
  */
+// Convert a File or Blob to a plain Blob so it can be stored in IndexedDB
+// on all browsers (iOS Safari rejects File objects in IndexedDB).
+async function toPlainBlob(fileOrBlob) {
+  if (!fileOrBlob) return null;
+  const buf = await fileOrBlob.arrayBuffer();
+  return new Blob([buf], { type: fileOrBlob.type || 'application/octet-stream' });
+}
+
 export async function saveTargets(targetsMeta, mindBuffer, videoBlobs, imageBlobs) {
   await set('ar-targets', targetsMeta);
   await set('ar-mind-file', mindBuffer);
   for (let i = 0; i < targetsMeta.length; i++) {
-    if (videoBlobs[i]) await set(`ar-video-${i}`, videoBlobs[i]);
-    if (imageBlobs[i]) await set(`ar-image-${i}`, imageBlobs[i]);
+    if (videoBlobs[i]) await set(`ar-video-${i}`, await toPlainBlob(videoBlobs[i]));
+    if (imageBlobs[i]) await set(`ar-image-${i}`, await toPlainBlob(imageBlobs[i]));
   }
 }
 

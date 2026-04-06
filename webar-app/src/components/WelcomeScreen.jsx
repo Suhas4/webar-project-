@@ -27,11 +27,7 @@ export default function WelcomeScreen({ onDone, user }) {
 
       <div style={styles.center}>
         <p style={styles.welcomeTo}>W E L C O M E &nbsp; T O</p>
-        <div style={styles.logoWrap}>
-          <span style={styles.logoMemo}>memo</span>
-          <span style={styles.logoEra}>era</span>
-        </div>
-        <p style={styles.tagline}>Restoring Memories</p>
+        <img src="/logo.png" alt="Memoera" style={styles.logo} />
         {firstName ? <p style={styles.greeting}>Hello, {firstName} 👋</p> : null}
       </div>
     </div>
@@ -84,19 +80,9 @@ const styles = {
     fontSize: 13, fontWeight: 300, fontFamily: FONT,
     color: 'rgba(255,255,255,0.4)', letterSpacing: '4px', margin: '0 0 8px',
   },
-  logoWrap: { display: 'flex', alignItems: 'baseline' },
-  logoMemo: {
-    fontSize: 58, fontWeight: 700, fontFamily: FONT,
-    color: '#ffffff', letterSpacing: '-1px', lineHeight: 1,
-  },
-  logoEra: {
-    fontSize: 58, fontWeight: 300, fontFamily: FONT,
-    color: TEAL, letterSpacing: '-1px', lineHeight: 1, fontStyle: 'italic',
-  },
-  tagline: {
-    fontSize: 12, fontWeight: 400, fontFamily: FONT,
-    color: 'rgba(255,255,255,0.35)', letterSpacing: '3px',
-    textTransform: 'uppercase', margin: '6px 0 0',
+  logo: {
+    width: 240, maxWidth: '70vw',
+    objectFit: 'contain',
   },
   greeting: {
     fontSize: 16, fontWeight: 400, fontFamily: FONT,
