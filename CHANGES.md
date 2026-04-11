@@ -7,6 +7,116 @@ A mobile-friendly WebAR application where users sign up/sign in, upload marker i
 
 ## Changelog
 
+### Session 5 — Full App Redesign + OTP Signup
+
+#### 🎨 UI Redesign — Dark Teal Theme
+
+All screens updated to match brand reference images with dark teal color palette:
+- **Background:** `linear-gradient(160deg, #061A1F, #0A2229, #061820)`
+- **Gold accent:** `#C9A84C` (nav bar border)
+- **Logo watermark:** low-opacity infinity logo on background
+
+#### 📱 Screen Changes
+
+| Screen | Change |
+|---|---|
+| **SplashScreen** | Removed video, shows `splash.jpg` (logo image) for 2.5s |
+| **HelloScreen** | Dark teal bg, "EXISTING ACCOUNT" button text, logo watermark |
+| **HomeScreen** | Dark teal bg, real SVG nav icons, logo watermark, WhatsApp chat button |
+| **ProfileScreen** | Dark teal bg |
+| **SignUpScreen** | 2-step flow: form → OTP verification before account creation |
+| **SignInScreen** | "WELCOME BACK" heading, mobile number only (no email) |
+| **ForgotPasswordScreen** | 4-step: mobile → security question → OTP → new password |
+
+#### 🔐 Auth Changes
+
+- **Email removed** from signup and login — mobile number is the sole identifier
+- **Date of Birth** added to signup form and profile display
+- **Confirm Password** field added to signup
+- **OTP before signup** via 2Factor.in SMS — account only created after OTP verified
+- **Token system** switched from email-based to mobile-based JWT
+- **Forgot password** now requires security question answer before sending OTP
+
+#### 📲 New Endpoints (Backend)
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/auth/send-signup-otp` | Send OTP to mobile before account creation |
+| POST | `/api/auth/verify-security-question` | Verify security answer, then send OTP |
+
+#### 🎬 Video Overlays
+
+| Trigger | Video |
+|---|---|
+| Successful signup (OTP verified) | `right-mark.mp4` → `welcome-hand.mp4` → Home |
+| Wrong OTP | `x-mark.mp4` → back to signup |
+| After AR upload completes | `disc-loading.mp4` → `wings-to-memories.mp4` → AR view |
+
+#### 🏠 Home Page
+
+- Dark teal background matching reference
+- Right-side nav bar with real SVG icons (Home, Scan, Upload, Profile, Settings)
+- Gold border on nav panel (`#C9A84C`)
+- Social media links: Instagram, Facebook, YouTube, Twitter
+- **Chat with us** → opens WhatsApp with `+91 8660418820`
+- Sign Out button
+
+#### 👤 Profile Page
+
+- Hexagonal avatar with user initials
+- Displays: Name (caps), DOB as `DD | MM | YYYY`, mobile, security question
+- EDIT and DONE buttons
+
+#### 🖼️ Gallery
+
+- Shows all uploaded AR targets
+- Click image/video → fullscreen playback
+- Delete button removes all targets
+
+#### ⬆️ Upload Progress Fix
+
+- Progress no longer stuck at 100% while backend finalizes
+- New `finalizing` state shows "Preparing AR experience…" while `loadTargets()` runs after upload
+
+#### 🔧 SMS OTP Provider
+
+- Replaced Twilio with **2Factor.in**
+- Env var: `TWOFACTOR_API_KEY`
+- Free tier uses voice call OTP (SMS requires DLT registration in India)
+
+#### 📁 New Files
+
+| File | Purpose |
+|---|---|
+| `webar-app/public/splash.jpg` | Splash screen logo image |
+| `webar-app/public/right-mark.mp4` | Success OTP animation |
+| `webar-app/public/x-mark.mp4` | Failed OTP animation |
+| `webar-app/public/welcome-hand.mp4` | Post-activation welcome animation |
+| `webar-app/public/disc-loading.mp4` | Post-upload loading animation |
+| `webar-app/public/wings-to-memories.mp4` | Pre-AR transition animation |
+| `webar-app/src/components/HelloScreen.jsx` | New hello/landing screen |
+| `webar-app/src/components/HomeScreen.jsx` | New home with nav + about us |
+| `webar-app/src/components/ProfileScreen.jsx` | User profile page |
+| `webar-app/src/components/GalleryScreen.jsx` | Uploaded targets gallery |
+| `webar-app/src/components/VideoOverlay.jsx` | Full-screen video overlay component |
+| `webar-app/src/components/DiscLoadingOverlay.jsx` | Disc + wings video sequence |
+
+#### ⚙️ New Environment Variables
+
+| Key | Description |
+|---|---|
+| `TWOFACTOR_API_KEY` | 2Factor.in API key for SMS OTP |
+
+#### 🌐 Netlify — Required Environment Variable
+
+Must be set in **Netlify → Site settings → Environment variables**:
+```
+VITE_API_BASE=https://webar-project-8jbi.onrender.com
+```
+Without this, the deployed frontend calls `http://localhost:8181` and fails on mobile.
+
+---
+
 ### Session 4 — Cloud Storage (Neon PostgreSQL + Cloudflare R2)
 
 #### 🗄️ Database — Neon PostgreSQL (replaces in-memory store)
