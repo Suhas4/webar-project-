@@ -51,6 +51,7 @@ type SignUpRequest struct {
 	Mobile           string `json:"mobile"`
 	DateOfBirth      string `json:"dateOfBirth"`
 	Password         string `json:"password"`
+	OTP              string `json:"otp"`
 	SecurityQuestion string `json:"securityQuestion"`
 	SecurityAnswer   string `json:"securityAnswer"`
 }
@@ -446,6 +447,48 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// POST /api/auth/send-signup-otp — sends OTP to mobile before account creation
+func sendSignupOTPHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Mobile string `json:"mobile"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	mobile := strings.TrimSpace(req.Mobile)
+	if mobile == "" {
+		writeError(w, http.StatusBadRequest, "Mobile number is required")
+		return
+	}
+	// Check if mobile already registered
+	var exists bool
+	_ = db.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM users WHERE mobile=$1)", mobile).Scan(&exists)
+	if exists {
+		writeError(w, http.StatusConflict, "An account with this mobile number already exists")
+		return
+	}
+
+	otp := generateOTP()
+	otpMu.Lock()
+	otpStore["signup:"+mobile] = OTPEntry{OTP: otp, Email: mobile, ExpiresAt: time.Now().Add(10 * time.Minute)}
+	otpMu.Unlock()
+
+	if err := sendSMSOTP(mobile, otp); err != nil {
+		log.Printf("[OTP] SMS send failed for %s: %v", mobile, err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"message":      "OTP sent to your mobile.",
+		"maskedMobile": maskMobile(mobile),
+	})
+}
+
 func signUpHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -458,7 +501,7 @@ func signUpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.FirstName == "" || req.LastName == "" || req.Mobile == "" || req.Password == "" {
+	if req.FirstName == "" || req.LastName == "" || req.Mobile == "" || req.Password == "" || req.OTP == "" {
 		writeError(w, http.StatusBadRequest, "All fields are required")
 		return
 	}
@@ -466,6 +509,22 @@ func signUpHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Password must be at least 6 characters")
 		return
 	}
+
+	// Verify OTP
+	otpMu.Lock()
+	entry, exists := otpStore["signup:"+req.Mobile]
+	otpMu.Unlock()
+	if !exists || time.Now().After(entry.ExpiresAt) {
+		writeError(w, http.StatusUnauthorized, "OTP has expired. Please request a new one.")
+		return
+	}
+	if entry.OTP != strings.TrimSpace(req.OTP) {
+		writeError(w, http.StatusUnauthorized, "Incorrect OTP. Please try again.")
+		return
+	}
+	otpMu.Lock()
+	delete(otpStore, "signup:"+req.Mobile)
+	otpMu.Unlock()
 
 	salt := generateSalt()
 	passwordHash := salt + ":" + hashPassword(req.Password, salt)
@@ -1247,6 +1306,7 @@ func main() {
 	mux.HandleFunc("/health", healthHandler)
 
 	// Auth
+	mux.HandleFunc("/api/auth/send-signup-otp", sendSignupOTPHandler)
 	mux.HandleFunc("/api/auth/signup", signUpHandler)
 	mux.HandleFunc("/api/auth/signin", signInHandler)
 	mux.HandleFunc("/api/auth/forgot-password", forgotPasswordHandler)

@@ -51,14 +51,13 @@ export default function App() {
 
   const handleSignIn = useCallback((user) => { setCurrentUser(user); setAppView('home'); }, []);
   const handleSignUp = useCallback((user) => { setCurrentUser(user); setVideoOverlay({ src: '/right-mark.mp4', next: 'welcome-hand' }); }, []);
+  const handleOtpFail = useCallback(() => { setVideoOverlay({ src: '/x-mark.mp4', next: 'signup' }); }, []);
   const handleVideoOverlayDone = useCallback(() => {
     setVideoOverlay((v) => {
       if (!v) return null;
       if (v.next === 'welcome-hand') return { src: '/welcome-hand.mp4', next: 'home' };
-      if (v.next === 'home') {
-        setTimeout(() => setAppView('home'), 0);
-        return null;
-      }
+      if (v.next === 'home') { setTimeout(() => setAppView('home'), 0); return null; }
+      if (v.next === 'signup') { setTimeout(() => setAppView('signup'), 0); return null; }
       return null;
     });
   }, []);
@@ -94,7 +93,7 @@ export default function App() {
   }
   if (appView === 'hello') return <HelloScreen onCreateAccount={() => setAppView('signup')} onExisting={() => setAppView('signin')} />;
   if (appView === 'signin') return <SignInScreen onSuccess={handleSignIn} onGoForgotPassword={() => setAppView('forgot')} />;
-  if (appView === 'signup') return <SignUpScreen onSuccess={handleSignUp} onBack={() => setAppView('hello')} />;
+  if (appView === 'signup') return <SignUpScreen onSuccess={handleSignUp} onBack={() => setAppView('hello')} onOtpFail={handleOtpFail} />;
   if (appView === 'forgot') return <ForgotPasswordScreen onBack={() => setAppView('signin')} onSuccess={handleSignIn} />;
   if (appView === 'welcome') return <WelcomeScreen onDone={() => setAppView('home')} user={currentUser} />;
   if (appView === 'profile') return <ProfileScreen user={currentUser} onBack={() => setAppView('home')} />;

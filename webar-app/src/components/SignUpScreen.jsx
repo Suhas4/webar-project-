@@ -9,116 +9,151 @@ const SECURITY_QUESTIONS = [
   "What is your oldest sibling's middle name?",
 ];
 
-export default function SignUpScreen({ onSuccess, onBack }) {
+export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
+  const [step, setStep] = useState(1);
   const [form, setForm] = useState({
     firstName: '', lastName: '', mobile: '', dateOfBirth: '',
     password: '', confirmPassword: '',
     securityQuestion: SECURITY_QUESTIONS[0], securityAnswer: '',
   });
+  const [otp, setOtp] = useState('');
+  const [maskedMobile, setMaskedMobile] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [showPass, setShowPass] = useState(false);
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
-  const handleSubmit = useCallback(async (e) => {
-    e.preventDefault();
-    const { firstName, lastName, mobile, dateOfBirth, password, confirmPassword, securityQuestion, securityAnswer } = form;
+  const startCooldown = () => {
+    setResendCooldown(30);
+    const t = setInterval(() => setResendCooldown((c) => { if (c <= 1) { clearInterval(t); return 0; } return c - 1; }), 1000);
+  };
+
+  const handleSendOTP = useCallback(async (e) => {
+    e && e.preventDefault();
+    const { firstName, lastName, mobile, dateOfBirth, password, confirmPassword, securityAnswer } = form;
     if (!firstName || !lastName || !mobile || !dateOfBirth || !password || !securityAnswer) {
       setError('Please fill in all fields.'); return;
     }
     if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
     if (password !== confirmPassword) { setError('Passwords do not match.'); return; }
-    if (!/^\d{10}$/.test(mobile.replace(/\s/g, ''))) {
-      setError('Please enter a valid 10-digit mobile number.'); return;
-    }
+    if (!/^\d{10}$/.test(mobile.replace(/\s/g, ''))) { setError('Enter a valid 10-digit mobile number.'); return; }
+    setLoading(true); setError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/send-signup-otp`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mobile: mobile.replace(/\s/g, '') }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || 'Failed to send OTP.'); return; }
+      setMaskedMobile(data.maskedMobile || '');
+      setStep(2); startCooldown();
+    } catch { setError('Cannot connect to server. Make sure the backend is running.'); }
+    finally { setLoading(false); }
+  }, [form]);
+
+  const handleVerifyOTP = useCallback(async (e) => {
+    e && e.preventDefault();
+    if (otp.trim().length !== 6) { setError('Enter the 6-digit OTP.'); return; }
     setLoading(true); setError('');
     try {
       const res = await fetch(`${API_BASE}/api/auth/signup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          firstName, lastName, mobile: mobile.replace(/\s/g, ''),
-          dateOfBirth, password, securityQuestion, securityAnswer,
+          firstName: form.firstName, lastName: form.lastName,
+          mobile: form.mobile.replace(/\s/g, ''), dateOfBirth: form.dateOfBirth,
+          password: form.password, otp: otp.trim(),
+          securityQuestion: form.securityQuestion, securityAnswer: form.securityAnswer,
         }),
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error || 'Sign up failed. Please try again.'); return; }
+      if (!res.ok) {
+        setError(data.error || 'Verification failed.');
+        if (data.error && data.error.toLowerCase().includes('otp')) {
+          onOtpFail && onOtpFail();
+        }
+        return;
+      }
       localStorage.setItem('memoera_token', data.token);
       localStorage.setItem('memoera_user', JSON.stringify(data.user));
       onSuccess(data.user);
-    } catch {
-      setError('Cannot connect to server. Make sure the backend is running.');
-    } finally {
-      setLoading(false);
-    }
-  }, [form, onSuccess]);
+    } catch { setError('Cannot connect to server. Make sure the backend is running.'); }
+    finally { setLoading(false); }
+  }, [form, otp, onSuccess, onOtpFail]);
 
   return (
-    <div style={styles.screen}>
-      <style>{`
-        @keyframes su-fade { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
-        input::placeholder { color: rgba(255,255,255,0.25); }
-        input:focus, select:focus { border-bottom-color: #00C9A7 !important; outline: none; }
-      `}</style>
-      <div style={styles.orb1} /><div style={styles.orb2} />
-      <div style={styles.container}>
-        <img src="/logo.png" alt="Memoera" style={styles.logo} />
-        <div style={styles.card}>
-          <h2 style={styles.heading}>CREATE ACCOUNT</h2>
-          {error && <div style={styles.errorBox}>{error}</div>}
-          <form onSubmit={handleSubmit} style={styles.form}>
-            <div style={styles.row}>
-              <Field label="First Name" style={{ flex:1 }}>
-                <input style={styles.input} type="text" placeholder="First name"
-                  value={form.firstName} onChange={set('firstName')} autoComplete="given-name" />
-              </Field>
-              <Field label="Last Name" style={{ flex:1 }}>
-                <input style={styles.input} type="text" placeholder="Last name"
-                  value={form.lastName} onChange={set('lastName')} autoComplete="family-name" />
-              </Field>
-            </div>
-            <Field label="Mobile Number">
-              <input style={styles.input} type="tel" placeholder="10-digit mobile number"
-                value={form.mobile} onChange={set('mobile')} autoComplete="tel" maxLength={10} />
-            </Field>
-            <Field label="Date of Birth">
-              <input style={styles.input} type="date"
-                value={form.dateOfBirth} onChange={set('dateOfBirth')} />
-            </Field>
-            <Field label="Create Password">
-              <div style={styles.passwordWrap}>
-                <input style={{ ...styles.input, paddingRight:44 }}
-                  type={showPass ? 'text' : 'password'} placeholder="Min. 6 characters"
-                  value={form.password} onChange={set('password')} autoComplete="new-password" />
-                <button type="button" style={styles.eyeBtn}
-                  onClick={() => setShowPass((v) => !v)} tabIndex={-1}>{showPass ? '🙈' : '👁️'}</button>
-              </div>
-            </Field>
-            <Field label="Confirm Password">
-              <input style={styles.input}
-                type={showPass ? 'text' : 'password'} placeholder="Re-enter password"
-                value={form.confirmPassword} onChange={set('confirmPassword')} autoComplete="new-password" />
-            </Field>
-            <Field label="Security Question">
-              <select style={{ ...styles.input, cursor:'pointer' }}
-                value={form.securityQuestion} onChange={set('securityQuestion')}>
-                {SECURITY_QUESTIONS.map((q) => (
-                  <option key={q} value={q} style={{ background:'#0d1220', color:'#fff' }}>{q}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Security Answer">
-              <input style={styles.input} type="text" placeholder="Your answer"
-                value={form.securityAnswer} onChange={set('securityAnswer')} />
-            </Field>
-            <button type="submit" disabled={loading}
-              style={{ ...styles.submitBtn, ...(loading ? styles.submitBtnDisabled : {}) }}>
-              {loading ? <Spinner /> : 'Create'}
-            </button>
-          </form>
+    <div style={S.screen}>
+      <div style={S.orb1}/><div style={S.orb2}/>
+      <div style={S.container}>
+        <img src="/logo.png" alt="Memoera" style={S.logo} />
+        <div style={S.card}>
+          {step === 1 ? (
+            <>
+              <h2 style={S.heading}>CREATE ACCOUNT</h2>
+              {error && <div style={S.errorBox}>{error}</div>}
+              <form onSubmit={handleSendOTP} style={S.form}>
+                <div style={S.row}>
+                  <Field label="First Name" style={{ flex:1 }}>
+                    <input style={S.input} type="text" placeholder="First name" value={form.firstName} onChange={set('firstName')} />
+                  </Field>
+                  <Field label="Last Name" style={{ flex:1 }}>
+                    <input style={S.input} type="text" placeholder="Last name" value={form.lastName} onChange={set('lastName')} />
+                  </Field>
+                </div>
+                <Field label="Mobile Number">
+                  <input style={S.input} type="tel" placeholder="10-digit mobile number" value={form.mobile} onChange={set('mobile')} maxLength={10} />
+                </Field>
+                <Field label="Date of Birth">
+                  <input style={S.input} type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} />
+                </Field>
+                <Field label="Create Password">
+                  <div style={{ position:'relative' }}>
+                    <input style={{ ...S.input, paddingRight:44 }}
+                      type={showPass ? 'text' : 'password'} placeholder="Min. 6 characters"
+                      value={form.password} onChange={set('password')} />
+                    <button type="button" style={S.eyeBtn} onClick={() => setShowPass(v => !v)}>
+                      {showPass ? 'Hide' : 'Show'}
+                    </button>
+                  </div>
+                </Field>
+                <Field label="Confirm Password">
+                  <input style={S.input} type={showPass ? 'text' : 'password'}
+                    placeholder="Re-enter password" value={form.confirmPassword} onChange={set('confirmPassword')} />
+                </Field>
+                <Field label="Security Question">
+                  <select style={{ ...S.input, cursor:'pointer' }} value={form.securityQuestion} onChange={set('securityQuestion')}>
+                    {SECURITY_QUESTIONS.map(q => <option key={q} value={q} style={{ background:'#0d1220', color:'#fff' }}>{q}</option>)}
+                  </select>
+                </Field>
+                <Field label="Security Answer">
+                  <input style={S.input} type="text" placeholder="Your answer" value={form.securityAnswer} onChange={set('securityAnswer')} />
+                </Field>
+                <button type="submit" disabled={loading} style={{ ...S.btn, ...(loading ? S.btnDisabled : {}) }}>
+                  {loading ? 'Sending OTP...' : 'Create'}
+                </button>
+              </form>
+            </>
+          ) : (
+            <>
+              <h2 style={S.heading}>VERIFY OTP</h2>
+              <p style={S.hint}>OTP sent to {maskedMobile}. Valid for 10 minutes.</p>
+              {error && <div style={S.errorBox}>{error}</div>}
+              <form onSubmit={handleVerifyOTP} style={S.form}>
+                <input style={{ ...S.input, letterSpacing:'0.3em', fontSize:22, textAlign:'center' }}
+                  type="text" inputMode="numeric" maxLength={6} placeholder="000000"
+                  value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} />
+                <button type="submit" disabled={loading} style={{ ...S.btn, ...(loading ? S.btnDisabled : {}) }}>
+                  {loading ? 'Verifying...' : 'Verify OTP'}
+                </button>
+                <button type="button" disabled={resendCooldown > 0} onClick={handleSendOTP} style={S.resendBtn}>
+                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend OTP'}
+                </button>
+              </form>
+            </>
+          )}
         </div>
-        <button onClick={onBack} style={styles.backBtn}>← Back</button>
+        <button onClick={step === 2 ? () => setStep(1) : onBack} style={S.backBtn}>Back</button>
       </div>
     </div>
   );
@@ -127,39 +162,28 @@ export default function SignUpScreen({ onSuccess, onBack }) {
 function Field({ label, children, style }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:6, ...style }}>
-      <label style={styles.label}>{label}</label>
+      <label style={S.label}>{label}</label>
       {children}
     </div>
   );
 }
 
-function Spinner() {
-  return (
-    <>
-      <style>{`@keyframes su-spin { to { transform: rotate(360deg); } }`}</style>
-      <div style={{ width:18, height:18, border:'2.5px solid rgba(255,255,255,0.3)',
-        borderTopColor:'#fff', borderRadius:'50%', animation:'su-spin 0.7s linear infinite', display:'inline-block' }} />
-    </>
-  );
-}
-
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const TEAL = '#00C9A7';
-const styles = {
+const S = {
   screen: { position:'fixed', inset:0,
-    background:`radial-gradient(ellipse at 20% 20%, rgba(0,201,167,0.15) 0%, transparent 55%),
-               radial-gradient(ellipse at 80% 80%, rgba(0,229,204,0.1) 0%, transparent 55%), #080C18`,
+    background:'radial-gradient(ellipse at 20% 20%, rgba(0,201,167,0.15) 0%, transparent 55%), radial-gradient(ellipse at 80% 80%, rgba(0,229,204,0.1) 0%, transparent 55%), #080C18',
     overflowY:'auto', WebkitOverflowScrolling:'touch', display:'flex', justifyContent:'center', padding:'32px 0 40px' },
   orb1: { position:'fixed', top:'-10%', left:'-10%', width:'55vw', height:'55vw', maxWidth:350, maxHeight:350,
     borderRadius:'50%', background:'radial-gradient(circle, rgba(0,201,167,0.2) 0%, transparent 70%)', pointerEvents:'none' },
   orb2: { position:'fixed', bottom:'-10%', right:'-10%', width:'50vw', height:'50vw', maxWidth:320, maxHeight:320,
     borderRadius:'50%', background:'radial-gradient(circle, rgba(0,229,204,0.15) 0%, transparent 70%)', pointerEvents:'none' },
-  container: { width:'100%', maxWidth:420, padding:'0 24px', display:'flex', flexDirection:'column',
-    alignItems:'center', animation:'su-fade 0.5s ease-out forwards', zIndex:1 },
+  container: { width:'100%', maxWidth:420, padding:'0 24px', display:'flex', flexDirection:'column', alignItems:'center', zIndex:1 },
   logo: { width:200, maxWidth:'60vw', objectFit:'contain', marginBottom:16 },
   card: { width:'100%', background:'rgba(0,201,167,0.04)', border:'1px solid rgba(0,201,167,0.25)',
     borderRadius:20, padding:'28px 24px 24px', backdropFilter:'blur(12px)', WebkitBackdropFilter:'blur(12px)' },
   heading: { fontSize:22, fontWeight:700, fontFamily:FONT, color:'#ffffff', letterSpacing:'2px', marginBottom:20, textAlign:'center' },
+  hint: { fontSize:13, color:'rgba(255,255,255,0.45)', fontFamily:FONT, margin:'0 0 16px', lineHeight:1.6, textAlign:'center' },
   errorBox: { background:'rgba(255,80,80,0.08)', border:'1px solid rgba(255,80,80,0.3)', borderRadius:10,
     padding:'10px 14px', fontSize:13, color:'#ff8080', fontFamily:FONT, marginBottom:16, textAlign:'center' },
   form: { display:'flex', flexDirection:'column', gap:14 },
@@ -167,15 +191,17 @@ const styles = {
   label: { fontSize:11, fontWeight:600, fontFamily:FONT, color:'rgba(255,255,255,0.45)', letterSpacing:'0.08em', textTransform:'uppercase' },
   input: { background:'rgba(255,255,255,0.05)', border:'none', borderBottom:'1.5px solid rgba(0,201,167,0.4)',
     borderRadius:'8px 8px 0 0', padding:'11px 14px', fontSize:14, fontFamily:FONT, color:'#ffffff',
-    outline:'none', width:'100%', transition:'border-color 0.2s', WebkitAppearance:'none' },
-  passwordWrap: { position:'relative' },
+    outline:'none', width:'100%', WebkitAppearance:'none' },
   eyeBtn: { position:'absolute', right:10, top:'50%', transform:'translateY(-50%)',
-    background:'transparent', border:'none', cursor:'pointer', fontSize:16, padding:4 },
-  submitBtn: { display:'flex', alignItems:'center', justifyContent:'center', gap:8,
-    background:`linear-gradient(135deg, #00C9A7, #00E5CC)`, border:'none', borderRadius:50, color:'#080C18',
+    background:'transparent', border:'none', cursor:'pointer', fontSize:12, color:TEAL, fontFamily:FONT },
+  btn: { display:'flex', alignItems:'center', justifyContent:'center',
+    background:'linear-gradient(135deg, #00C9A7, #00E5CC)', border:'none', borderRadius:50, color:'#080C18',
     fontSize:16, fontWeight:700, fontFamily:FONT, padding:'15px 24px', cursor:'pointer', letterSpacing:'0.05em',
-    boxShadow:`0 4px 24px rgba(0,201,167,0.35)`, marginTop:6, transition:'opacity 0.15s' },
-  submitBtnDisabled: { opacity:0.65, cursor:'not-allowed', boxShadow:'none' },
+    boxShadow:'0 4px 24px rgba(0,201,167,0.35)', marginTop:6 },
+  btnDisabled: { opacity:0.65, cursor:'not-allowed', boxShadow:'none' },
+  resendBtn: { background:'transparent', border:'none', color:'rgba(255,255,255,0.35)',
+    fontSize:13, fontFamily:FONT, cursor:'pointer', textAlign:'center', textDecoration:'underline' },
   backBtn: { background:'transparent', border:'none', color:'rgba(255,255,255,0.4)',
     fontSize:14, fontFamily:FONT, cursor:'pointer', marginTop:20, padding:'4px 0' },
 };
+
