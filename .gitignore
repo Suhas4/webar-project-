@@ -8,6 +8,7 @@ webar-app/.env.production
 # Go / Backend
 backend/webar-backend
 backend/*.exe
+backend/.env
 
 # OS files
 .DS_Store
@@ -18,3 +19,8 @@ Thumbs.db
 .idea/
 *.suo
 *.user
+
+# Playwright / Claude artifacts
+.playwright-mcp/
+.claude/
+write_components.py

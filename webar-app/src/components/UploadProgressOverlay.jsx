@@ -1,7 +1,10 @@
 export default function UploadProgressOverlay({ compileState, progress }) {
-  const isSaving = compileState === 'saving';
+  const isSaving   = compileState === 'saving';
+  const isUploading = compileState === 'uploading';
   const displayProgress = isSaving ? 100 : progress;
-  const label = isSaving ? 'Saving to device…' : 'Compiling targets…';
+  const label = isSaving    ? 'Saving…'
+              : isUploading ? 'Uploading to cloud…'
+              : 'Compiling targets…';
 
   const size = 180;
   const strokeWidth = 10;
@@ -52,7 +55,7 @@ export default function UploadProgressOverlay({ compileState, progress }) {
   );
 }
 
-const FONT = '"Outfit", -apple-system, BlinkMacSystemFont, sans-serif';
+const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 
 const styles = {
   overlay: {

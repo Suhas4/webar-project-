@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -16,15 +18,28 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/joho/godotenv"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // ─── Data Models ──────────────────────────────────────────────────────────────
 
 type User struct {
+	ID               int64  `json:"id"`
 	FirstName        string `json:"firstName"`
 	LastName         string `json:"lastName"`
 	Mobile           string `json:"mobile"`
-	Email            string `json:"email"`
+	Email            string `json:"email,omitempty"`
+	DateOfBirth      string `json:"dateOfBirth,omitempty"`
 	PasswordHash     string `json:"-"`
 	SecurityQuestion string `json:"securityQuestion"`
 	SecurityAnswer   string `json:"-"`
@@ -34,14 +49,14 @@ type SignUpRequest struct {
 	FirstName        string `json:"firstName"`
 	LastName         string `json:"lastName"`
 	Mobile           string `json:"mobile"`
-	Email            string `json:"email"`
+	DateOfBirth      string `json:"dateOfBirth"`
 	Password         string `json:"password"`
 	SecurityQuestion string `json:"securityQuestion"`
 	SecurityAnswer   string `json:"securityAnswer"`
 }
 
 type SignInRequest struct {
-	Identifier string `json:"identifier"` // email or mobile
+	Identifier string `json:"identifier"`
 	Password   string `json:"password"`
 }
 
@@ -50,22 +65,35 @@ type AuthResponse struct {
 	User  User   `json:"user"`
 }
 
-// OTP entry stored in memory
 type OTPEntry struct {
 	OTP       string
-	Email     string // always resolved to email
+	Email     string
 	ExpiresAt time.Time
 }
 
-// ─── In-memory store ──────────────────────────────────────────────────────────
+type ARTarget struct {
+	TargetIndex  int     `json:"targetIndex"`
+	Label        string  `json:"label"`
+	PlaneWidth   float64 `json:"planeWidth"`
+	PlaneHeight  float64 `json:"planeHeight"`
+	PlaneOffsetY float64 `json:"planeOffsetY"`
+	ImageKey     string  `json:"imageKey"`
+	VideoKey     string  `json:"videoKey"`
+	MindKey      string  `json:"mindKey"`
+}
+
+// ─── Globals ──────────────────────────────────────────────────────────────────
 
 var (
-	users       = map[string]User{}   // keyed by email (lowercase)
-	mobileIndex = map[string]string{} // mobile → email
-	otpStore    = map[string]OTPEntry{} // identifier → OTPEntry
-	mu          sync.RWMutex
-	otpMu       sync.Mutex
-	jwtSecret   []byte
+	db           *pgxpool.Pool
+	s3Client     *s3.Client
+	presignClient *s3.PresignClient
+	r2Bucket     string
+	r2PublicURL  string
+
+	otpStore = map[string]OTPEntry{}
+	otpMu    sync.Mutex
+	jwtSecret []byte
 )
 
 func init() {
@@ -78,6 +106,104 @@ func init() {
 			log.Fatal("failed to generate JWT secret:", err)
 		}
 	}
+}
+
+// ─── DB Init ──────────────────────────────────────────────────────────────────
+
+func initDB(ctx context.Context) error {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		return fmt.Errorf("DATABASE_URL env var not set")
+	}
+
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return fmt.Errorf("pgxpool.New: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		return fmt.Errorf("db ping: %w", err)
+	}
+	db = pool
+
+	_, err = db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS users (
+			id            BIGSERIAL PRIMARY KEY,
+			email         TEXT UNIQUE,
+			mobile        TEXT UNIQUE NOT NULL,
+			first_name    TEXT NOT NULL,
+			last_name     TEXT NOT NULL,
+			password_hash TEXT NOT NULL,
+			security_question TEXT,
+			security_answer   TEXT,
+			created_at    TIMESTAMPTZ DEFAULT NOW()
+		);
+
+		CREATE TABLE IF NOT EXISTS ar_targets (
+			id            BIGSERIAL PRIMARY KEY,
+			user_id       BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			target_index  INTEGER NOT NULL,
+			label         TEXT NOT NULL,
+			plane_width   FLOAT8 NOT NULL DEFAULT 1.0,
+			plane_height  FLOAT8 NOT NULL DEFAULT 0.5625,
+			plane_offset_y FLOAT8 NOT NULL DEFAULT 0.0,
+			image_key     TEXT,
+			video_key     TEXT,
+			mind_key      TEXT,
+			created_at    TIMESTAMPTZ DEFAULT NOW(),
+			UNIQUE(user_id, target_index)
+		);
+	`)
+	if err != nil {
+		return fmt.Errorf("create tables: %w", err)
+	}
+
+	// Safe migrations for existing installs
+	_, _ = db.Exec(ctx, `ALTER TABLE users ALTER COLUMN email DROP NOT NULL`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth TEXT`)
+
+	log.Println("DB connected and tables ready")
+	return nil
+}
+
+// ─── R2 Init ──────────────────────────────────────────────────────────────────
+
+func initR2() error {
+	accountID := os.Getenv("R2_ACCOUNT_ID")
+	accessKey := os.Getenv("R2_ACCESS_KEY_ID")
+	secretKey := os.Getenv("R2_SECRET_ACCESS_KEY")
+	r2Bucket = os.Getenv("R2_BUCKET_NAME")
+	r2PublicURL = strings.TrimSuffix(os.Getenv("R2_PUBLIC_URL"), "/")
+
+	if accountID == "" || accessKey == "" || secretKey == "" || r2Bucket == "" {
+		return fmt.Errorf("R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME must all be set")
+	}
+
+	cfg, err := awsconfig.LoadDefaultConfig(context.Background(),
+		awsconfig.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
+		),
+		awsconfig.WithRegion("auto"),
+	)
+	if err != nil {
+		return fmt.Errorf("aws config: %w", err)
+	}
+
+	endpoint := fmt.Sprintf("https://%s.r2.cloudflarestorage.com", accountID)
+	s3Client = s3.NewFromConfig(cfg, func(o *s3.Options) {
+		o.BaseEndpoint = aws.String(endpoint)
+		o.UsePathStyle = true
+	})
+	presignClient = s3.NewPresignClient(s3Client)
+
+	log.Printf("R2 connected: bucket=%s", r2Bucket)
+	return nil
+}
+
+func fileURL(key string) string {
+	if r2PublicURL == "" || key == "" {
+		return ""
+	}
+	return r2PublicURL + "/" + key
 }
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
@@ -94,18 +220,16 @@ func generateSalt() string {
 	return fmt.Sprintf("%x", b)
 }
 
-func makeToken(email string) string {
+func makeToken(mobile string) string {
 	payload := map[string]interface{}{
-		"email": email,
-		"exp":   time.Now().Add(30 * 24 * time.Hour).Unix(),
+		"mobile": mobile,
+		"exp":    time.Now().Add(30 * 24 * time.Hour).Unix(),
 	}
 	payloadJSON, _ := json.Marshal(payload)
 	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
-
 	mac := hmac.New(sha256.New, jwtSecret)
 	mac.Write([]byte(payloadB64))
 	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-
 	return payloadB64 + "." + sig
 }
 
@@ -118,8 +242,7 @@ func verifyToken(token string) (string, error) {
 
 	mac := hmac.New(sha256.New, jwtSecret)
 	mac.Write([]byte(payloadB64))
-	expectedSig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	if !hmac.Equal([]byte(sig), []byte(expectedSig)) {
+	if !hmac.Equal([]byte(sig), []byte(base64.RawURLEncoding.EncodeToString(mac.Sum(nil)))) {
 		return "", fmt.Errorf("invalid token signature")
 	}
 
@@ -127,19 +250,35 @@ func verifyToken(token string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid token payload")
 	}
-
 	var payload map[string]interface{}
 	if err := json.Unmarshal(payloadJSON, &payload); err != nil {
 		return "", fmt.Errorf("invalid token JSON")
 	}
-
 	exp, ok := payload["exp"].(float64)
 	if !ok || time.Now().Unix() > int64(exp) {
 		return "", fmt.Errorf("token expired")
 	}
+	mobile, _ := payload["mobile"].(string)
+	return mobile, nil
+}
 
-	email, _ := payload["email"].(string)
-	return email, nil
+// getUserFromToken extracts and validates the Bearer token, returns (userID, mobile, error).
+func getUserFromToken(r *http.Request) (int64, string, error) {
+	auth := r.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, "Bearer ") {
+		return 0, "", errors.New("missing authorization header")
+	}
+	token := strings.TrimPrefix(auth, "Bearer ")
+	mobile, err := verifyToken(token)
+	if err != nil {
+		return 0, "", err
+	}
+	var userID int64
+	err = db.QueryRow(r.Context(), "SELECT id FROM users WHERE mobile=$1", mobile).Scan(&userID)
+	if err != nil {
+		return 0, "", errors.New("user not found")
+	}
+	return userID, mobile, nil
 }
 
 // ─── OTP helpers ──────────────────────────────────────────────────────────────
@@ -158,7 +297,7 @@ func sendEmailOTP(toEmail, otp, firstName string) error {
 
 	if smtpHost == "" || smtpUser == "" || smtpPass == "" {
 		log.Printf("[OTP] SMTP not configured — OTP for %s: %s", toEmail, otp)
-		return nil // In dev, just log it
+		return nil
 	}
 	if smtpPort == "" {
 		smtpPort = "587"
@@ -183,7 +322,6 @@ This code expires in 10 minutes. Do not share it with anyone.
 
 	auth := smtp.PlainAuth("", smtpUser, smtpPass, smtpHost)
 
-	// Try TLS first (port 465), fallback to STARTTLS (port 587)
 	if smtpPort == "465" {
 		tlsConfig := &tls.Config{ServerName: smtpHost}
 		conn, err := tls.Dial("tcp", smtpHost+":"+smtpPort, tlsConfig)
@@ -219,41 +357,23 @@ This code expires in 10 minutes. Do not share it with anyone.
 }
 
 func sendSMSOTP(mobile, otp string) error {
-	accountSID := os.Getenv("TWILIO_ACCOUNT_SID")
-	authToken := os.Getenv("TWILIO_AUTH_TOKEN")
-	fromNumber := os.Getenv("TWILIO_FROM_NUMBER")
-
-	if accountSID == "" || authToken == "" || fromNumber == "" {
-		log.Printf("[OTP] Twilio not configured — OTP for %s: %s", mobile, otp)
-		return nil // In dev, just log it
+	apiKey := os.Getenv("TWOFACTOR_API_KEY")
+	if apiKey == "" {
+		log.Printf("[OTP] 2Factor not configured — OTP for %s: %s", mobile, otp)
+		return nil
 	}
-
-	// Format mobile to E.164 if not already
-	to := mobile
-	if !strings.HasPrefix(to, "+") {
-		to = "+91" + to // default to India prefix
+	to := strings.TrimPrefix(mobile, "+")
+	if !strings.HasPrefix(to, "91") {
+		to = "91" + to
 	}
-
-	body := fmt.Sprintf("Your Memoera OTP is: %s. Valid for 10 minutes. Do not share.", otp)
-
-	msgData := fmt.Sprintf("To=%s&From=%s&Body=%s", urlEncode(to), urlEncode(fromNumber), urlEncode(body))
-
-	url := fmt.Sprintf("https://api.twilio.com/2010-04-01/Accounts/%s/Messages.json", accountSID)
-	req, err := http.NewRequest("POST", url, strings.NewReader(msgData))
+	url := fmt.Sprintf("https://2factor.in/API/V1/%s/SMS/%s/%s/OTP1", apiKey, to, otp)
+	resp, err := http.Get(url)
 	if err != nil {
-		return err
-	}
-	req.SetBasicAuth(accountSID, authToken)
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("Twilio request failed: %w", err)
+		return fmt.Errorf("2Factor request failed: %w", err)
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("Twilio error: status %d", resp.StatusCode)
+		return fmt.Errorf("2Factor error: status %d", resp.StatusCode)
 	}
 	return nil
 }
@@ -293,20 +413,16 @@ func getPort() string {
 func corsMiddleware(allowedOrigin string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin == allowedOrigin || allowedOrigin == "*" {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-		} else if origin != "" {
+		if origin != "" {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		w.Header().Set("Access-Control-Max-Age", "86400")
-
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-
 		next.ServeHTTP(w, r)
 	})
 }
@@ -319,11 +435,10 @@ func loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// ─── Handlers ─────────────────────────────────────────────────────────────────
+// ─── Auth Handlers ────────────────────────────────────────────────────────────
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":    "ok",
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
@@ -343,7 +458,7 @@ func signUpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.FirstName == "" || req.LastName == "" || req.Email == "" || req.Password == "" || req.Mobile == "" {
+	if req.FirstName == "" || req.LastName == "" || req.Mobile == "" || req.Password == "" {
 		writeError(w, http.StatusBadRequest, "All fields are required")
 		return
 	}
@@ -352,40 +467,33 @@ func signUpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	email := strings.ToLower(strings.TrimSpace(req.Email))
-
-	mu.Lock()
-	defer mu.Unlock()
-
-	if _, exists := users[email]; exists {
-		writeError(w, http.StatusConflict, "An account with this email already exists")
-		return
-	}
-	if _, exists := mobileIndex[req.Mobile]; exists {
-		writeError(w, http.StatusConflict, "An account with this mobile number already exists")
-		return
-	}
-
 	salt := generateSalt()
 	passwordHash := salt + ":" + hashPassword(req.Password, salt)
-
 	answerSalt := generateSalt()
 	answerHash := answerSalt + ":" + hashPassword(strings.ToLower(req.SecurityAnswer), answerSalt)
 
-	user := User{
-		FirstName:        req.FirstName,
-		LastName:         req.LastName,
-		Mobile:           req.Mobile,
-		Email:            email,
-		PasswordHash:     passwordHash,
-		SecurityQuestion: req.SecurityQuestion,
-		SecurityAnswer:   answerHash,
+	var userID int64
+	err := db.QueryRow(r.Context(), `
+		INSERT INTO users (mobile, first_name, last_name, password_hash, security_question, security_answer, date_of_birth)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id`,
+		req.Mobile, req.FirstName, req.LastName, passwordHash, req.SecurityQuestion, answerHash, req.DateOfBirth,
+	).Scan(&userID)
+
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			writeError(w, http.StatusConflict, "An account with this mobile number already exists")
+			return
+		}
+		log.Printf("[signUp] db error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to create account")
+		return
 	}
 
-	users[email] = user
-	mobileIndex[req.Mobile] = email
-
-	token := makeToken(email)
+	user := User{ID: userID, FirstName: req.FirstName, LastName: req.LastName,
+		Mobile: req.Mobile, DateOfBirth: req.DateOfBirth, SecurityQuestion: req.SecurityQuestion}
+	token := makeToken(req.Mobile)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -403,204 +511,171 @@ func signInHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-
 	if req.Identifier == "" || req.Password == "" {
-		writeError(w, http.StatusBadRequest, "Email/mobile and password are required")
+		writeError(w, http.StatusBadRequest, "Mobile number and password are required")
 		return
 	}
 
-	identifier := strings.TrimSpace(req.Identifier)
-
-	mu.RLock()
-	defer mu.RUnlock()
+	mobile := strings.TrimSpace(req.Identifier)
 
 	var user User
-	var found bool
+	err := db.QueryRow(r.Context(), `
+		SELECT id, mobile, first_name, last_name, password_hash, security_question, COALESCE(date_of_birth,'')
+		FROM users WHERE mobile=$1`, mobile,
+	).Scan(&user.ID, &user.Mobile, &user.FirstName, &user.LastName, &user.PasswordHash, &user.SecurityQuestion, &user.DateOfBirth)
 
-	email := strings.ToLower(identifier)
-	if u, ok := users[email]; ok {
-		user = u
-		found = true
-	} else if mappedEmail, ok := mobileIndex[identifier]; ok {
-		if u, ok := users[mappedEmail]; ok {
-			user = u
-			found = true
-		}
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusUnauthorized, "Invalid mobile number or password")
+		return
 	}
-
-	if !found {
-		writeError(w, http.StatusUnauthorized, "Invalid email/mobile or password")
+	if err != nil {
+		log.Printf("[signIn] db error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Sign in failed")
 		return
 	}
 
 	parts := strings.SplitN(user.PasswordHash, ":", 2)
-	if len(parts) != 2 {
-		writeError(w, http.StatusInternalServerError, "Account data corrupted")
-		return
-	}
-	salt, storedHash := parts[0], parts[1]
-	if hashPassword(req.Password, salt) != storedHash {
-		writeError(w, http.StatusUnauthorized, "Invalid email/mobile or password")
+	if len(parts) != 2 || hashPassword(req.Password, parts[0]) != parts[1] {
+		writeError(w, http.StatusUnauthorized, "Invalid mobile number or password")
 		return
 	}
 
-	token := makeToken(user.Email)
-
+	token := makeToken(user.Mobile)
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(AuthResponse{Token: token, User: user})
 }
 
-// ─── Forgot Password: Step 1 — Send OTP ──────────────────────────────────────
-// POST /api/auth/forgot-password
-// Body: { "identifier": "email or mobile" }
-// Sends OTP to both email and mobile of the matched account
-
+// Step 1: POST /api/auth/forgot-password — takes mobile, returns security question
 func forgotPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
 	var req struct {
-		Identifier string `json:"identifier"`
+		Mobile string `json:"mobile"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-
-	identifier := strings.TrimSpace(req.Identifier)
-	if identifier == "" {
-		writeError(w, http.StatusBadRequest, "Email or mobile number is required")
+	mobile := strings.TrimSpace(req.Mobile)
+	if mobile == "" {
+		writeError(w, http.StatusBadRequest, "Mobile number is required")
 		return
 	}
 
-	mu.RLock()
-	var user User
-	var found bool
-	email := strings.ToLower(identifier)
-	if u, ok := users[email]; ok {
-		user = u
-		found = true
-	} else if mappedEmail, ok := mobileIndex[identifier]; ok {
-		if u, ok := users[mappedEmail]; ok {
-			user = u
-			found = true
-		}
+	var securityQuestion string
+	err := db.QueryRow(r.Context(), `SELECT security_question FROM users WHERE mobile=$1`, mobile).Scan(&securityQuestion)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Don't reveal whether account exists
+		writeError(w, http.StatusNotFound, "No account found with this mobile number")
+		return
 	}
-	mu.RUnlock()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to lookup account")
+		return
+	}
 
-	if !found {
-		// Don't reveal whether account exists — return success anyway
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"message": "If an account exists, an OTP has been sent.",
-			"maskedEmail":  "",
-			"maskedMobile": "",
-		})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"securityQuestion": securityQuestion})
+}
+
+// Step 2: POST /api/auth/verify-security-question — verifies answer, sends OTP
+func verifySecurityQuestionHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Mobile         string `json:"mobile"`
+		SecurityAnswer string `json:"securityAnswer"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.Mobile == "" || req.SecurityAnswer == "" {
+		writeError(w, http.StatusBadRequest, "Mobile and security answer are required")
+		return
+	}
+
+	var storedHash, firstName string
+	err := db.QueryRow(r.Context(), `SELECT security_answer, first_name FROM users WHERE mobile=$1`, req.Mobile).
+		Scan(&storedHash, &firstName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusUnauthorized, "Incorrect answer")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to verify answer")
+		return
+	}
+
+	parts := strings.SplitN(storedHash, ":", 2)
+	if len(parts) != 2 || hashPassword(strings.ToLower(strings.TrimSpace(req.SecurityAnswer)), parts[0]) != parts[1] {
+		writeError(w, http.StatusUnauthorized, "Incorrect security answer")
 		return
 	}
 
 	otp := generateOTP()
-
 	otpMu.Lock()
-	otpStore[user.Email] = OTPEntry{
-		OTP:       otp,
-		Email:     user.Email,
-		ExpiresAt: time.Now().Add(10 * time.Minute),
-	}
+	otpStore[req.Mobile] = OTPEntry{OTP: otp, Email: req.Mobile, ExpiresAt: time.Now().Add(10 * time.Minute)}
 	otpMu.Unlock()
 
-	// Send OTP via email
-	emailErr := sendEmailOTP(user.Email, otp, user.FirstName)
-	if emailErr != nil {
-		log.Printf("[OTP] Email send failed for %s: %v", user.Email, emailErr)
+	if err := sendSMSOTP(req.Mobile, otp); err != nil {
+		log.Printf("[OTP] SMS send failed for %s: %v", req.Mobile, err)
 	}
-
-	// Send OTP via SMS
-	smsErr := sendSMSOTP(user.Mobile, otp)
-	if smsErr != nil {
-		log.Printf("[OTP] SMS send failed for %s: %v", user.Mobile, smsErr)
-	}
-
-	// Mask email and mobile for display
-	maskedEmail := maskEmail(user.Email)
-	maskedMobile := maskMobile(user.Mobile)
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"message":      "OTP sent to your registered email and mobile.",
-		"maskedEmail":  maskedEmail,
-		"maskedMobile": maskedMobile,
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"message":      "OTP sent to your mobile.",
+		"maskedMobile": maskMobile(req.Mobile),
 	})
 }
-
-// ─── Forgot Password: Step 2 — Verify OTP ────────────────────────────────────
-// POST /api/auth/verify-otp
-// Body: { "identifier": "email or mobile", "otp": "123456" }
 
 func verifyOTPHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
 	var req struct {
-		Identifier string `json:"identifier"`
-		OTP        string `json:"otp"`
+		Mobile string `json:"mobile"`
+		OTP    string `json:"otp"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-
-	if req.Identifier == "" || req.OTP == "" {
-		writeError(w, http.StatusBadRequest, "Identifier and OTP are required")
-		return
-	}
-
-	// Resolve identifier to email
-	resolvedEmail := resolveEmail(req.Identifier)
-	if resolvedEmail == "" {
-		writeError(w, http.StatusUnauthorized, "Invalid OTP or expired")
+	if req.Mobile == "" || req.OTP == "" {
+		writeError(w, http.StatusBadRequest, "Mobile and OTP are required")
 		return
 	}
 
 	otpMu.Lock()
-	entry, exists := otpStore[resolvedEmail]
+	entry, exists := otpStore[req.Mobile]
 	otpMu.Unlock()
 
 	if !exists || time.Now().After(entry.ExpiresAt) {
 		writeError(w, http.StatusUnauthorized, "OTP has expired. Please request a new one.")
 		return
 	}
-
 	if entry.OTP != strings.TrimSpace(req.OTP) {
 		writeError(w, http.StatusUnauthorized, "Incorrect OTP. Please try again.")
 		return
 	}
 
-	// OTP valid — issue a short-lived reset token
-	resetToken := makeResetToken(resolvedEmail)
-
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"message":    "OTP verified successfully.",
-		"resetToken": resetToken,
+		"resetToken": makeResetToken(req.Mobile),
 	})
 }
-
-// ─── Forgot Password: Step 3 — Reset Password ────────────────────────────────
-// POST /api/auth/reset-password
-// Body: { "resetToken": "...", "newPassword": "..." }
 
 func resetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
 	var req struct {
 		ResetToken  string `json:"resetToken"`
 		NewPassword string `json:"newPassword"`
@@ -609,7 +684,6 @@ func resetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-
 	if req.ResetToken == "" || req.NewPassword == "" {
 		writeError(w, http.StatusBadRequest, "Reset token and new password are required")
 		return
@@ -619,51 +693,465 @@ func resetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	email, err := verifyResetToken(req.ResetToken)
+	mobile, err := verifyResetToken(req.ResetToken)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "Invalid or expired reset token. Please start over.")
 		return
 	}
 
-	mu.Lock()
-	user, exists := users[email]
-	if !exists {
-		mu.Unlock()
-		writeError(w, http.StatusNotFound, "Account not found")
+	salt := generateSalt()
+	newHash := salt + ":" + hashPassword(req.NewPassword, salt)
+	_, err = db.Exec(r.Context(), "UPDATE users SET password_hash=$1 WHERE mobile=$2", newHash, mobile)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update password")
 		return
 	}
 
-	salt := generateSalt()
-	user.PasswordHash = salt + ":" + hashPassword(req.NewPassword, salt)
-	users[email] = user
-	mu.Unlock()
-
-	// Clear OTP after successful reset
 	otpMu.Lock()
-	delete(otpStore, email)
+	delete(otpStore, mobile)
 	otpMu.Unlock()
 
-	// Sign them in automatically
-	token := makeToken(email)
+	var user User
+	_ = db.QueryRow(r.Context(), `
+		SELECT id, mobile, first_name, last_name, security_question, COALESCE(date_of_birth,'')
+		FROM users WHERE mobile=$1`, mobile,
+	).Scan(&user.ID, &user.Mobile, &user.FirstName, &user.LastName, &user.SecurityQuestion, &user.DateOfBirth)
 
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(AuthResponse{Token: token, User: user})
+	_ = json.NewEncoder(w).Encode(AuthResponse{Token: makeToken(mobile), User: user})
 }
 
-// ─── Reset token (short-lived 15min token for password reset only) ────────────
+// ─── Me Handler ───────────────────────────────────────────────────────────────
 
-func makeResetToken(email string) string {
-	payload := map[string]interface{}{
-		"email": email,
-		"type":  "reset",
-		"exp":   time.Now().Add(15 * time.Minute).Unix(),
+// GET /api/me — returns the authenticated user's profile (including numeric id).
+func getMeHandler(w http.ResponseWriter, r *http.Request) {
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
 	}
+	var user User
+	err = db.QueryRow(r.Context(), `
+		SELECT id, mobile, first_name, last_name, security_question, COALESCE(date_of_birth,'')
+		FROM users WHERE id=$1`, userID,
+	).Scan(&user.ID, &user.Mobile, &user.FirstName, &user.LastName, &user.SecurityQuestion, &user.DateOfBirth)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "User not found")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(user)
+}
+
+// ─── Upload Handlers ──────────────────────────────────────────────────────────
+
+// POST /api/upload/presign
+// Body: {"key": "users/1/images/0.jpg", "contentType": "image/jpeg"}
+// Returns: {"url": "...presigned PUT url...", "key": "..."}
+func presignUploadHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	var req struct {
+		Key         string `json:"key"`
+		ContentType string `json:"contentType"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.Key == "" {
+		writeError(w, http.StatusBadRequest, "key is required")
+		return
+	}
+	// Ensure key is scoped to the user
+	expectedPrefix := fmt.Sprintf("users/%d/", userID)
+	if !strings.HasPrefix(req.Key, expectedPrefix) {
+		writeError(w, http.StatusForbidden, "Key must be scoped to your user ID")
+		return
+	}
+
+	presignResult, err := presignClient.PresignPutObject(r.Context(), &s3.PutObjectInput{
+		Bucket:      aws.String(r2Bucket),
+		Key:         aws.String(req.Key),
+		ContentType: aws.String(req.ContentType),
+	}, func(opts *s3.PresignOptions) {
+		opts.Expires = 15 * time.Minute
+	})
+	if err != nil {
+		log.Printf("[presign] error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to generate upload URL")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"url": presignResult.URL, "key": req.Key})
+}
+
+// POST /api/upload/multipart/init
+// Body: {"key": "users/1/videos/0.mp4", "contentType": "video/mp4"}
+// Returns: {"uploadId": "...", "key": "..."}
+func multipartInitHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	var req struct {
+		Key         string `json:"key"`
+		ContentType string `json:"contentType"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	expectedPrefix := fmt.Sprintf("users/%d/", userID)
+	if !strings.HasPrefix(req.Key, expectedPrefix) {
+		writeError(w, http.StatusForbidden, "Key must be scoped to your user ID")
+		return
+	}
+
+	result, err := s3Client.CreateMultipartUpload(r.Context(), &s3.CreateMultipartUploadInput{
+		Bucket:      aws.String(r2Bucket),
+		Key:         aws.String(req.Key),
+		ContentType: aws.String(req.ContentType),
+	})
+	if err != nil {
+		log.Printf("[multipart init] error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to initiate upload")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"uploadId": *result.UploadId, "key": req.Key})
+}
+
+// POST /api/upload/multipart/part-url
+// Body: {"key": "...", "uploadId": "...", "partNumber": 1}
+// Returns: {"url": "...presigned..."}
+func multipartPartURLHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	var req struct {
+		Key        string `json:"key"`
+		UploadID   string `json:"uploadId"`
+		PartNumber int32  `json:"partNumber"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	expectedPrefix := fmt.Sprintf("users/%d/", userID)
+	if !strings.HasPrefix(req.Key, expectedPrefix) {
+		writeError(w, http.StatusForbidden, "Key must be scoped to your user ID")
+		return
+	}
+	if req.PartNumber < 1 || req.PartNumber > 10000 {
+		writeError(w, http.StatusBadRequest, "partNumber must be between 1 and 10000")
+		return
+	}
+
+	presignResult, err := presignClient.PresignUploadPart(r.Context(), &s3.UploadPartInput{
+		Bucket:     aws.String(r2Bucket),
+		Key:        aws.String(req.Key),
+		UploadId:   aws.String(req.UploadID),
+		PartNumber: aws.Int32(req.PartNumber),
+	}, func(opts *s3.PresignOptions) {
+		opts.Expires = 60 * time.Minute
+	})
+	if err != nil {
+		log.Printf("[multipart part-url] error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to generate part upload URL")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"url": presignResult.URL})
+}
+
+// POST /api/upload/multipart/complete
+// Body: {"key": "...", "uploadId": "...", "parts": [{"partNumber": 1, "etag": "..."}]}
+// Returns: {"url": "public URL"}
+func multipartCompleteHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	var req struct {
+		Key      string `json:"key"`
+		UploadID string `json:"uploadId"`
+		Parts    []struct {
+			PartNumber int32  `json:"partNumber"`
+			ETag       string `json:"etag"`
+		} `json:"parts"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	expectedPrefix := fmt.Sprintf("users/%d/", userID)
+	if !strings.HasPrefix(req.Key, expectedPrefix) {
+		writeError(w, http.StatusForbidden, "Key must be scoped to your user ID")
+		return
+	}
+
+	completedParts := make([]s3types.CompletedPart, len(req.Parts))
+	for i, p := range req.Parts {
+		etag := p.ETag
+		completedParts[i] = s3types.CompletedPart{
+			PartNumber: aws.Int32(p.PartNumber),
+			ETag:       aws.String(etag),
+		}
+	}
+
+	_, err = s3Client.CompleteMultipartUpload(r.Context(), &s3.CompleteMultipartUploadInput{
+		Bucket:   aws.String(r2Bucket),
+		Key:      aws.String(req.Key),
+		UploadId: aws.String(req.UploadID),
+		MultipartUpload: &s3types.CompletedMultipartUpload{
+			Parts: completedParts,
+		},
+	})
+	if err != nil {
+		log.Printf("[multipart complete] error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to complete upload")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"url": fileURL(req.Key), "key": req.Key})
+}
+
+// POST /api/upload/multipart/abort
+// Body: {"key": "...", "uploadId": "..."}
+func multipartAbortHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	_, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	var req struct {
+		Key      string `json:"key"`
+		UploadID string `json:"uploadId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	_, _ = s3Client.AbortMultipartUpload(r.Context(), &s3.AbortMultipartUploadInput{
+		Bucket:   aws.String(r2Bucket),
+		Key:      aws.String(req.Key),
+		UploadId: aws.String(req.UploadID),
+	})
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ─── Target Handlers ──────────────────────────────────────────────────────────
+
+// POST /api/targets/save
+// Body: {"targets": [{label, planeWidth, planeHeight, planeOffsetY, imageKey, videoKey}], "mindKey": "..."}
+// Upserts all targets for the authenticated user (replaces previous set).
+func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	var req struct {
+		Targets []struct {
+			TargetIndex  int     `json:"targetIndex"`
+			Label        string  `json:"label"`
+			PlaneWidth   float64 `json:"planeWidth"`
+			PlaneHeight  float64 `json:"planeHeight"`
+			PlaneOffsetY float64 `json:"planeOffsetY"`
+			ImageKey     string  `json:"imageKey"`
+			VideoKey     string  `json:"videoKey"`
+		} `json:"targets"`
+		MindKey string `json:"mindKey"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if len(req.Targets) == 0 {
+		writeError(w, http.StatusBadRequest, "targets array is required")
+		return
+	}
+
+	// Delete old targets first, then insert new ones in a transaction
+	tx, err := db.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	_, err = tx.Exec(r.Context(), "DELETE FROM ar_targets WHERE user_id=$1", userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to clear old targets")
+		return
+	}
+
+	for i, t := range req.Targets {
+		_, err = tx.Exec(r.Context(), `
+			INSERT INTO ar_targets (user_id, target_index, label, plane_width, plane_height, plane_offset_y, image_key, video_key, mind_key)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+			userID, i, t.Label, t.PlaneWidth, t.PlaneHeight, t.PlaneOffsetY, t.ImageKey, t.VideoKey, req.MindKey,
+		)
+		if err != nil {
+			log.Printf("[saveTargets] insert error: %v", err)
+			writeError(w, http.StatusInternalServerError, "Failed to save targets")
+			return
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to commit targets")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "saved"})
+}
+
+// GET /api/targets
+// Returns the user's saved targets with public R2 URLs.
+func getTargetsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	rows, err := db.Query(r.Context(), `
+		SELECT target_index, label, plane_width, plane_height, plane_offset_y, image_key, video_key, mind_key
+		FROM ar_targets WHERE user_id=$1
+		ORDER BY target_index`, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to fetch targets")
+		return
+	}
+	defer rows.Close()
+
+	type TargetResponse struct {
+		TargetIndex  int     `json:"targetIndex"`
+		Label        string  `json:"label"`
+		PlaneWidth   float64 `json:"planeWidth"`
+		PlaneHeight  float64 `json:"planeHeight"`
+		PlaneOffsetY float64 `json:"planeOffsetY"`
+		ImageURL     string  `json:"imageUrl"`
+		VideoURL     string  `json:"videoUrl"`
+		ImageKey     string  `json:"imageKey"`
+		VideoKey     string  `json:"videoKey"`
+		MindKey      string  `json:"mindKey"`
+	}
+
+	var targets []TargetResponse
+	var mindURL string
+
+	for rows.Next() {
+		var t TargetResponse
+		var imageKey, videoKey, mindKey string
+		if err := rows.Scan(&t.TargetIndex, &t.Label, &t.PlaneWidth, &t.PlaneHeight, &t.PlaneOffsetY,
+			&imageKey, &videoKey, &mindKey); err != nil {
+			continue
+		}
+		t.ImageKey = imageKey
+		t.VideoKey = videoKey
+		t.MindKey = mindKey
+		t.ImageURL = fileURL(imageKey)
+		t.VideoURL = fileURL(videoKey)
+		if mindURL == "" {
+			mindURL = fileURL(mindKey)
+		}
+		targets = append(targets, t)
+	}
+
+	if targets == nil {
+		targets = []TargetResponse{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"targets": targets,
+		"mindUrl": mindURL,
+		"hasData": len(targets) > 0,
+	})
+}
+
+// DELETE /api/targets
+// Clears all targets for the authenticated user.
+func deleteTargetsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	_, err = db.Exec(r.Context(), "DELETE FROM ar_targets WHERE user_id=$1", userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to delete targets")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ─── Reset Token ──────────────────────────────────────────────────────────────
+
+func makeResetToken(mobile string) string {
+	payload := map[string]interface{}{"mobile": mobile, "type": "reset", "exp": time.Now().Add(15 * time.Minute).Unix()}
 	payloadJSON, _ := json.Marshal(payload)
 	payloadB64 := base64.RawURLEncoding.EncodeToString(payloadJSON)
 	mac := hmac.New(sha256.New, jwtSecret)
 	mac.Write([]byte(payloadB64))
-	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	return payloadB64 + "." + sig
+	return payloadB64 + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func verifyResetToken(token string) (string, error) {
@@ -673,8 +1161,7 @@ func verifyResetToken(token string) (string, error) {
 	}
 	mac := hmac.New(sha256.New, jwtSecret)
 	mac.Write([]byte(parts[0]))
-	expectedSig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-	if !hmac.Equal([]byte(parts[1]), []byte(expectedSig)) {
+	if !hmac.Equal([]byte(parts[1]), []byte(base64.RawURLEncoding.EncodeToString(mac.Sum(nil)))) {
 		return "", fmt.Errorf("invalid signature")
 	}
 	payloadJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
@@ -692,22 +1179,21 @@ func verifyResetToken(token string) (string, error) {
 	if time.Now().Unix() > int64(exp) {
 		return "", fmt.Errorf("token expired")
 	}
-	return payload["email"].(string), nil
+	return payload["mobile"].(string), nil
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-func resolveEmail(identifier string) string {
-	mu.RLock()
-	defer mu.RUnlock()
-	email := strings.ToLower(strings.TrimSpace(identifier))
-	if _, ok := users[email]; ok {
-		return email
+func getUserByIdentifier(ctx context.Context, identifier string) (User, bool) {
+	mobile := strings.TrimSpace(identifier)
+	var user User
+	err := db.QueryRow(ctx, `
+		SELECT id, mobile, first_name, last_name FROM users WHERE mobile=$1`, mobile,
+	).Scan(&user.ID, &user.Mobile, &user.FirstName, &user.LastName)
+	if err == nil {
+		return user, true
 	}
-	if mapped, ok := mobileIndex[strings.TrimSpace(identifier)]; ok {
-		return mapped
-	}
-	return ""
+	return User{}, false
 }
 
 func maskEmail(email string) string {
@@ -738,25 +1224,58 @@ func writeError(w http.ResponseWriter, status int, message string) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 func main() {
+	// Load .env file in development (ignored in production where env vars are set directly)
+	_ = godotenv.Load()
+
+	ctx := context.Background()
+
+	if err := initDB(ctx); err != nil {
+		log.Fatalf("DB init failed: %v", err)
+	}
+	defer db.Close()
+
+	if err := initR2(); err != nil {
+		log.Fatalf("R2 init failed: %v", err)
+	}
+
 	allowedOrigin := getAllowedOrigin()
 	port := getPort()
 
 	mux := http.NewServeMux()
 
+	// Health
 	mux.HandleFunc("/health", healthHandler)
+
+	// Auth
 	mux.HandleFunc("/api/auth/signup", signUpHandler)
 	mux.HandleFunc("/api/auth/signin", signInHandler)
 	mux.HandleFunc("/api/auth/forgot-password", forgotPasswordHandler)
+	mux.HandleFunc("/api/auth/verify-security-question", verifySecurityQuestionHandler)
 	mux.HandleFunc("/api/auth/verify-otp", verifyOTPHandler)
 	mux.HandleFunc("/api/auth/reset-password", resetPasswordHandler)
+
+	// Me
+	mux.HandleFunc("/api/me", getMeHandler)
+
+	// File upload (presigned URLs + multipart)
+	mux.HandleFunc("/api/upload/presign", presignUploadHandler)
+	mux.HandleFunc("/api/upload/multipart/init", multipartInitHandler)
+	mux.HandleFunc("/api/upload/multipart/part-url", multipartPartURLHandler)
+	mux.HandleFunc("/api/upload/multipart/complete", multipartCompleteHandler)
+	mux.HandleFunc("/api/upload/multipart/abort", multipartAbortHandler)
+
+	// AR targets
+	mux.HandleFunc("/api/targets/save", saveTargetsHandler)
+	mux.HandleFunc("/api/targets", getTargetsHandler)
+	mux.HandleFunc("/api/targets/delete", deleteTargetsHandler)
 
 	handler := loggingMiddleware(corsMiddleware(allowedOrigin, mux))
 
 	server := &http.Server{
 		Addr:         port,
 		Handler:      handler,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 

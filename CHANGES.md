@@ -1,13 +1,156 @@
 # WebAR App — Complete Project Documentation
 
 ## Overview
-A mobile-friendly WebAR application where users sign up/sign in, upload marker images and videos via a Setup Screen. When the camera detects a marker, the corresponding video plays fullscreen. Assets are compiled in-browser and persisted in IndexedDB. Authentication is handled by a Go backend with in-memory user store.
+A mobile-friendly WebAR application where users sign up/sign in, upload marker images and videos via a Setup Screen. When the camera detects a marker, the corresponding video plays fullscreen. Assets are compiled in-browser, uploaded to Cloudflare R2, and metadata persisted in Neon PostgreSQL. Authentication is handled by a Go backend backed by Neon PostgreSQL.
 
 ---
 
 ## Changelog
 
-### Latest Changes (Session 2)
+### Session 4 — Cloud Storage (Neon PostgreSQL + Cloudflare R2)
+
+#### 🗄️ Database — Neon PostgreSQL (replaces in-memory store)
+
+**Problem:** All registered users were wiped every time Render restarted the backend (free tier sleeps after 15 min inactivity).
+
+**Fix:** Replaced Go in-memory maps with Neon PostgreSQL.
+
+**Schema (auto-created on first run):**
+```sql
+users (id, email, mobile, first_name, last_name, password_hash, security_question, security_answer, created_at)
+ar_targets (id, user_id→users, target_index, label, plane_width, plane_height, plane_offset_y, image_key, video_key, mind_key, created_at)
+```
+
+**Connection:** `DATABASE_URL` env var (Neon connection string with `?sslmode=require`)
+
+**Driver:** `github.com/jackc/pgx/v5` (pgxpool for concurrent requests)
+
+#### ☁️ File Storage — Cloudflare R2 (replaces browser IndexedDB)
+
+**Problem:** AR assets (marker images, videos, .mind files) stored in browser IndexedDB — lost on cache clear, not accessible from other devices, and IndexedDB has size limits.
+
+**Fix:** Upload all assets to Cloudflare R2 (S3-compatible, zero egress fees).
+
+**File organisation in R2:**
+```
+users/{userID}/images/target-{i}-{timestamp}.jpg
+users/{userID}/videos/target-{i}-{timestamp}.mp4
+users/{userID}/mind/targets-{timestamp}.mind
+```
+
+**Upload strategy:**
+- **Images + .mind** → single presigned PUT (small files, 15-min URL expiry)
+- **Videos** → S3 multipart upload in **10 MB chunks** (handles any size HD video up to 5 TB)
+  - Chunks upload directly from browser to R2 via presigned part URLs
+  - Backend never proxies video bytes — no memory pressure on server
+  - Per-video progress tracked and shown in the upload overlay
+
+#### 🆕 New Backend Endpoints
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/me` | Bearer | Returns authenticated user's profile incl. numeric `id` |
+| POST | `/api/upload/presign` | Bearer | Get presigned PUT URL for image or .mind file |
+| POST | `/api/upload/multipart/init` | Bearer | Start multipart upload, returns `uploadId` |
+| POST | `/api/upload/multipart/part-url` | Bearer | Get presigned URL for one chunk |
+| POST | `/api/upload/multipart/complete` | Bearer | Assemble all parts on R2 |
+| POST | `/api/upload/multipart/abort` | Bearer | Cancel incomplete multipart upload |
+| POST | `/api/targets/save` | Bearer | Upsert target metadata + keys to DB |
+| GET | `/api/targets` | Bearer | Fetch user's targets with public R2 URLs |
+| DELETE | `/api/targets/delete` | Bearer | Clear all user's targets from DB |
+
+**Key scoping:** All upload endpoints enforce `users/{userID}/` prefix on R2 keys so users can't overwrite each other.
+
+#### 🔧 Frontend Changes
+
+- **`src/config/api.js`** — Central `API_BASE` (reads `VITE_API_BASE` env var, defaults to `http://localhost:8181`). All three auth screens now import from here instead of hardcoded URLs.
+- **`src/hooks/useArStorage.js`** — Complete rewrite: IndexedDB replaced with cloud API calls. Same exported function signatures (`saveTargets`, `loadTargets`, `clearTargets`, `hasStoredTargets`) so the rest of the app needed minimal changes.
+- **`SetupScreen.jsx`** — New `onLaunchSaved` prop: when the user has previously uploaded targets, a **"Launch AR with saved files →"** button appears so they can go straight to AR without re-compiling.
+- **`App.jsx`** — After loading cloud targets, stores them in `cloudTargets`/`cloudMindFileUrl` state. `handleLaunchSaved` passes these directly to the AR view.
+- **`UploadProgressOverlay.jsx`** — Added `'uploading'` state with label "Uploading to cloud…". Compile progress (0→100%) is followed by upload progress (0→100%).
+
+#### 📁 New Files
+
+| File | Purpose |
+|---|---|
+| `backend/.env` | Local env vars (gitignored) |
+| `backend/.env.example` | Template with all required env var names + comments |
+| `webar-app/.env.local.example` | Frontend env template (`VITE_API_BASE`) |
+| `webar-app/src/config/api.js` | Central API base URL config |
+
+#### ⚙️ New Go Dependencies (run `go mod tidy` after cloning)
+```bash
+cd backend
+go get github.com/jackc/pgx/v5@latest
+go get github.com/aws/aws-sdk-go-v2/config@latest
+go get github.com/aws/aws-sdk-go-v2/credentials@latest
+go get github.com/aws/aws-sdk-go-v2/service/s3@latest
+go mod tidy
+```
+
+#### 🔑 New Environment Variables
+
+**Backend (`backend/.env`):**
+| Key | Description |
+|---|---|
+| `DATABASE_URL` | Neon PostgreSQL connection string |
+| `R2_ACCOUNT_ID` | Cloudflare account ID |
+| `R2_ACCESS_KEY_ID` | R2 API token access key |
+| `R2_SECRET_ACCESS_KEY` | R2 API token secret key |
+| `R2_BUCKET_NAME` | R2 bucket name (e.g. `memoera-assets`) |
+| `R2_PUBLIC_URL` | Public bucket URL (e.g. `https://pub-xxx.r2.dev`) |
+
+**Frontend (`webar-app/.env.local`):**
+| Key | Description |
+|---|---|
+| `VITE_API_BASE` | Backend URL (default: `http://localhost:8181`) |
+
+#### ☁️ R2 CORS Configuration (required for browser uploads)
+In Cloudflare dashboard → R2 → your bucket → Settings → CORS:
+```json
+[{
+  "AllowedOrigins": ["http://localhost:5173", "https://web-ar-suhas.netlify.app", "https://memoera.in"],
+  "AllowedMethods": ["PUT", "GET"],
+  "AllowedHeaders": ["*"],
+  "ExposeHeaders": ["ETag"]
+}]
+```
+> The `ETag` header must be exposed — it is required to complete the multipart upload.
+
+#### 📋 Status
+- ✅ Neon PostgreSQL — connected (`DATABASE_URL` set in `backend/.env`)
+- ⏳ Cloudflare R2 — pending (card required, will set up tomorrow)
+
+---
+
+### Session 3 — Production AR Fix
+
+#### 🐛 AR Error on memoera.in (production) — Root Cause & Fix
+
+**Problem:** AR worked fine locally but showed "Failed to load MindAR" on the deployed Netlify site.
+
+**Two root causes identified:**
+
+1. **Import map stripped by Vite build**
+   - Vite removes `<script type="importmap">` from `index.html` during production build
+   - MindAR's CDN bundle uses bare `"three"` specifier — without the import map it can't resolve it in production
+   - Locally, Vite dev server handles bare specifiers automatically so it worked fine
+   - **Fix:** Added `injectImportMap()` custom Vite plugin in `vite.config.js` that re-injects the import map into `dist/index.html` after build
+
+2. **COEP header blocking CDN chunk files**
+   - `netlify.toml` had `Cross-Origin-Embedder-Policy: require-corp` and `Cross-Origin-Opener-Policy: same-origin`
+   - These headers require every cross-origin resource to have `Cross-Origin-Resource-Policy: cross-origin`
+   - MindAR's relative chunk files (`./controller-xxx.js`, `./ui-xxx.js`) were being blocked
+   - MindAR 1.2.5 does **not** use SharedArrayBuffer so these headers were never needed
+   - **Fix:** Removed both COEP and COOP headers from `netlify.toml`
+
+**Files changed:**
+- `webar-app/vite.config.js` — added `injectImportMap()` plugin
+- `webar-app/netlify.toml` — removed COEP/COOP headers
+
+---
+
+### Session 2
 
 #### 🖼️ Logo
 - Replaced all text-based "memo**era**" logos with `App Memo Era New.png` (transparent RGBA PNG)

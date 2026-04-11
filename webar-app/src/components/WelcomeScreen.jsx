@@ -34,7 +34,7 @@ export default function WelcomeScreen({ onDone, user }) {
   );
 }
 
-const FONT = '"Outfit", -apple-system, BlinkMacSystemFont, sans-serif';
+const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const TEAL = '#00C9A7';
 
 const styles = {

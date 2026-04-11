@@ -122,7 +122,7 @@ function ScanIcon() {
   );
 }
 
-const FONT = '"Outfit", -apple-system, BlinkMacSystemFont, sans-serif';
+const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 
 const styles = {
   title: { fontSize: 18, fontWeight: 600, fontFamily: FONT, color: '#ffffff', margin: 0, lineHeight: 1.3 },

@@ -1,114 +1,193 @@
 /**
- * useArStorage — IndexedDB persistence for uploaded AR assets.
+ * useArStorage - Cloud storage for AR assets.
  *
- * Uses idb-keyval (tiny wrapper around the IndexedDB API) to store:
- *   'ar-targets'    → JSON array of target metadata (no blobs)
- *   'ar-mind-file'  → ArrayBuffer of the compiled .mind file
- *   'ar-video-{i}'  → Blob of the video for target index i
- *   'ar-image-{i}'  → Blob of the marker image for target index i
- *
- * Blob URLs are NOT stored — they are created fresh on each loadTargets() call
- * and must be revoked by the caller when no longer needed.
+ * Replaces IndexedDB with:
+ *   Cloudflare R2  - images, videos, .mind compiled file
+ *   Neon PostgreSQL - target metadata (via Go backend)
  */
-import { get, set, del } from 'idb-keyval';
+import { API_BASE } from "../config/api.js";
 
-/**
- * saveTargets — persist all AR assets to IndexedDB.
- *
- * @param {Array<{label:string, planeWidth:number, planeHeight:number, planeOffsetY:number}>} targetsMeta
- * @param {ArrayBuffer} mindBuffer — compiled .mind binary from MindAR compiler
- * @param {Blob[]} videoBlobs — one Blob per target (same order as targetsMeta)
- * @param {Blob[]} imageBlobs — one Blob per target (same order as targetsMeta)
- */
-// Convert a File or Blob to a plain Blob so it can be stored in IndexedDB
-// on all browsers (iOS Safari rejects File objects in IndexedDB).
-async function toPlainBlob(fileOrBlob) {
-  if (!fileOrBlob) return null;
-  const buf = await fileOrBlob.arrayBuffer();
-  return new Blob([buf], { type: fileOrBlob.type || 'application/octet-stream' });
+function getToken() {
+  return localStorage.getItem("memoera_token") || "";
 }
 
-export async function saveTargets(targetsMeta, mindBuffer, videoBlobs, imageBlobs) {
-  await set('ar-targets', targetsMeta);
-  await set('ar-mind-file', mindBuffer);
-  for (let i = 0; i < targetsMeta.length; i++) {
-    if (videoBlobs[i]) await set(`ar-video-${i}`, await toPlainBlob(videoBlobs[i]));
-    if (imageBlobs[i]) await set(`ar-image-${i}`, await toPlainBlob(imageBlobs[i]));
+async function uploadPresigned(key, blob, contentType) {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api/upload/presign`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+    body: JSON.stringify({ key, contentType }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to get upload URL");
+  }
+  const { url } = await res.json();
+  const uploadRes = await fetch(url, { method: "PUT", body: blob, headers: { "Content-Type": contentType } });
+  if (!uploadRes.ok) throw new Error(`R2 upload failed: ${uploadRes.status}`);
+}
+
+const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MB
+
+async function uploadMultipart(key, blob, contentType, onProgress) {
+  const token = getToken();
+  const auth = { "Content-Type": "application/json", "Authorization": `Bearer ${token}` };
+
+  const initRes = await fetch(`${API_BASE}/api/upload/multipart/init`, {
+    method: "POST", headers: auth,
+    body: JSON.stringify({ key, contentType }),
+  });
+  if (!initRes.ok) {
+    const err = await initRes.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to initiate upload");
+  }
+  const { uploadId } = await initRes.json();
+
+  const totalChunks = Math.ceil(blob.size / CHUNK_SIZE);
+  const parts = [];
+
+  try {
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * CHUNK_SIZE;
+      const chunk = blob.slice(start, Math.min(start + CHUNK_SIZE, blob.size));
+      const partNumber = i + 1;
+
+      const partRes = await fetch(`${API_BASE}/api/upload/multipart/part-url`, {
+        method: "POST", headers: auth,
+        body: JSON.stringify({ key, uploadId, partNumber }),
+      });
+      if (!partRes.ok) throw new Error(`Failed to get URL for part ${partNumber}`);
+      const { url } = await partRes.json();
+
+      const uploadRes = await fetch(url, { method: "PUT", body: chunk, headers: { "Content-Type": contentType } });
+      if (!uploadRes.ok) throw new Error(`Part ${partNumber} upload failed: ${uploadRes.status}`);
+
+      const etag = (uploadRes.headers.get("ETag") || "").replace(/"/g, "");
+      parts.push({ partNumber, etag });
+      onProgress && onProgress(Math.round(((i + 1) / totalChunks) * 100));
+    }
+
+    const completeRes = await fetch(`${API_BASE}/api/upload/multipart/complete`, {
+      method: "POST", headers: auth,
+      body: JSON.stringify({ key, uploadId, parts }),
+    });
+    if (!completeRes.ok) throw new Error("Failed to complete upload");
+
+  } catch (err) {
+    fetch(`${API_BASE}/api/upload/multipart/abort`, {
+      method: "POST", headers: auth,
+      body: JSON.stringify({ key, uploadId }),
+    }).catch(() => {});
+    throw err;
   }
 }
 
-/**
- * loadTargets — restore AR assets from IndexedDB and create blob URLs.
- *
- * @returns {Promise<{
- *   targets: Array|null,
- *   mindFileUrl: string|null,
- *   hasData: boolean,
- *   imagePreviewUrls: string[]
- * }>}
- *
- * ⚠️  The caller MUST revoke all returned blob URLs when done:
- *       URL.revokeObjectURL(mindFileUrl)
- *       targets.forEach(t => URL.revokeObjectURL(t.videoUrl))
- *       imagePreviewUrls.forEach(u => URL.revokeObjectURL(u))
- */
-export async function loadTargets() {
-  const targetsMeta = await get('ar-targets');
-  const mindBuffer = await get('ar-mind-file');
+export async function saveTargets(targetsMeta, mindBuffer, videoBlobs, imageBlobs, onProgress) {
+  const token = getToken();
+  if (!token) throw new Error("Not authenticated");
 
-  if (!targetsMeta || !mindBuffer) {
-    return { targets: null, mindFileUrl: null, hasData: false, imagePreviewUrls: [] };
-  }
+  const meRes = await fetch(`${API_BASE}/api/me`, { headers: { "Authorization": `Bearer ${token}` } });
+  if (!meRes.ok) throw new Error("Failed to authenticate");
+  const { id: userID } = await meRes.json();
 
-  // Create a blob URL for the .mind file so MindAR can fetch it
-  const mindBlob = new Blob([mindBuffer], { type: 'application/octet-stream' });
-  const mindFileUrl = URL.createObjectURL(mindBlob);
+  const ts = Date.now();
+  const n = targetsMeta.length;
+  let overallProgress = 0;
+  const imageWeight = (0.2 / (n + 1)) * 100;
+  const mindWeight  = (0.2 / (n + 1)) * 100;
+  const videoWeight = (0.8 / n) * 100;
+  const report = (delta) => {
+    overallProgress = Math.min(100, overallProgress + delta);
+    onProgress && onProgress(Math.round(overallProgress));
+  };
 
-  const imagePreviewUrls = [];
-
-  const targets = await Promise.all(
-    targetsMeta.map(async (meta, i) => {
-      const videoBlob = await get(`ar-video-${i}`);
-      const imageBlob = await get(`ar-image-${i}`);
-
-      const videoUrl = videoBlob ? URL.createObjectURL(videoBlob) : null;
-      const imagePreviewUrl = imageBlob ? URL.createObjectURL(imageBlob) : null;
-      if (imagePreviewUrl) imagePreviewUrls.push(imagePreviewUrl);
-
-      return {
-        ...meta,
-        targetIndex: i,
-        videoUrl,
-        // Store the image blob URL so SetupScreen can show previews
-        _imagePreviewUrl: imagePreviewUrl,
-        _videoBlob: videoBlob,
-        _imageBlob: imageBlob,
-      };
+  const imageKeys = await Promise.all(
+    imageBlobs.map(async (blob, i) => {
+      const key = `users/${userID}/images/target-${i}-${ts}.jpg`;
+      await uploadPresigned(key, blob, blob.type || "image/jpeg");
+      report(imageWeight);
+      return key;
     })
   );
 
-  return { targets, mindFileUrl, hasData: true, imagePreviewUrls };
-}
+  const videoKeys = [];
+  for (let i = 0; i < videoBlobs.length; i++) {
+    const blob = videoBlobs[i];
+    const key = `users/${userID}/videos/target-${i}-${ts}.mp4`;
+    await uploadMultipart(key, blob, blob.type || "video/mp4", null);
+    report(videoWeight);
+    videoKeys.push(key);
+  }
 
-/**
- * clearTargets — delete all stored AR assets from IndexedDB.
- *
- * @param {number} count — number of targets to clear (needed to delete indexed keys)
- */
-export async function clearTargets(count = 10) {
-  await del('ar-targets');
-  await del('ar-mind-file');
-  for (let i = 0; i < count; i++) {
-    await del(`ar-video-${i}`);
-    await del(`ar-image-${i}`);
+  const mindKey = `users/${userID}/mind/targets-${ts}.mind`;
+  await uploadPresigned(mindKey, new Blob([mindBuffer], { type: "application/octet-stream" }), "application/octet-stream");
+  report(mindWeight);
+
+  const saveRes = await fetch(`${API_BASE}/api/targets/save`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+    body: JSON.stringify({
+      targets: targetsMeta.map((meta, i) => ({
+        targetIndex: i,
+        label: meta.label,
+        planeWidth: meta.planeWidth,
+        planeHeight: meta.planeHeight,
+        planeOffsetY: meta.planeOffsetY,
+        imageKey: imageKeys[i],
+        videoKey: videoKeys[i],
+      })),
+      mindKey,
+    }),
+  });
+  if (!saveRes.ok) {
+    const err = await saveRes.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to save target metadata");
   }
 }
 
-/**
- * hasStoredTargets — quick check without loading all blobs.
- * Useful for deciding whether to show setup or AR on first load.
- */
+export async function loadTargets() {
+  const token = getToken();
+  if (!token) return { targets: null, mindFileUrl: null, hasData: false, imagePreviewUrls: [] };
+
+  let data;
+  try {
+    const res = await fetch(`${API_BASE}/api/targets`, { headers: { "Authorization": `Bearer ${token}` } });
+    if (!res.ok) return { targets: null, mindFileUrl: null, hasData: false, imagePreviewUrls: [] };
+    data = await res.json();
+  } catch {
+    return { targets: null, mindFileUrl: null, hasData: false, imagePreviewUrls: [] };
+  }
+
+  if (!data.hasData || !data.targets?.length) {
+    return { targets: null, mindFileUrl: null, hasData: false, imagePreviewUrls: [] };
+  }
+
+  const imagePreviewUrls = data.targets.map((t) => t.imageUrl).filter(Boolean);
+  const targets = data.targets.map((t) => ({
+    label: t.label,
+    targetIndex: t.targetIndex,
+    planeWidth: t.planeWidth,
+    planeHeight: t.planeHeight,
+    planeOffsetY: t.planeOffsetY,
+    videoUrl: t.videoUrl,
+    _imagePreviewUrl: t.imageUrl,
+    _videoBlob: null,
+    _imageBlob: null,
+  }));
+
+  return { targets, mindFileUrl: data.mindUrl, hasData: true, imagePreviewUrls };
+}
+
+export async function clearTargets() {
+  const token = getToken();
+  if (!token) return;
+  await fetch(`${API_BASE}/api/targets/delete`, {
+    method: "DELETE",
+    headers: { "Authorization": `Bearer ${token}` },
+  }).catch(() => {});
+}
+
 export async function hasStoredTargets() {
-  const meta = await get('ar-targets');
-  return Array.isArray(meta) && meta.length > 0;
+  const { hasData } = await loadTargets();
+  return hasData;
 }

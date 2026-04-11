@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import TargetCard from './TargetCard.jsx';
 import UploadProgressOverlay from './UploadProgressOverlay.jsx';
-import { saveTargets } from '../hooks/useArStorage.js';
+import { saveTargets, loadTargets } from '../hooks/useArStorage.js';
 
 const ASPECT_MAP = { '16:9': 0.5625, '4:3': 0.75, '1:1': 1.0, '9:16': 1.7778 };
 
@@ -10,7 +10,7 @@ function emptyCard(index) {
     videoFile: null, videoName: null, videoSize: null, aspectRatio: '16:9' };
 }
 
-export default function SetupScreen({ onStart, initialCards, onSignOut, user }) {
+export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSignOut, user }) {
   const [cards, setCards] = useState(() => initialCards?.length ? initialCards : [emptyCard(0)]);
   const [compileState, setCompileState] = useState('idle');
   const [compileProgress, setCompileProgress] = useState(0);
@@ -88,7 +88,7 @@ export default function SetupScreen({ onStart, initialCards, onSignOut, user }) 
         label: card.label, planeWidth: 1,
         planeHeight: ASPECT_MAP[card.aspectRatio] ?? 0.5625, planeOffsetY: 0,
       }));
-      setCompileState('saving');
+      setCompileState('uploading'); setCompileProgress(0);
 
       // Bug 7 fix: Re-read video files into fresh blobs before saving to IndexedDB
       // so that multi-target File references don't go stale
@@ -105,16 +105,11 @@ export default function SetupScreen({ onStart, initialCards, onSignOut, user }) 
         })
       );
 
-      await saveTargets(targetsMeta, mindBuffer, freshVideoBlobs, freshImageBlobs);
+      await saveTargets(targetsMeta, mindBuffer, freshVideoBlobs, freshImageBlobs, (pct) => {
+        setCompileProgress(pct);
+      });
 
-      const mindBlob = new Blob([mindBuffer], { type: 'application/octet-stream' });
-      const mindFileUrl = URL.createObjectURL(mindBlob);
-
-      // Bug 7 fix: create video blob URLs from fresh blobs (not stale File refs)
-      const targets = cards.map((card, i) => ({
-        ...targetsMeta[i], targetIndex: i,
-        videoUrl: URL.createObjectURL(freshVideoBlobs[i]),
-      }));
+      const { targets, mindFileUrl } = await loadTargets();
       onStart({ targets, mindFileUrl });
     } catch (err) {
       console.error('[SetupScreen] Compilation failed:', err);
@@ -170,6 +165,11 @@ export default function SetupScreen({ onStart, initialCards, onSignOut, user }) 
         )}
         {showValidation && !canStart && compileState === 'idle' && (
           <p style={styles.validationHint}>Each target needs both a marker image and a video.</p>
+        )}
+        {onLaunchSaved && compileState === 'idle' && (
+          <button onClick={onLaunchSaved} style={styles.launchSavedButton}>
+            Launch AR with saved files →
+          </button>
         )}
         <button onClick={handleStart} disabled={isCompiling}
           style={{ ...styles.startButton, ...(isCompiling ? styles.startButtonDisabled : {}) }}>
@@ -262,4 +262,11 @@ const styles = {
     boxShadow: `0 4px 28px rgba(0,201,167,0.35)`, transition: 'opacity 0.15s',
   },
   startButtonDisabled: { opacity: 0.6, cursor: 'not-allowed', boxShadow: 'none' },
+  launchSavedButton: {
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    background: 'rgba(0,201,167,0.1)', border: '1.5px solid rgba(0,201,167,0.4)',
+    borderRadius: 50, color: '#00C9A7',
+    fontSize: 15, fontWeight: 600, fontFamily: FONT, padding: '13px 24px',
+    cursor: 'pointer', letterSpacing: '0.02em',
+  },
 };
