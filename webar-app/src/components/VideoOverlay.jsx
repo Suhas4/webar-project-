@@ -6,16 +6,23 @@ export default function VideoOverlay({ src, onDone }) {
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
-    v.play().catch(() => {});
-    const onEnd = () => onDone && onDone();
+    // Fallback: if video can't play or errors, call onDone after 3s
+    const fallback = setTimeout(() => onDone && onDone(), 3000);
+    const onEnd = () => { clearTimeout(fallback); onDone && onDone(); };
+    const onError = () => { clearTimeout(fallback); onDone && onDone(); };
     v.addEventListener('ended', onEnd);
-    return () => v.removeEventListener('ended', onEnd);
+    v.addEventListener('error', onError);
+    v.play().catch(() => {});
+    return () => {
+      clearTimeout(fallback);
+      v.removeEventListener('ended', onEnd);
+      v.removeEventListener('error', onError);
+    };
   }, [onDone]);
 
   return (
     <div style={styles.overlay}>
-      <video ref={ref} src={src} muted playsInline
-        style={styles.video} />
+      <video ref={ref} src={src} muted playsInline style={styles.video} />
     </div>
   );
 }

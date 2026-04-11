@@ -54,8 +54,11 @@ export default function App() {
   const handleVideoOverlayDone = useCallback(() => {
     setVideoOverlay((v) => {
       if (!v) return null;
-      if (v.next === 'welcome-hand') { setVideoOverlay({ src: '/welcome-hand.mp4', next: 'home' }); return null; }
-      if (v.next === 'home') { setAppView('home'); return null; }
+      if (v.next === 'welcome-hand') return { src: '/welcome-hand.mp4', next: 'home' };
+      if (v.next === 'home') {
+        setTimeout(() => setAppView('home'), 0);
+        return null;
+      }
       return null;
     });
   }, []);
@@ -84,7 +87,7 @@ export default function App() {
   }, [cloudTargets, cloudMindFileUrl, handleStart]);
 
   if (videoOverlay) {
-    return <VideoOverlay src={videoOverlay.src} onDone={handleVideoOverlayDone} />;
+    return <VideoOverlay key={videoOverlay.src} src={videoOverlay.src} onDone={handleVideoOverlayDone} />;
   }
   if (showDiscLoading) {
     return <DiscLoadingOverlay onDone={handleDiscLoadingDone} />;
