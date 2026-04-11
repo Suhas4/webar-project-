@@ -1,9 +1,11 @@
 export default function UploadProgressOverlay({ compileState, progress }) {
-  const isSaving   = compileState === 'saving';
+  const isSaving    = compileState === 'saving';
   const isUploading = compileState === 'uploading';
-  const displayProgress = isSaving ? 100 : progress;
-  const label = isSaving    ? 'Saving…'
-              : isUploading ? 'Uploading to cloud…'
+  const isFinalizing = compileState === 'finalizing';
+  const displayProgress = isSaving ? 100 : isFinalizing ? 100 : progress;
+  const label = isSaving     ? 'Saving…'
+              : isUploading  ? 'Uploading to cloud…'
+              : isFinalizing ? 'Preparing AR experience…'
               : 'Compiling targets…';
 
   const size = 180;

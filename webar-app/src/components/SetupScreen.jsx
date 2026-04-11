@@ -17,7 +17,7 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
   const [compileError, setCompileError] = useState('');
   const [showValidation, setShowValidation] = useState(false);
 
-  const isCompiling = compileState === 'compiling' || compileState === 'saving';
+  const isCompiling = compileState === 'compiling' || compileState === 'saving' || compileState === 'uploading' || compileState === 'finalizing';
   const canStart = cards.length > 0 && cards.every((c) => c.imageFile && c.videoFile);
 
   const handleCardChange = useCallback((index, patch) => {
@@ -90,8 +90,6 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
       }));
       setCompileState('uploading'); setCompileProgress(0);
 
-      // Bug 7 fix: Re-read video files into fresh blobs before saving to IndexedDB
-      // so that multi-target File references don't go stale
       const freshVideoBlobs = await Promise.all(
         cards.map(async (c) => {
           const buf = await c.videoFile.arrayBuffer();
@@ -109,6 +107,7 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
         setCompileProgress(pct);
       });
 
+      setCompileState('finalizing'); setCompileProgress(0);
       const { targets, mindFileUrl } = await loadTargets();
       onStart({ targets, mindFileUrl });
     } catch (err) {

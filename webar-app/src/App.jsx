@@ -2,22 +2,23 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import ARScene from './components/ARScene.jsx';
 import LoadingScreen from './components/LoadingScreen.jsx';
 import SetupScreen from './components/SetupScreen.jsx';
-import HelloScreen from './components/HelloScreen.jsx';
+import SplashScreen from './components/SplashScreen.jsx';
 import SignInScreen from './components/SignInScreen.jsx';
 import SignUpScreen from './components/SignUpScreen.jsx';
 import WelcomeScreen from './components/WelcomeScreen.jsx';
 import ForgotPasswordScreen from './components/ForgotPasswordScreen.jsx';
+import HelloScreen from './components/HelloScreen.jsx';
 import HomeScreen from './components/HomeScreen.jsx';
 import ProfileScreen from './components/ProfileScreen.jsx';
 import GalleryScreen from './components/GalleryScreen.jsx';
-import VideoOverlay from './components/VideoOverlay.jsx';
 import DiscLoadingOverlay from './components/DiscLoadingOverlay.jsx';
+import VideoOverlay from './components/VideoOverlay.jsx';
 import { loadTargets } from './hooks/useArStorage.js';
 
 export default function App() {
   const hasToken = !!localStorage.getItem('memoera_token');
 
-  const [appView, setAppView] = useState(() => hasToken ? 'home' : 'hello');
+  const [appView, setAppView] = useState(() => hasToken ? 'home' : 'splash');
   const [currentUser, setCurrentUser] = useState(() => {
     try { const s = localStorage.getItem('memoera_user'); return s ? JSON.parse(s) : null; }
     catch { return null; }
@@ -91,6 +92,7 @@ export default function App() {
   if (showDiscLoading) {
     return <DiscLoadingOverlay onDone={handleDiscLoadingDone} />;
   }
+  if (appView === 'splash') return <SplashScreen onDone={() => setAppView('hello')} />;
   if (appView === 'hello') return <HelloScreen onCreateAccount={() => setAppView('signup')} onExisting={() => setAppView('signin')} />;
   if (appView === 'signin') return <SignInScreen onSuccess={handleSignIn} onGoForgotPassword={() => setAppView('forgot')} />;
   if (appView === 'signup') return <SignUpScreen onSuccess={handleSignUp} onBack={() => setAppView('hello')} onOtpFail={handleOtpFail} />;

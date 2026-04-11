@@ -9,7 +9,7 @@ export default function HelloScreen({ onCreateAccount, onExisting }) {
       </div>
       <div style={styles.buttons}>
         <button onClick={onCreateAccount} style={styles.createBtn}>CREATE NEW ACCOUNT</button>
-        <button onClick={onExisting} style={styles.existingBtn}>EXISTING</button>
+        <button onClick={onExisting} style={styles.existingBtn}>EXISTING ACCOUNT</button>
       </div>
     </div>
   );
@@ -19,7 +19,7 @@ const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const BLUE = '#1565C0';
 const styles = {
   screen: { position:'fixed',inset:0,
-    background:'linear-gradient(160deg, #1a75cc 0%, #1565C0 50%, #0d47a1 100%)',
+    background:'linear-gradient(160deg, #061A1F 0%, #0A2229 50%, #061820 100%)',
     display:'flex',flexDirection:'column',justifyContent:'space-between',overflow:'hidden' },
   watermark: { position:'absolute',right:-40,top:'8%',width:'75vw',maxWidth:340,opacity:0.12,pointerEvents:'none' },
   watermarkImg: { width:'100%',filter:'brightness(0) invert(1)' },
@@ -29,7 +29,7 @@ const styles = {
   createBtn: { background:'transparent',border:'2px solid rgba(255,255,255,0.8)',borderRadius:50,
     color:'#ffffff',fontSize:15,fontWeight:700,fontFamily:FONT,padding:'16px 24px',
     cursor:'pointer',letterSpacing:'0.08em' },
-  existingBtn: { background:'#ffffff',border:'none',borderRadius:50,color:BLUE,
+  existingBtn: { background:'#ffffff',border:'none',borderRadius:50,color:'#061A1F',
     fontSize:15,fontWeight:700,fontFamily:FONT,padding:'16px 24px',
     cursor:'pointer',letterSpacing:'0.08em' },
 };
