@@ -151,7 +151,7 @@ func initDB(ctx context.Context) error {
 			video_key     TEXT,
 			mind_key      TEXT,
 			created_at    TIMESTAMPTZ DEFAULT NOW(),
-			UNIQUE(user_id, target_index)
+			UNIQUE(user_id, target_index, is_public)
 		);
 	`)
 	if err != nil {
@@ -164,6 +164,22 @@ func initDB(ctx context.Context) error {
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT false`)
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS target_type TEXT NOT NULL DEFAULT 'video'`)
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS url_link TEXT NOT NULL DEFAULT ''`)
+	// Migrate unique constraint: (user_id, target_index) → (user_id, target_index, is_public)
+	// so public and private targets can coexist at the same index for the same user.
+	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets DROP CONSTRAINT IF EXISTS ar_targets_user_id_target_index_key`)
+	_, _ = db.Exec(ctx, `
+		DO $body$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1 FROM pg_constraint
+				WHERE conname = 'ar_targets_user_id_target_index_is_public_key'
+			) THEN
+				ALTER TABLE ar_targets
+				ADD CONSTRAINT ar_targets_user_id_target_index_is_public_key
+				UNIQUE (user_id, target_index, is_public);
+			END IF;
+		END;
+		$body$`)
 
 	log.Println("DB connected and tables ready")
 	return nil

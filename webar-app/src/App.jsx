@@ -71,7 +71,7 @@ export default function App() {
   const handleSignOut = useCallback(() => {
     localStorage.removeItem('memoera_token'); localStorage.removeItem('memoera_user');
     setCurrentUser(null); setTargets(null); setMindFileUrl(null);
-    setInitialCards(null); setCloudTargets(null);
+    setCloudTargets(null);
     setArStatus('idle'); setIsGuest(false); setAppView('hello');
   }, []);
 

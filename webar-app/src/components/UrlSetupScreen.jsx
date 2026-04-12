@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import UploadProgressOverlay from './UploadProgressOverlay.jsx';
-import { saveTargets, loadTargets } from '../hooks/useArStorage.js';
+import { saveTargets } from '../hooks/useArStorage.js';
 
 const ASPECT_MAP = { '16:9': 0.5625, '4:3': 0.75, '1:1': 1.0, '9:16': 1.7778 };
 
@@ -109,8 +109,21 @@ export default function UrlSetupScreen({ onStart, onSignOut, isPublic }) {
       }, isPublic);
 
       setCompileState('finalizing'); setCompileProgress(0);
-      const { targets, mindFileUrl } = await loadTargets();
-      onStart({ targets, mindFileUrl });
+
+      // Use locally-compiled data instead of loadTargets() to avoid index conflicts
+      // between public and private target batches.
+      const localMindUrl = URL.createObjectURL(new Blob([mindBuffer], { type: 'application/octet-stream' }));
+      const arTargets = targetsMeta.map((meta, i) => ({
+        label: meta.label,
+        targetIndex: i,
+        planeWidth: meta.planeWidth,
+        planeHeight: meta.planeHeight,
+        planeOffsetY: meta.planeOffsetY,
+        videoUrl: '',
+        targetType: 'url',
+        urlLink: meta.urlLink,
+      }));
+      onStart({ targets: arTargets, mindFileUrl: localMindUrl });
     } catch (err) {
       console.error('[UrlSetupScreen] failed:', err);
       setCompileState('error');

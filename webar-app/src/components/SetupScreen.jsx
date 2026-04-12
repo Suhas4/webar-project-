@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import TargetCard from './TargetCard.jsx';
 import UploadProgressOverlay from './UploadProgressOverlay.jsx';
-import { saveTargets, loadTargets } from '../hooks/useArStorage.js';
+import { saveTargets } from '../hooks/useArStorage.js';
 
 const ASPECT_MAP = { '16:9': 0.5625, '4:3': 0.75, '1:1': 1.0, '9:16': 1.7778 };
 
@@ -108,8 +108,23 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
       }, isPublic);
 
       setCompileState('finalizing'); setCompileProgress(0);
-      const { targets, mindFileUrl } = await loadTargets();
-      onStart({ targets, mindFileUrl });
+
+      // Use locally-compiled data to launch AR immediately.
+      // Calling loadTargets() here would return a mix of all public + private targets
+      // from different upload sessions, causing index conflicts. Instead we use the
+      // mind file we just compiled and the video blobs we already have in memory.
+      const localMindUrl = URL.createObjectURL(new Blob([mindBuffer], { type: 'application/octet-stream' }));
+      const arTargets = targetsMeta.map((meta, i) => ({
+        label: meta.label,
+        targetIndex: i,
+        planeWidth: meta.planeWidth,
+        planeHeight: meta.planeHeight,
+        planeOffsetY: meta.planeOffsetY,
+        videoUrl: URL.createObjectURL(freshVideoBlobs[i]),
+        targetType: 'video',
+        urlLink: '',
+      }));
+      onStart({ targets: arTargets, mindFileUrl: localMindUrl });
     } catch (err) {
       console.error('[SetupScreen] Compilation failed:', err);
       setCompileState('error');
