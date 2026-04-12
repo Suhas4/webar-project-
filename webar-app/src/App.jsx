@@ -33,9 +33,8 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState('');
   const [targets, setTargets] = useState(null);
   const [mindFileUrl, setMindFileUrl] = useState(null);
-  const [initialCards, setInitialCards] = useState(null);
+  const [initialCards] = useState(null); // always null — each upload starts fresh
   const [cloudTargets, setCloudTargets] = useState(null);
-  const [cloudMindFileUrl, setCloudMindFileUrl] = useState(null);
   const [videoOverlay, setVideoOverlay] = useState(null); // { src, next }
   const [showDiscLoading, setShowDiscLoading] = useState(false);
   // Upload flow: visibility + type chosen before SetupScreen
@@ -46,15 +45,12 @@ export default function App() {
 
   useEffect(() => {
     if (!hasToken) return;
-    loadTargets().then(({ targets: t, mindFileUrl: m, hasData, imagePreviewUrls }) => {
+    // Just check if the user has any targets — used only for Gallery / SetupScreen pre-fill.
+    // Scanning is always done via UserScanScreen which recompiles fresh from imageUrls,
+    // so cloudMindFileUrl is intentionally not used for scanning.
+    loadTargets().then(({ targets: t, hasData }) => {
       if (!hasData) return;
-      setCloudTargets(t); setCloudMindFileUrl(m);
-      setInitialCards(t.map((x, i) => ({
-        label: x.label || `Target ${i+1}`, imageFile: null,
-        imagePreviewUrl: x._imagePreviewUrl || null,
-        videoFile: null, videoName: x.videoUrl ? 'Saved to cloud' : null,
-        videoSize: null, aspectRatio: getAspectRatioLabel(x.planeHeight),
-      })));
+      setCloudTargets(t);
     }).catch(() => {});
     return () => { activeBlobUrlsRef.current.forEach((u) => { try { URL.revokeObjectURL(u); } catch(_){} }); };
   }, []);
@@ -75,7 +71,7 @@ export default function App() {
   const handleSignOut = useCallback(() => {
     localStorage.removeItem('memoera_token'); localStorage.removeItem('memoera_user');
     setCurrentUser(null); setTargets(null); setMindFileUrl(null);
-    setInitialCards(null); setCloudTargets(null); setCloudMindFileUrl(null);
+    setInitialCards(null); setCloudTargets(null);
     setArStatus('idle'); setIsGuest(false); setAppView('hello');
   }, []);
 
@@ -91,10 +87,10 @@ export default function App() {
   }, []);
 
   const handleLaunchSaved = useCallback(() => {
-    if (!cloudTargets || !cloudMindFileUrl) return;
+    if (!cloudTargets || !cloudTargets.length) return;
     setIsGuest(false);
-    handleStart({ targets: cloudTargets, mindFileUrl: cloudMindFileUrl });
-  }, [cloudTargets, cloudMindFileUrl, handleStart]);
+    setAppView('user-scan');
+  }, [cloudTargets]);
 
   // Guest scan: called when GuestScanScreen finishes compiling public targets
   const handleGuestReady = useCallback(({ targets: t, mindFileUrl: m }) => {
@@ -162,8 +158,8 @@ export default function App() {
     />
   );
   if (appView === 'setup') return (
-    <SetupScreen onStart={handleStart} onLaunchSaved={cloudTargets ? handleLaunchSaved : null}
-      initialCards={initialCards} onSignOut={handleSignOut} user={currentUser}
+    <SetupScreen onStart={handleStart} onLaunchSaved={null}
+      initialCards={null} onSignOut={handleSignOut} user={currentUser}
       isPublic={selectedVisibility === 'public'} />
   );
   if (appView === 'home') return (

@@ -1089,7 +1089,7 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 
-	_, err = tx.Exec(r.Context(), "DELETE FROM ar_targets WHERE user_id=$1", userID)
+	_, err = tx.Exec(r.Context(), "DELETE FROM ar_targets WHERE user_id=$1 AND is_public=$2", userID, req.IsPublic)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to clear old targets")
 		return
