@@ -15,6 +15,7 @@ import GoalSelectScreen from './components/GoalSelectScreen.jsx';
 import UploadTypeScreen from './components/UploadTypeScreen.jsx';
 import UrlSetupScreen from './components/UrlSetupScreen.jsx';
 import GuestScanScreen from './components/GuestScanScreen.jsx';
+import UserScanScreen from './components/UserScanScreen.jsx';
 import DiscLoadingOverlay from './components/DiscLoadingOverlay.jsx';
 import VideoOverlay from './components/VideoOverlay.jsx';
 import { loadTargets } from './hooks/useArStorage.js';
@@ -101,6 +102,12 @@ export default function App() {
     handleStart({ targets: t, mindFileUrl: m });
   }, [handleStart]);
 
+  // Logged-in user scan: own targets + public targets combined
+  const handleUserScanReady = useCallback(({ targets: t, mindFileUrl: m }) => {
+    setIsGuest(false);
+    handleStart({ targets: t, mindFileUrl: m });
+  }, [handleStart]);
+
   // Upload flow: navigate through goal-select → upload-type → setup/url-setup
   const handleGoalPrivate = useCallback(() => { setSelectedVisibility('private'); setAppView('upload-type'); }, []);
   const handleGoalPublic  = useCallback(() => { setSelectedVisibility('public');  setAppView('upload-type'); }, []);
@@ -123,6 +130,9 @@ export default function App() {
   );
   if (appView === 'guest-scan') return (
     <GuestScanScreen onReady={handleGuestReady} onBack={() => setAppView('hello')} />
+  );
+  if (appView === 'user-scan') return (
+    <UserScanScreen onReady={handleUserScanReady} onBack={() => setAppView('home')} />
   );
   if (appView === 'signin') return <SignInScreen onSuccess={handleSignIn} onGoForgotPassword={() => setAppView('forgot')} />;
   if (appView === 'signup') return <SignUpScreen onSuccess={handleSignUp} onBack={() => setAppView('hello')} onOtpFail={handleOtpFail} />;
@@ -158,7 +168,7 @@ export default function App() {
   );
   if (appView === 'home') return (
     <HomeScreen
-      onScan={cloudTargets ? handleLaunchSaved : () => setAppView('goal-select')}
+      onScan={() => setAppView('user-scan')}
       onUpload={() => setAppView('goal-select')}
       onProfile={() => setAppView('profile')}
       onGallery={() => setAppView('gallery')}
