@@ -82,7 +82,17 @@ async function uploadMultipart(key, blob, contentType, onProgress) {
   }
 }
 
-export async function saveTargets(targetsMeta, mindBuffer, videoBlobs, imageBlobs, onProgress) {
+/**
+ * saveTargets — uploads images, videos (or URL targets), .mind file, then saves metadata.
+ *
+ * @param {Array}       targetsMeta  — each item: { label, planeWidth, planeHeight, planeOffsetY, targetType, urlLink }
+ * @param {ArrayBuffer} mindBuffer
+ * @param {Array|null}  videoBlobs   — null/empty for URL-type targets (no video upload)
+ * @param {Array}       imageBlobs
+ * @param {Function}    onProgress
+ * @param {boolean}     isPublic     — whether targets are visible to all users when scanning
+ */
+export async function saveTargets(targetsMeta, mindBuffer, videoBlobs, imageBlobs, onProgress, isPublic = false) {
   const token = getToken();
   if (!token) throw new Error("Not authenticated");
 
@@ -92,10 +102,11 @@ export async function saveTargets(targetsMeta, mindBuffer, videoBlobs, imageBlob
 
   const ts = Date.now();
   const n = targetsMeta.length;
+  const hasVideos = videoBlobs && videoBlobs.length > 0;
   let overallProgress = 0;
   const imageWeight = (0.2 / (n + 1)) * 100;
   const mindWeight  = (0.2 / (n + 1)) * 100;
-  const videoWeight = (0.8 / n) * 100;
+  const videoWeight = hasVideos ? (0.8 / n) * 100 : 0;
   const report = (delta) => {
     overallProgress = Math.min(100, overallProgress + delta);
     onProgress && onProgress(Math.round(overallProgress));
@@ -111,12 +122,16 @@ export async function saveTargets(targetsMeta, mindBuffer, videoBlobs, imageBlob
   );
 
   const videoKeys = [];
-  for (let i = 0; i < videoBlobs.length; i++) {
-    const blob = videoBlobs[i];
-    const key = `users/${userID}/videos/target-${i}-${ts}.mp4`;
-    await uploadMultipart(key, blob, blob.type || "video/mp4", null);
-    report(videoWeight);
-    videoKeys.push(key);
+  if (hasVideos) {
+    for (let i = 0; i < videoBlobs.length; i++) {
+      const blob = videoBlobs[i];
+      const key = `users/${userID}/videos/target-${i}-${ts}.mp4`;
+      await uploadMultipart(key, blob, blob.type || "video/mp4", null);
+      report(videoWeight);
+      videoKeys.push(key);
+    }
+  } else {
+    targetsMeta.forEach(() => videoKeys.push(""));
   }
 
   const mindKey = `users/${userID}/mind/targets-${ts}.mind`;
@@ -135,8 +150,11 @@ export async function saveTargets(targetsMeta, mindBuffer, videoBlobs, imageBlob
         planeOffsetY: meta.planeOffsetY,
         imageKey: imageKeys[i],
         videoKey: videoKeys[i],
+        targetType: meta.targetType || "video",
+        urlLink: meta.urlLink || "",
       })),
       mindKey,
+      isPublic,
     }),
   });
   if (!saveRes.ok) {
@@ -170,12 +188,39 @@ export async function loadTargets() {
     planeHeight: t.planeHeight,
     planeOffsetY: t.planeOffsetY,
     videoUrl: t.videoUrl,
+    targetType: t.targetType || "video",
+    urlLink: t.urlLink || "",
     _imagePreviewUrl: t.imageUrl,
     _videoBlob: null,
     _imageBlob: null,
   }));
 
   return { targets, mindFileUrl: data.mindUrl, hasData: true, imagePreviewUrls };
+}
+
+/**
+ * loadPublicTargets — fetches all public targets (no auth required).
+ * Used by the guest scanner to compile a combined .mind and scan all public markers.
+ */
+export async function loadPublicTargets() {
+  try {
+    const res = await fetch(`${API_BASE}/api/targets/public`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!data.targets?.length) return [];
+    return data.targets.map((t) => ({
+      label: t.label,
+      planeWidth: t.planeWidth,
+      planeHeight: t.planeHeight,
+      planeOffsetY: t.planeOffsetY,
+      imageUrl: t.imageUrl,
+      videoUrl: t.videoUrl,
+      targetType: t.targetType || "video",
+      urlLink: t.urlLink || "",
+    }));
+  } catch {
+    return [];
+  }
 }
 
 export async function clearTargets() {

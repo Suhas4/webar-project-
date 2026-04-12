@@ -7,7 +7,84 @@ A mobile-friendly WebAR application where users sign up/sign in, upload marker i
 
 ## Changelog
 
-### Session 5 — Full App Redesign + OTP Signup
+### Session 6 — Public/Private Uploads, URL Targets, Guest Scan
+
+#### 🔒 Public / Private Upload Flow
+
+After login, clicking **Upload** in the Home screen now starts a guided flow:
+
+1. **Select Your Goal** (`GoalSelectScreen`) — PRIVATE (lock icon) or PUBLIC (people icon)
+   - Private: only the uploader can see their AR targets when scanning
+   - Public: all users (including guests) can see the target in their scanner
+2. **Select Your Goal** (`UploadTypeScreen`) — UPLOAD PHOTO WITH VIDEO or UPLOAD PHOTO WITH URL / LINK
+3. Depending on choice:
+   - **Photo + Video** → existing `SetupScreen` (passes `isPublic` to `saveTargets`)
+   - **Photo + URL** → new `UrlSetupScreen` (compiles marker + saves URL instead of video)
+
+#### 🔗 URL / Link Targets (`UrlSetupScreen`)
+
+New upload type: user uploads a marker image and enters a URL. When a camera scans the marker, the URL opens in the browser (via a "OPEN LINK" overlay in the AR view).
+
+- Same compilation flow as video targets (MindAR compiler)
+- No video file needed — just marker image + URL text
+- Multiple URL targets per session supported
+
+#### 🎯 AR View — URL Target Overlay
+
+When a URL target marker is detected in AR, instead of playing a video:
+- A full-screen overlay appears with the target label + a **"🔗 OPEN LINK"** button
+- User taps the button to open the URL in a new tab
+- A "Close" button dismisses the overlay without leaving AR
+
+#### 🏃 Guest Scan (`GuestScanScreen` + `HelloScreen`)
+
+The **HelloScreen** now has a **SCAN AS GUEST** button (scanner icon + text) in the center.
+
+Guest scan flow:
+1. Tap "SCAN AS GUEST" on Hello screen (no login required)
+2. App fetches all public targets from `/api/targets/public` (unauthenticated endpoint)
+3. App downloads all public marker images and compiles a combined `.mind` file using MindAR
+4. AR scanner launches — recognizes any public marker (video plays or URL overlay appears)
+5. Exiting AR returns to Hello screen (not Home, since user is not logged in)
+
+#### 📡 New Backend Endpoints
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/api/targets/public` | None | Returns all public targets (image/video/URL) for guest scanning |
+
+#### 🗄️ DB Schema Changes
+
+New columns added to `ar_targets` (safe migrations for existing installs):
+```sql
+ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS target_type TEXT NOT NULL DEFAULT 'video';
+ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS url_link TEXT NOT NULL DEFAULT '';
+```
+
+#### 📁 New Files
+
+| File | Purpose |
+|---|---|
+| `webar-app/src/components/GoalSelectScreen.jsx` | Private/Public selection screen |
+| `webar-app/src/components/UploadTypeScreen.jsx` | Video or URL/Link selection screen |
+| `webar-app/src/components/UrlSetupScreen.jsx` | Photo + URL upload with compilation |
+| `webar-app/src/components/GuestScanScreen.jsx` | Guest scan: fetch public targets, compile, launch AR |
+
+#### ⚙️ Modified Files
+
+| File | Change |
+|---|---|
+| `HelloScreen.jsx` | Added scanner icon + SCAN AS GUEST button |
+| `SetupScreen.jsx` | Accepts `isPublic` prop, passes to `saveTargets` |
+| `useMindAR.js` | Handles URL targets — shows DOM overlay instead of video |
+| `useArStorage.js` | `saveTargets` accepts `isPublic`; `loadTargets` returns `targetType`/`urlLink`; new `loadPublicTargets()` |
+| `App.jsx` | New views: `goal-select`, `upload-type`, `url-setup`, `guest-scan`; `isGuest` state for AR exit routing |
+| `backend/main.go` | DB migrations, `saveTargetsHandler`/`getTargetsHandler` updated, `getPublicTargetsHandler` added |
+
+---
+
+
 
 #### 🎨 UI Redesign — Dark Teal Theme
 

@@ -10,7 +10,7 @@ function emptyCard(index) {
     videoFile: null, videoName: null, videoSize: null, aspectRatio: '16:9' };
 }
 
-export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSignOut, user }) {
+export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSignOut, user, isPublic = false }) {
   const [cards, setCards] = useState(() => initialCards?.length ? initialCards : [emptyCard(0)]);
   const [compileState, setCompileState] = useState('idle');
   const [compileProgress, setCompileProgress] = useState(0);
@@ -105,7 +105,7 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
 
       await saveTargets(targetsMeta, mindBuffer, freshVideoBlobs, freshImageBlobs, (pct) => {
         setCompileProgress(pct);
-      });
+      }, isPublic);
 
       setCompileState('finalizing'); setCompileProgress(0);
       const { targets, mindFileUrl } = await loadTargets();
@@ -136,7 +136,11 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
         </div>
         <div style={styles.divider} />
         <h1 style={styles.title}>Upload Your Files</h1>
-        <p style={styles.subtitle}>Upload a marker image and a video for each AR target</p>
+        <p style={styles.subtitle}>
+          {isPublic
+            ? 'PUBLIC — your AR targets will be visible to all guests when they scan'
+            : 'PRIVATE — only you can see these AR targets when you scan'}
+        </p>
       </div>
 
       {/* Cards */}

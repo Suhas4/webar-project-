@@ -161,6 +161,9 @@ func initDB(ctx context.Context) error {
 	// Safe migrations for existing installs
 	_, _ = db.Exec(ctx, `ALTER TABLE users ALTER COLUMN email DROP NOT NULL`)
 	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth TEXT`)
+	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT false`)
+	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS target_type TEXT NOT NULL DEFAULT 'video'`)
+	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS url_link TEXT NOT NULL DEFAULT ''`)
 
 	log.Println("DB connected and tables ready")
 	return nil
@@ -1063,8 +1066,11 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 			PlaneOffsetY float64 `json:"planeOffsetY"`
 			ImageKey     string  `json:"imageKey"`
 			VideoKey     string  `json:"videoKey"`
+			TargetType   string  `json:"targetType"`
+			URLLink      string  `json:"urlLink"`
 		} `json:"targets"`
-		MindKey string `json:"mindKey"`
+		MindKey  string `json:"mindKey"`
+		IsPublic bool   `json:"isPublic"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
@@ -1090,10 +1096,15 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i, t := range req.Targets {
+		targetType := t.TargetType
+		if targetType == "" {
+			targetType = "video"
+		}
 		_, err = tx.Exec(r.Context(), `
-			INSERT INTO ar_targets (user_id, target_index, label, plane_width, plane_height, plane_offset_y, image_key, video_key, mind_key)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+			INSERT INTO ar_targets (user_id, target_index, label, plane_width, plane_height, plane_offset_y, image_key, video_key, mind_key, is_public, target_type, url_link)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 			userID, i, t.Label, t.PlaneWidth, t.PlaneHeight, t.PlaneOffsetY, t.ImageKey, t.VideoKey, req.MindKey,
+			req.IsPublic, targetType, t.URLLink,
 		)
 		if err != nil {
 			log.Printf("[saveTargets] insert error: %v", err)
@@ -1125,7 +1136,8 @@ func getTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Query(r.Context(), `
-		SELECT target_index, label, plane_width, plane_height, plane_offset_y, image_key, video_key, mind_key
+		SELECT target_index, label, plane_width, plane_height, plane_offset_y, image_key, video_key, mind_key,
+		       COALESCE(target_type, 'video'), COALESCE(url_link, ''), COALESCE(is_public, false)
 		FROM ar_targets WHERE user_id=$1
 		ORDER BY target_index`, userID)
 	if err != nil {
@@ -1145,6 +1157,9 @@ func getTargetsHandler(w http.ResponseWriter, r *http.Request) {
 		ImageKey     string  `json:"imageKey"`
 		VideoKey     string  `json:"videoKey"`
 		MindKey      string  `json:"mindKey"`
+		TargetType   string  `json:"targetType"`
+		URLLink      string  `json:"urlLink"`
+		IsPublic     bool    `json:"isPublic"`
 	}
 
 	var targets []TargetResponse
@@ -1154,7 +1169,7 @@ func getTargetsHandler(w http.ResponseWriter, r *http.Request) {
 		var t TargetResponse
 		var imageKey, videoKey, mindKey string
 		if err := rows.Scan(&t.TargetIndex, &t.Label, &t.PlaneWidth, &t.PlaneHeight, &t.PlaneOffsetY,
-			&imageKey, &videoKey, &mindKey); err != nil {
+			&imageKey, &videoKey, &mindKey, &t.TargetType, &t.URLLink, &t.IsPublic); err != nil {
 			continue
 		}
 		t.ImageKey = imageKey
@@ -1178,6 +1193,57 @@ func getTargetsHandler(w http.ResponseWriter, r *http.Request) {
 		"mindUrl": mindURL,
 		"hasData": len(targets) > 0,
 	})
+}
+
+// GET /api/targets/public
+// Returns all public targets across all users (no auth required).
+func getPublicTargetsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	rows, err := db.Query(r.Context(), `
+		SELECT label, plane_width, plane_height, plane_offset_y,
+		       COALESCE(image_key,''), COALESCE(video_key,''),
+		       COALESCE(target_type,'video'), COALESCE(url_link,'')
+		FROM ar_targets WHERE is_public = true
+		ORDER BY id`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to fetch public targets")
+		return
+	}
+	defer rows.Close()
+
+	type PublicTarget struct {
+		Label        string  `json:"label"`
+		PlaneWidth   float64 `json:"planeWidth"`
+		PlaneHeight  float64 `json:"planeHeight"`
+		PlaneOffsetY float64 `json:"planeOffsetY"`
+		ImageURL     string  `json:"imageUrl"`
+		VideoURL     string  `json:"videoUrl"`
+		TargetType   string  `json:"targetType"`
+		URLLink      string  `json:"urlLink"`
+	}
+
+	var targets []PublicTarget
+	for rows.Next() {
+		var t PublicTarget
+		var imageKey, videoKey string
+		if err := rows.Scan(&t.Label, &t.PlaneWidth, &t.PlaneHeight, &t.PlaneOffsetY,
+			&imageKey, &videoKey, &t.TargetType, &t.URLLink); err != nil {
+			continue
+		}
+		t.ImageURL = fileURL(imageKey)
+		t.VideoURL = fileURL(videoKey)
+		targets = append(targets, t)
+	}
+	if targets == nil {
+		targets = []PublicTarget{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"targets": targets})
 }
 
 // DELETE /api/targets
@@ -1326,6 +1392,7 @@ func main() {
 
 	// AR targets
 	mux.HandleFunc("/api/targets/save", saveTargetsHandler)
+	mux.HandleFunc("/api/targets/public", getPublicTargetsHandler)
 	mux.HandleFunc("/api/targets", getTargetsHandler)
 	mux.HandleFunc("/api/targets/delete", deleteTargetsHandler)
 

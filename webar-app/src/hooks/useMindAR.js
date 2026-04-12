@@ -74,6 +74,7 @@ function loadMindAR(maxRetries = 3) {
 export function useMindAR(containerRef, onStatusChange, targetsOverride, mindFileUrlOverride) {
   const mindarThreeRef = useRef(null);
   const fullscreenVideosRef = useRef([]);
+  const urlOverlaysRef = useRef([]);
   const isStartedRef = useRef(false);
   const activeTargetsRef = useRef(new Set());
 
@@ -89,6 +90,12 @@ export function useMindAR(containerRef, onStatusChange, targetsOverride, mindFil
       try { document.body.removeChild(video); } catch (_) {}
     });
 
+    urlOverlaysRef.current.forEach((overlay) => {
+      if (!overlay) return;
+      overlay.style.display = 'none';
+      try { document.body.removeChild(overlay); } catch (_) {}
+    });
+
     try {
       if (mindarThreeRef.current) {
         mindarThreeRef.current.renderer.setAnimationLoop(null);
@@ -101,6 +108,7 @@ export function useMindAR(containerRef, onStatusChange, targetsOverride, mindFil
 
     mindarThreeRef.current = null;
     fullscreenVideosRef.current = [];
+    urlOverlaysRef.current = [];
     activeTargetsRef.current.clear();
   }, []);
 
@@ -153,26 +161,80 @@ export function useMindAR(containerRef, onStatusChange, targetsOverride, mindFil
       scene.add(new THREE.AmbientLight(0xffffff, 1.0));
 
       resolvedTargets.forEach((targetConfig) => {
-        const { targetIndex, videoUrl, planeWidth, planeHeight, planeOffsetY, label } = targetConfig;
+        const { targetIndex, videoUrl, targetType, urlLink, planeWidth, planeHeight, planeOffsetY, label } = targetConfig;
+        const isUrlTarget = targetType === 'url';
 
-        const fsVideo = document.createElement('video');
-        fsVideo.src = videoUrl;
-        fsVideo.loop = true;
-        fsVideo.muted = false;
-        fsVideo.setAttribute('playsinline', '');
-        fsVideo.setAttribute('webkit-playsinline', '');
-        fsVideo.preload = 'none';
-        Object.assign(fsVideo.style, {
-          position: 'fixed',
-          top: '0', left: '0',
-          width: '100%', height: '100%',
-          objectFit: 'cover',
-          zIndex: '5',
-          display: 'none',
-          background: '#000',
-        });
-        document.body.appendChild(fsVideo);
-        fullscreenVideosRef.current[targetIndex] = fsVideo;
+        let fsVideo = null;
+        let urlOverlay = null;
+
+        if (isUrlTarget) {
+          // Create a tap-to-open overlay for URL targets
+          urlOverlay = document.createElement('div');
+          Object.assign(urlOverlay.style, {
+            position: 'fixed', inset: '0',
+            background: 'rgba(6,26,31,0.92)',
+            zIndex: '6',
+            display: 'none',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '20px',
+          });
+          const labelEl = document.createElement('p');
+          Object.assign(labelEl.style, {
+            color: 'rgba(255,255,255,0.7)', fontSize: '14px',
+            fontFamily: 'Outfit, sans-serif', letterSpacing: '0.1em',
+            margin: '0', textAlign: 'center', padding: '0 24px',
+          });
+          labelEl.textContent = label || 'AR Target';
+          const openBtn = document.createElement('button');
+          Object.assign(openBtn.style, {
+            background: 'linear-gradient(135deg, #00C9A7, #00E5CC)',
+            border: 'none', borderRadius: '50px',
+            color: '#080C18', fontSize: '16px', fontWeight: '700',
+            fontFamily: 'Outfit, sans-serif', padding: '16px 40px',
+            cursor: 'pointer', letterSpacing: '0.05em',
+          });
+          openBtn.textContent = '🔗 OPEN LINK';
+          openBtn.addEventListener('click', () => {
+            const url = urlLink || '';
+            if (url) window.open(url.startsWith('http') ? url : 'https://' + url, '_blank', 'noopener');
+          });
+          const closeBtn = document.createElement('button');
+          Object.assign(closeBtn.style, {
+            background: 'transparent', border: '1px solid rgba(255,255,255,0.2)',
+            borderRadius: '50px', color: 'rgba(255,255,255,0.5)',
+            fontSize: '13px', fontFamily: 'Outfit, sans-serif',
+            padding: '10px 24px', cursor: 'pointer',
+          });
+          closeBtn.textContent = 'Close';
+          closeBtn.addEventListener('click', () => { urlOverlay.style.display = 'none'; });
+          urlOverlay.appendChild(labelEl);
+          urlOverlay.appendChild(openBtn);
+          urlOverlay.appendChild(closeBtn);
+          document.body.appendChild(urlOverlay);
+          urlOverlaysRef.current[targetIndex] = urlOverlay;
+        } else {
+          // Create fullscreen video element
+          fsVideo = document.createElement('video');
+          fsVideo.src = videoUrl;
+          fsVideo.loop = true;
+          fsVideo.muted = false;
+          fsVideo.setAttribute('playsinline', '');
+          fsVideo.setAttribute('webkit-playsinline', '');
+          fsVideo.preload = 'none';
+          Object.assign(fsVideo.style, {
+            position: 'fixed',
+            top: '0', left: '0',
+            width: '100%', height: '100%',
+            objectFit: 'cover',
+            zIndex: '5',
+            display: 'none',
+            background: '#000',
+          });
+          document.body.appendChild(fsVideo);
+          fullscreenVideosRef.current[targetIndex] = fsVideo;
+        }
 
         const geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
         const material = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 });
@@ -184,18 +246,22 @@ export function useMindAR(containerRef, onStatusChange, targetsOverride, mindFil
 
         anchor.onTargetFound = () => {
           console.log(`[useMindAR] Target found: ${label} (index ${targetIndex})`);
-          fsVideo.style.display = 'block';
-          fsVideo.currentTime = 0;
-          const playPromise = fsVideo.play();
-          if (playPromise !== undefined) {
-            playPromise.catch((err) => {
-              if (err.name === 'NotAllowedError') {
-                fsVideo.muted = true;
-                fsVideo.play().catch(() => {});
-              } else if (err.name !== 'AbortError') {
-                console.warn(`[useMindAR] video.play() failed:`, err.name, err.message);
-              }
-            });
+          if (isUrlTarget) {
+            urlOverlay.style.display = 'flex';
+          } else {
+            fsVideo.style.display = 'block';
+            fsVideo.currentTime = 0;
+            const playPromise = fsVideo.play();
+            if (playPromise !== undefined) {
+              playPromise.catch((err) => {
+                if (err.name === 'NotAllowedError') {
+                  fsVideo.muted = true;
+                  fsVideo.play().catch(() => {});
+                } else if (err.name !== 'AbortError') {
+                  console.warn(`[useMindAR] video.play() failed:`, err.name, err.message);
+                }
+              });
+            }
           }
           activeTargetsRef.current.add(targetIndex);
           onStatusChange('tracking');
@@ -203,8 +269,12 @@ export function useMindAR(containerRef, onStatusChange, targetsOverride, mindFil
 
         anchor.onTargetLost = () => {
           console.log(`[useMindAR] Target lost: ${label} (index ${targetIndex})`);
-          fsVideo.pause();
-          fsVideo.style.display = 'none';
+          if (isUrlTarget) {
+            urlOverlay.style.display = 'none';
+          } else {
+            fsVideo.pause();
+            fsVideo.style.display = 'none';
+          }
           activeTargetsRef.current.delete(targetIndex);
           if (activeTargetsRef.current.size === 0) {
             onStatusChange('ready');
