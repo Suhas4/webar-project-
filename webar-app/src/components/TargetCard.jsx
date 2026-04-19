@@ -66,10 +66,8 @@ export default function TargetCard({ index, data, onChange, onRemove, showValida
     handleVideoFile(e.dataTransfer.files[0]);
   }, [handleVideoFile]);
 
-  const ASPECT_OPTIONS = ['16:9', '4:3', '1:1', '9:16'];
   const imageMissing = showValidation && !data.imageFile;
   const videoMissing = showValidation && !data.videoFile;
-
   return (
     <div style={styles.card}>
       {/* Camera/Files picker sheets */}
@@ -182,17 +180,6 @@ export default function TargetCard({ index, data, onChange, onRemove, showValida
         style={{ display: 'none' }}
         onChange={(e) => handleVideoFile(e.target.files[0])}
         onClick={(e) => { e.target.value = ''; }} />
-
-      {/* Aspect Ratio */}
-      <p style={{ ...styles.fieldLabel, marginTop: 16 }}>Video Aspect Ratio<span style={styles.fieldHint}> — match your video's dimensions</span></p>
-      <div style={styles.aspectRow}>
-        {ASPECT_OPTIONS.map((ratio) => (
-          <button key={ratio} onClick={() => onChange({ aspectRatio: ratio })}
-            style={{ ...styles.aspectButton, ...(data.aspectRatio === ratio ? styles.aspectButtonActive : {}) }}>
-            {ratio}
-          </button>
-        ))}
-      </div>
     </div>
   );
 }

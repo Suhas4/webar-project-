@@ -11,12 +11,12 @@ import HelloScreen from './components/HelloScreen.jsx';
 import HomeScreen from './components/HomeScreen.jsx';
 import ProfileScreen from './components/ProfileScreen.jsx';
 import GalleryScreen from './components/GalleryScreen.jsx';
+import SettingsScreen from './components/SettingsScreen.jsx';
 import GoalSelectScreen from './components/GoalSelectScreen.jsx';
 import UploadTypeScreen from './components/UploadTypeScreen.jsx';
 import UrlSetupScreen from './components/UrlSetupScreen.jsx';
 import GuestScanScreen from './components/GuestScanScreen.jsx';
 import UserScanScreen from './components/UserScanScreen.jsx';
-import DiscLoadingOverlay from './components/DiscLoadingOverlay.jsx';
 import VideoOverlay from './components/VideoOverlay.jsx';
 import { loadTargets } from './hooks/useArStorage.js';
 
@@ -33,15 +33,37 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState('');
   const [targets, setTargets] = useState(null);
   const [mindFileUrl, setMindFileUrl] = useState(null);
-  const [initialCards] = useState(null); // always null — each upload starts fresh
+  const [initialCards] = useState(null);
   const [cloudTargets, setCloudTargets] = useState(null);
-  const [videoOverlay, setVideoOverlay] = useState(null); // { src, next }
-  const [showDiscLoading, setShowDiscLoading] = useState(false);
-  // Upload flow: visibility + type chosen before SetupScreen
-  const [selectedVisibility, setSelectedVisibility] = useState('private'); // 'public' | 'private'
-  // Guest mode: AR exit returns to 'hello' instead of 'home'
+  const [videoOverlay, setVideoOverlay] = useState(null);
+  const [selectedVisibility, setSelectedVisibility] = useState('private');
   const [isGuest, setIsGuest] = useState(false);
   const activeBlobUrlsRef = useRef([]);
+
+  // Point 2: push a history entry on every view change so the browser back
+  // button triggers popstate instead of leaving the site.
+  useEffect(() => {
+    window.history.pushState({ view: appView }, '');
+  }, [appView]);
+
+  useEffect(() => {
+    const handlePop = (e) => {
+      const view = e.state?.view;
+      if (view === 'home' || !view) {
+        // Already on home or no state — confirm before exit
+        if (window.confirm('Are you sure you want to exit?')) {
+          window.history.back();
+        } else {
+          window.history.pushState({ view: 'home' }, '');
+        }
+      } else {
+        setAppView('home');
+        window.history.pushState({ view: 'home' }, '');
+      }
+    };
+    window.addEventListener('popstate', handlePop);
+    return () => window.removeEventListener('popstate', handlePop);
+  }, []);
 
   useEffect(() => {
     if (!hasToken) return;
@@ -79,11 +101,11 @@ export default function App() {
     activeBlobUrlsRef.current.forEach((u) => { try { URL.revokeObjectURL(u); } catch(_){} });
     activeBlobUrlsRef.current = [m, ...t.map((x) => x.videoUrl).filter(Boolean)].filter(Boolean);
     setTargets(t); setMindFileUrl(m); setArStatus('idle'); setErrorMessage('');
-    setShowDiscLoading(true);
+    setAppView('ar');
   }, []);
 
   const handleDiscLoadingDone = useCallback(() => {
-    setShowDiscLoading(false); setAppView('ar');
+    setAppView('ar');
   }, []);
 
   const handleLaunchSaved = useCallback(() => {
@@ -113,9 +135,6 @@ export default function App() {
   if (videoOverlay) {
     return <VideoOverlay key={videoOverlay.src} src={videoOverlay.src} onDone={handleVideoOverlayDone} />;
   }
-  if (showDiscLoading) {
-    return <DiscLoadingOverlay onDone={handleDiscLoadingDone} />;
-  }
   if (appView === 'splash') return <SplashScreen onDone={() => setAppView('hello')} />;
   if (appView === 'hello') return (
     <HelloScreen
@@ -134,8 +153,9 @@ export default function App() {
   if (appView === 'signup') return <SignUpScreen onSuccess={handleSignUp} onBack={() => setAppView('hello')} onOtpFail={handleOtpFail} />;
   if (appView === 'forgot') return <ForgotPasswordScreen onBack={() => setAppView('signin')} onSuccess={handleSignIn} />;
   if (appView === 'welcome') return <WelcomeScreen onDone={() => setAppView('home')} user={currentUser} />;
-  if (appView === 'profile') return <ProfileScreen user={currentUser} onBack={() => setAppView('home')} />;
+  if (appView === 'profile') return <ProfileScreen user={currentUser} onBack={() => setAppView('home')} onUserUpdate={(u) => { setCurrentUser(u); localStorage.setItem('memoera_user', JSON.stringify(u)); }} />;
   if (appView === 'gallery') return <GalleryScreen onBack={() => setAppView('home')} />;
+  if (appView === 'settings') return <SettingsScreen onBack={() => setAppView('home')} />;
   if (appView === 'goal-select') return (
     <GoalSelectScreen
       onPrivate={handleGoalPrivate}
@@ -168,6 +188,7 @@ export default function App() {
       onUpload={() => setAppView('goal-select')}
       onProfile={() => setAppView('profile')}
       onGallery={() => setAppView('gallery')}
+      onSettings={() => setAppView('settings')}
       onSignOut={handleSignOut}
       user={currentUser}
     />

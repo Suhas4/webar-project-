@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -40,6 +41,7 @@ type User struct {
 	Mobile           string `json:"mobile"`
 	Email            string `json:"email,omitempty"`
 	DateOfBirth      string `json:"dateOfBirth,omitempty"`
+	ProfilePhotoURL  string `json:"profilePhotoUrl,omitempty"`
 	PasswordHash     string `json:"-"`
 	SecurityQuestion string `json:"securityQuestion"`
 	SecurityAnswer   string `json:"-"`
@@ -161,6 +163,7 @@ func initDB(ctx context.Context) error {
 	// Safe migrations for existing installs
 	_, _ = db.Exec(ctx, `ALTER TABLE users ALTER COLUMN email DROP NOT NULL`)
 	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth TEXT`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_photo_url TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT false`)
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS target_type TEXT NOT NULL DEFAULT 'video'`)
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS url_link TEXT NOT NULL DEFAULT ''`)
@@ -598,9 +601,11 @@ func signInHandler(w http.ResponseWriter, r *http.Request) {
 
 	var user User
 	err := db.QueryRow(r.Context(), `
-		SELECT id, mobile, first_name, last_name, password_hash, security_question, COALESCE(date_of_birth,'')
+		SELECT id, mobile, first_name, last_name, password_hash, security_question,
+		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,'')
 		FROM users WHERE mobile=$1`, mobile,
-	).Scan(&user.ID, &user.Mobile, &user.FirstName, &user.LastName, &user.PasswordHash, &user.SecurityQuestion, &user.DateOfBirth)
+	).Scan(&user.ID, &user.Mobile, &user.FirstName, &user.LastName, &user.PasswordHash,
+		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusUnauthorized, "Invalid mobile number or password")
@@ -810,15 +815,108 @@ func getMeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	var user User
 	err = db.QueryRow(r.Context(), `
-		SELECT id, mobile, first_name, last_name, security_question, COALESCE(date_of_birth,'')
+		SELECT id, mobile, first_name, last_name, security_question,
+		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,'')
 		FROM users WHERE id=$1`, userID,
-	).Scan(&user.ID, &user.Mobile, &user.FirstName, &user.LastName, &user.SecurityQuestion, &user.DateOfBirth)
+	).Scan(&user.ID, &user.Mobile, &user.FirstName, &user.LastName,
+		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "User not found")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(user)
+}
+
+// PUT /api/auth/profile — update profile fields (firstName, lastName, dateOfBirth)
+func updateProfileHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	var req struct {
+		FirstName   string `json:"firstName"`
+		LastName    string `json:"lastName"`
+		DateOfBirth string `json:"dateOfBirth"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	_, err = db.Exec(r.Context(),
+		`UPDATE users SET first_name=$1, last_name=$2, date_of_birth=$3 WHERE id=$4`,
+		req.FirstName, req.LastName, req.DateOfBirth, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update profile")
+		return
+	}
+	var user User
+	_ = db.QueryRow(r.Context(), `
+		SELECT id, mobile, first_name, last_name, security_question,
+		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,'')
+		FROM users WHERE id=$1`, userID,
+	).Scan(&user.ID, &user.Mobile, &user.FirstName, &user.LastName,
+		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(user)
+}
+
+// PUT /api/auth/profile/photo — receive base64 image, upload to R2 server-side, save public URL
+func updateProfilePhotoHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	var req struct {
+		ImageBase64 string `json:"imageBase64"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ImageBase64 == "" {
+		writeError(w, http.StatusBadRequest, "imageBase64 is required")
+		return
+	}
+	imgData, err := base64.StdEncoding.DecodeString(req.ImageBase64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid base64 image")
+		return
+	}
+	key := fmt.Sprintf("users/%d/profile/photo-%d.jpg", userID, time.Now().UnixMilli())
+	if s3Client == nil {
+		writeError(w, http.StatusInternalServerError, "Storage not configured")
+		return
+	}
+	bucket := os.Getenv("R2_BUCKET_NAME")
+	contentType := "image/jpeg"
+	_, err = s3Client.PutObject(r.Context(), &s3.PutObjectInput{
+		Bucket:      &bucket,
+		Key:         &key,
+		Body:        bytes.NewReader(imgData),
+		ContentType: &contentType,
+	})
+	if err != nil {
+		log.Printf("[profilePhoto] R2 upload error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to upload image")
+		return
+	}
+	publicBase := os.Getenv("R2_PUBLIC_URL")
+	photoUrl := publicBase + "/" + key
+	_, err = db.Exec(r.Context(),
+		`UPDATE users SET profile_photo_url=$1 WHERE id=$2`, photoUrl, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to save photo URL")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"photoUrl": photoUrl})
 }
 
 // ─── Upload Handlers ──────────────────────────────────────────────────────────
@@ -1396,8 +1494,10 @@ func main() {
 	mux.HandleFunc("/api/auth/verify-otp", verifyOTPHandler)
 	mux.HandleFunc("/api/auth/reset-password", resetPasswordHandler)
 
-	// Me
+	// Me + profile update
 	mux.HandleFunc("/api/me", getMeHandler)
+	mux.HandleFunc("/api/auth/profile", updateProfileHandler)
+	mux.HandleFunc("/api/auth/profile/photo", updateProfilePhotoHandler)
 
 	// File upload (presigned URLs + multipart)
 	mux.HandleFunc("/api/upload/presign", presignUploadHandler)

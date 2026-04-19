@@ -77,10 +77,18 @@ export function useMindAR(containerRef, onStatusChange, targetsOverride, mindFil
   const urlOverlaysRef = useRef([]);
   const isStartedRef = useRef(false);
   const activeTargetsRef = useRef(new Set());
+  const lockedRef = useRef(false);
+
+  const pauseAllVideos = useCallback(() => {
+    fullscreenVideosRef.current.forEach((v) => { if (!v) return; v.pause(); v.style.display = 'none'; });
+    urlOverlaysRef.current.forEach((o) => { if (!o) return; o.style.display = 'none'; });
+    activeTargetsRef.current.clear();
+  }, []);
 
   const stop = useCallback(async () => {
     if (!isStartedRef.current && !mindarThreeRef.current) return;
     isStartedRef.current = false;
+    lockedRef.current = false;
 
     fullscreenVideosRef.current.forEach((video) => {
       if (!video) return;
@@ -269,6 +277,10 @@ export function useMindAR(containerRef, onStatusChange, targetsOverride, mindFil
 
         anchor.onTargetLost = () => {
           console.log(`[useMindAR] Target lost: ${label} (index ${targetIndex})`);
+          if (!isUrlTarget && lockedRef.current) {
+            // Keep playing — user has locked the video
+            return;
+          }
           if (isUrlTarget) {
             urlOverlay.style.display = 'none';
           } else {
@@ -311,7 +323,7 @@ export function useMindAR(containerRef, onStatusChange, targetsOverride, mindFil
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetsOverride, mindFileUrlOverride]);
 
-  return { stop };
+  return { stop, lockedRef, pauseAllVideos };
 }
 
 function getCameraErrorMessage(err) {

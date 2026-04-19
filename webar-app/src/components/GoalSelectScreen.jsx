@@ -1,9 +1,22 @@
+import { useState } from "react";
+
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const GOLD = "#C9A84C";
 
 export default function GoalSelectScreen({ onPrivate, onPublic, onBack }) {
+  const [showGuide, setShowGuide] = useState(false);
   return (
     <div style={s.screen}>
+      {showGuide && (
+        <div style={s.modalOverlay} onClick={() => setShowGuide(false)}>
+          <div style={s.modal} onClick={e => e.stopPropagation()}>
+            <h3 style={s.modalTitle}>Guide — Select Your Goal</h3>
+            <p style={s.modalText}><strong style={{color:GOLD}}>PRIVATE</strong> — Your AR targets are only visible to you when you scan. Use this for personal memories or confidential content.</p>
+            <p style={s.modalText}><strong style={{color:GOLD}}>PUBLIC</strong> — Your AR targets are visible to all users and guests when they scan. Use this for marketing, events, or shared experiences.</p>
+            <button style={s.modalClose} onClick={() => setShowGuide(false)}>Close</button>
+          </div>
+        </div>
+      )}
       <div style={s.watermark}>
         <img src="/logo.png" alt="" style={s.watermarkImg} />
       </div>
@@ -28,10 +41,12 @@ export default function GoalSelectScreen({ onPrivate, onPublic, onBack }) {
       </div>
 
       <div style={s.guideArea}>
-        <div style={s.guideDot}>
-          <span style={s.guideI}>i</span>
-        </div>
-        <span style={s.guideLabel}>GUIDE</span>
+        <button onClick={() => setShowGuide(true)} style={s.guideBtn}>
+          <div style={s.guideDot}>
+            <span style={s.guideI}>i</span>
+          </div>
+          <span style={s.guideLabel}>GUIDE</span>
+        </button>
       </div>
     </div>
   );
@@ -106,6 +121,10 @@ const s = {
     display: "flex", flexDirection: "column", alignItems: "center",
     alignSelf: "flex-end", padding: "0 28px 32px",
   },
+  guideBtn: {
+    background: "transparent", border: "none", cursor: "pointer",
+    display: "flex", flexDirection: "column", alignItems: "center",
+  },
   guideDot: {
     width: 44, height: 44, borderRadius: "50%",
     border: "2px solid rgba(255,255,255,0.7)",
@@ -118,5 +137,27 @@ const s = {
   guideLabel: {
     fontSize: 10, color: "rgba(255,255,255,0.55)", fontFamily: FONT,
     letterSpacing: "0.15em", marginTop: 4,
+  },
+  modalOverlay: {
+    position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
+    backdropFilter: "blur(4px)", zIndex: 100,
+    display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+  },
+  modal: {
+    background: "#0A2229", border: "1px solid rgba(201,168,76,0.3)",
+    borderRadius: 20, padding: "28px 24px", maxWidth: 360, width: "100%",
+  },
+  modalTitle: {
+    fontSize: 18, fontWeight: 700, color: "#fff", fontFamily: FONT,
+    margin: "0 0 16px",
+  },
+  modalText: {
+    fontSize: 14, color: "rgba(255,255,255,0.75)", fontFamily: FONT,
+    lineHeight: 1.7, margin: "0 0 12px",
+  },
+  modalClose: {
+    marginTop: 8, width: "100%", background: GOLD, border: "none",
+    borderRadius: 50, color: "#000", fontSize: 14, fontWeight: 700,
+    fontFamily: FONT, padding: "12px", cursor: "pointer",
   },
 };

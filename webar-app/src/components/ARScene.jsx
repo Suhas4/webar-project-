@@ -1,53 +1,57 @@
-import { useRef } from 'react';
+import { useRef, useState, useCallback } from 'react';
 import { useMindAR } from '../hooks/useMindAR.js';
 
-/**
- * ARScene — Full-screen container that hosts the MindAR + Three.js AR experience.
- *
- * MindAR.js injects two elements into the container div at runtime:
- *   • A <video> element showing the live camera feed (background)
- *   • A <canvas> element where Three.js renders the AR video overlays
- *
- * Both are absolutely positioned to fill the container.
- * Our React UI (LoadingScreen) sits above them via z-index.
- *
- * ⚠️  Do NOT render React children inside the container div.
- *     MindAR manages its own DOM children and will conflict with React's
- *     virtual DOM reconciliation.
- *
- * @param {{
- *   onStatusChange: (status: string, message?: string) => void,
- *   targets: Array|null,       — runtime targets from user uploads (null = use static config)
- *   mindFileUrl: string|null,  — blob URL or static path to .mind file
- * }} props
- */
 export default function ARScene({ onStatusChange, targets, mindFileUrl }) {
   const containerRef = useRef(null);
+  const [isTracking, setIsTracking] = useState(false);
+  const [isLocked, setIsLocked] = useState(false);
 
-  // The hook owns ALL MindAR + Three.js state.
-  // It reads containerRef to inject the camera feed and canvas,
-  // and calls onStatusChange to report lifecycle events up to App.
-  // targets + mindFileUrl are passed through for runtime asset switching.
-  useMindAR(containerRef, onStatusChange, targets, mindFileUrl);
+  const handleStatusChange = useCallback((status, msg) => {
+    setIsTracking(status === 'tracking');
+    onStatusChange(status, msg);
+  }, [onStatusChange]);
+
+  const { lockedRef, pauseAllVideos } = useMindAR(containerRef, handleStatusChange, targets, mindFileUrl);
+
+  const handleToggleLock = () => {
+    if (isLocked) {
+      lockedRef.current = false;
+      setIsLocked(false);
+      pauseAllVideos();
+      onStatusChange('ready');
+    } else {
+      lockedRef.current = true;
+      setIsLocked(true);
+    }
+  };
 
   return (
-    <div
-      ref={containerRef}
-      style={{
-        // Fixed + full-viewport so the camera feed fills the screen
-        position: 'fixed',
-        top: 0,
-        left: 0,
-        width: '100%',
-        height: '100%',
-        overflow: 'hidden',
-
-        // Background layer — LoadingScreen and any future UI sit above this
-        zIndex: 0,
-
-        // Black background while camera initializes
-        background: '#000',
-      }}
-    />
+    <>
+      <div
+        ref={containerRef}
+        style={{
+          position: 'fixed', top: 0, left: 0,
+          width: '100%', height: '100%',
+          overflow: 'hidden', zIndex: 0, background: '#000',
+        }}
+      />
+      {(isTracking || isLocked) && (
+        <div style={{
+          position: 'fixed', bottom: 48, left: '50%',
+          transform: 'translateX(-50%)', zIndex: 10, pointerEvents: 'auto',
+        }}>
+          <button onClick={handleToggleLock} style={{
+            background: isLocked ? 'rgba(201,168,76,0.92)' : 'rgba(0,201,167,0.92)',
+            border: 'none', borderRadius: 50,
+            color: '#000', fontSize: 15, fontWeight: 700,
+            fontFamily: 'Outfit, sans-serif', padding: '13px 30px',
+            cursor: 'pointer', boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+            letterSpacing: '0.03em', whiteSpace: 'nowrap',
+          }}>
+            {isLocked ? '📷 Back to Scan' : '▶ Keep Playing'}
+          </button>
+        </div>
+      )}
+    </>
   );
 }

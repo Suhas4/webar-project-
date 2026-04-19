@@ -3,11 +3,10 @@ import TargetCard from './TargetCard.jsx';
 import UploadProgressOverlay from './UploadProgressOverlay.jsx';
 import { saveTargets } from '../hooks/useArStorage.js';
 
-const ASPECT_MAP = { '16:9': 0.5625, '4:3': 0.75, '1:1': 1.0, '9:16': 1.7778 };
 
 function emptyCard(index) {
   return { label: `Target ${index + 1}`, imageFile: null, imagePreviewUrl: null,
-    videoFile: null, videoName: null, videoSize: null, aspectRatio: '16:9' };
+    videoFile: null, videoName: null, videoSize: null };
 }
 
 export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSignOut, user, isPublic = false }) {
@@ -86,7 +85,7 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
       const mindBuffer = await compiler.exportData();
       const targetsMeta = cards.map((card) => ({
         label: card.label, planeWidth: 1,
-        planeHeight: ASPECT_MAP[card.aspectRatio] ?? 0.5625, planeOffsetY: 0,
+        planeHeight: 0.5625, planeOffsetY: 0,
       }));
       setCompileState('uploading'); setCompileProgress(0);
 

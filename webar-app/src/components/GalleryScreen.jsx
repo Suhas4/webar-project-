@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { loadTargets, clearTargets } from "../hooks/useArStorage.js";
+import { loadTargets } from "../hooks/useArStorage.js";
 import { API_BASE } from "../config/api.js";
 
 export default function GalleryScreen({ onBack }) {
@@ -13,12 +13,6 @@ export default function GalleryScreen({ onBack }) {
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
-
-  const handleDelete = async (index) => {
-    if (!confirm("Delete all uploaded targets?")) return;
-    await clearTargets();
-    setTargets([]);
-  };
 
   if (playingVideo) {
     return (
@@ -55,7 +49,6 @@ export default function GalleryScreen({ onBack }) {
                   {t.videoUrl && (
                     <button style={styles.playBtn} onClick={() => setPlayingVideo(t.videoUrl)}>Play</button>
                   )}
-                  <button style={styles.deleteBtn} onClick={() => handleDelete(i)}>Delete</button>
                 </div>
               </div>
             </div>

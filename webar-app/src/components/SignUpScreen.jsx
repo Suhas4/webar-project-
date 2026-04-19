@@ -122,9 +122,12 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
                     placeholder="Re-enter password" value={form.confirmPassword} onChange={set('confirmPassword')} />
                 </Field>
                 <Field label="Security Question">
-                  <select style={{ ...S.input, cursor:'pointer' }} value={form.securityQuestion} onChange={set('securityQuestion')}>
-                    {SECURITY_QUESTIONS.map(q => <option key={q} value={q} style={{ background:'#0d1220', color:'#fff' }}>{q}</option>)}
-                  </select>
+                  <div style={{ position: 'relative' }}>
+                    <select style={{ ...S.input, cursor:'pointer', paddingRight: 32, appearance: 'none', WebkitAppearance: 'none' }} value={form.securityQuestion} onChange={set('securityQuestion')}>
+                      {SECURITY_QUESTIONS.map(q => <option key={q} value={q} style={{ background:'#0d1220', color:'#fff' }}>{q}</option>)}
+                    </select>
+                    <span style={{ position:'absolute', right:12, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', color:'rgba(255,255,255,0.5)', fontSize:12 }}>▼</span>
+                  </div>
                 </Field>
                 <Field label="Security Answer">
                   <input style={S.input} type="text" placeholder="Your answer" value={form.securityAnswer} onChange={set('securityAnswer')} />

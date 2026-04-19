@@ -33,6 +33,12 @@ export default defineConfig({
     headers: {
       'ngrok-skip-browser-warning': 'true',
     },
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8181',
+        changeOrigin: true,
+      },
+    },
   },
 
   optimizeDeps: {

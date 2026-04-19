@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import UploadProgressOverlay from './UploadProgressOverlay.jsx';
 import { saveTargets } from '../hooks/useArStorage.js';
 
@@ -192,6 +192,9 @@ export default function UrlSetupScreen({ onStart, onSignOut, isPublic }) {
 function UrlTargetCard({ index, card, showValidation, onImageFile, onUrlChange, onRemove }) {
   const imageMissing = showValidation && !card.imageFile;
   const urlMissing = showValidation && !card.urlLink.trim();
+  const cameraInputRef = useRef(null);
+  const galleryInputRef = useRef(null);
+  const [showPicker, setShowPicker] = useState(false);
 
   return (
     <div style={card_s.card}>
@@ -205,11 +208,37 @@ function UrlTargetCard({ index, card, showValidation, onImageFile, onUrlChange, 
       </div>
 
       <p style={card_s.label}>Marker Image<span style={card_s.hint}> &mdash; the image your camera will detect</span></p>
+      {showPicker && (
+        <>
+          <div style={picker.backdrop} onClick={() => setShowPicker(false)} />
+          <div style={picker.sheet}>
+            <div style={picker.handle} />
+            <p style={picker.title}>Select Marker Image</p>
+            <button style={picker.optionBtn} onClick={() => { setShowPicker(false); cameraInputRef.current?.click(); }}>
+              <span style={picker.optionIcon}>📷</span>
+              <div><p style={picker.optionLabel}>Camera</p><p style={picker.optionHint}>Take a photo</p></div>
+            </button>
+            <button style={picker.optionBtn} onClick={() => { setShowPicker(false); galleryInputRef.current?.click(); }}>
+              <span style={picker.optionIcon}>📁</span>
+              <div><p style={picker.optionLabel}>Files</p><p style={picker.optionHint}>Choose from device</p></div>
+            </button>
+            <button style={picker.cancelBtn} onClick={() => setShowPicker(false)}>Cancel</button>
+          </div>
+        </>
+      )}
+      <input ref={cameraInputRef} type="file" accept="image/jpeg,image/png,image/webp"
+        capture="environment" style={{ display: 'none' }}
+        onChange={(e) => onImageFile(e.target.files[0])}
+        onClick={(e) => { e.target.value = ''; }} />
+      <input ref={galleryInputRef} type="file" accept="image/jpeg,image/png,image/webp"
+        style={{ display: 'none' }}
+        onChange={(e) => onImageFile(e.target.files[0])}
+        onClick={(e) => { e.target.value = ''; }} />
       <div
         style={{ ...card_s.zone, ...(imageMissing ? card_s.zoneError : {}), height: card.imagePreviewUrl ? 'auto' : 80, padding: card.imagePreviewUrl ? 8 : '0 16px' }}
-        onClick={() => document.getElementById(`url-img-${index}`)?.click()}
+        onClick={() => setShowPicker(true)}
         role="button" tabIndex={0}
-        onKeyDown={(e) => e.key === 'Enter' && document.getElementById(`url-img-${index}`)?.click()}>
+        onKeyDown={(e) => e.key === 'Enter' && setShowPicker(true)}>
         {card.imagePreviewUrl ? (
           <div style={card_s.previewRow}>
             <img src={card.imagePreviewUrl} alt="Marker" style={card_s.preview} />
@@ -225,14 +254,6 @@ function UrlTargetCard({ index, card, showValidation, onImageFile, onUrlChange, 
           </div>
         )}
       </div>
-      <input
-        id={`url-img-${index}`}
-        type="file" accept="image/jpeg,image/png,image/webp"
-        style={{ display: 'none' }}
-        onChange={(e) => onImageFile(e.target.files[0])}
-        onClick={(e) => { e.target.value = ''; }}
-      />
-
       <p style={{ ...card_s.label, marginTop: 16 }}>URL / Link<span style={card_s.hint}> &mdash; opens when marker is scanned</span></p>
       <input
         type="url"
@@ -251,6 +272,18 @@ const TEAL = '#00C9A7';
 const CYAN = '#00E5CC';
 const BG = '#080C18';
 const BORDER = 'rgba(0,201,167,0.28)';
+
+const picker = {
+  backdrop: { position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',backdropFilter:'blur(4px)',WebkitBackdropFilter:'blur(4px)',zIndex:1000 },
+  sheet: { position:'fixed',bottom:0,left:0,right:0,background:'#0E1628',border:'1px solid rgba(0,201,167,0.2)',borderBottom:'none',borderRadius:'24px 24px 0 0',padding:'12px 20px 40px',zIndex:1001,display:'flex',flexDirection:'column',gap:10 },
+  handle: { width:40,height:4,borderRadius:2,background:'rgba(255,255,255,0.2)',alignSelf:'center',marginBottom:8 },
+  title: { fontSize:15,fontWeight:600,fontFamily:FONT,color:'rgba(255,255,255,0.7)',textAlign:'center',margin:'0 0 8px' },
+  optionBtn: { display:'flex',alignItems:'center',gap:16,background:'rgba(0,201,167,0.06)',border:'1px solid rgba(0,201,167,0.2)',borderRadius:16,padding:'14px 18px',cursor:'pointer',textAlign:'left',width:'100%' },
+  optionIcon: { fontSize:28,flexShrink:0 },
+  optionLabel: { fontSize:15,fontWeight:600,fontFamily:FONT,color:'#fff',margin:0 },
+  optionHint: { fontSize:12,fontFamily:FONT,color:'rgba(255,255,255,0.35)',margin:'2px 0 0' },
+  cancelBtn: { marginTop:4,background:'transparent',border:'1px solid rgba(255,255,255,0.1)',borderRadius:16,padding:14,color:'rgba(255,255,255,0.4)',fontSize:15,fontFamily:FONT,cursor:'pointer',width:'100%' },
+};
 
 const styles = {
   screen: {
