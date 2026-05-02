@@ -1,20 +1,52 @@
+﻿import { useLanguage } from '../context/LanguageContext.jsx';
+import { LANGUAGES, T } from '../config/translations.js';
+import { useTheme } from '../context/ThemeContext.jsx';
+
 export default function HelloScreen({ onCreateAccount, onExisting, onGuestScan }) {
+  const { lang, setLang } = useLanguage();
+  const { colors } = useTheme();
+  const s = T[lang] || T.en;
+
   return (
-    <div style={styles.screen}>
+    <div style={{ ...styles.screen, background: colors.bg }}>
+      <style dangerouslySetInnerHTML={{ __html: `
+        @keyframes heartbeat {
+          0%,100% { transform: scale(1); }
+          14%      { transform: scale(1.12); }
+          28%      { transform: scale(1); }
+          42%      { transform: scale(1.08); }
+          56%      { transform: scale(1); }
+        }
+      ` }} />
+
       <div style={styles.watermark}>
         <img src="/logo.png" alt="" style={styles.watermarkImg} />
       </div>
-      <div style={styles.helloWrap}>
-        <h1 style={styles.hello}>HELLO</h1>
+
+      {/* Language selector — top right */}
+      <div style={styles.langRow}>
+        <select value={lang} onChange={(e) => setLang(e.target.value)}
+          style={{ ...styles.langSelect, color: colors.textMuted, borderColor: colors.border, background: 'transparent' }}>
+          {Object.entries(LANGUAGES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
       </div>
+
+      <div style={styles.helloWrap}>
+        <h1 style={{ ...styles.hello, color: colors.text }}>{s.hello}</h1>
+      </div>
+
+      {/* Heartbeat scan area */}
       <div style={styles.scanArea} onClick={onGuestScan} role="button" tabIndex={0}
         onKeyDown={(e) => e.key === "Enter" && onGuestScan?.()}>
-        <ScanIcon />
-        <span style={styles.scanLabel}>SCAN AS GUEST</span>
+        <div style={styles.heartbeatWrap}>
+          <ScanIcon />
+        </div>
+        <span style={{ ...styles.scanLabel, color: colors.textMuted }}>{s.scanAsGuest}</span>
       </div>
+
       <div style={styles.buttons}>
-        <button onClick={onCreateAccount} style={styles.createBtn}>CREATE NEW ACCOUNT</button>
-        <button onClick={onExisting} style={styles.existingBtn}>EXISTING ACCOUNT</button>
+        <button onClick={onCreateAccount} style={{ ...styles.createBtn, borderColor: colors.text, color: colors.text }}>{s.createAccount}</button>
+        <button onClick={onExisting} style={{ ...styles.existingBtn, background: colors.text, color: colors.bg }}>{s.existingAccount}</button>
       </div>
     </div>
   );
@@ -34,26 +66,17 @@ function ScanIcon() {
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const styles = {
-  screen: { position:"fixed",inset:0,
-    background:"linear-gradient(160deg, #061A1F 0%, #0A2229 50%, #061820 100%)",
-    display:"flex",flexDirection:"column",overflow:"hidden" },
+  screen: { position:"fixed",inset:0,display:"flex",flexDirection:"column",overflow:"hidden" },
   watermark: { position:"absolute",right:-40,top:"8%",width:"75vw",maxWidth:340,opacity:0.12,pointerEvents:"none" },
   watermarkImg: { width:"100%",filter:"brightness(0) invert(1)" },
-  helloWrap: { padding:"56px 32px 0",flexShrink:0 },
-  hello: { fontSize:54,fontWeight:700,fontFamily:FONT,color:"#ffffff",letterSpacing:2,margin:0 },
-  scanArea: {
-    flex:1, display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
-    cursor:"pointer",userSelect:"none",
-  },
-  scanLabel: {
-    fontSize:13,fontWeight:500,color:"rgba(255,255,255,0.65)",fontFamily:FONT,
-    letterSpacing:"0.2em",marginTop:18,
-  },
+  langRow: { padding:"52px 24px 0",display:"flex",justifyContent:"flex-end",flexShrink:0,zIndex:1 },
+  langSelect: { border:"1px solid",borderRadius:20,fontSize:13,fontFamily:FONT,padding:"6px 14px",cursor:"pointer",outline:"none" },
+  helloWrap: { padding:"12px 32px 0",flexShrink:0 },
+  hello: { fontSize:54,fontWeight:700,fontFamily:FONT,letterSpacing:2,margin:0 },
+  scanArea: { flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",userSelect:"none" },
+  heartbeatWrap: { animation:"heartbeat 1.8s ease-in-out infinite" },
+  scanLabel: { fontSize:13,fontWeight:500,fontFamily:FONT,letterSpacing:"0.2em",marginTop:18 },
   buttons: { padding:"0 32px 52px",display:"flex",flexDirection:"column",gap:16 },
-  createBtn: { background:"transparent",border:"2px solid rgba(255,255,255,0.8)",borderRadius:50,
-    color:"#ffffff",fontSize:15,fontWeight:700,fontFamily:FONT,padding:"16px 24px",
-    cursor:"pointer",letterSpacing:"0.08em" },
-  existingBtn: { background:"#ffffff",border:"none",borderRadius:50,color:"#061A1F",
-    fontSize:15,fontWeight:700,fontFamily:FONT,padding:"16px 24px",
-    cursor:"pointer",letterSpacing:"0.08em" },
+  createBtn: { background:"transparent",border:"2px solid",borderRadius:50,fontSize:15,fontWeight:700,fontFamily:FONT,padding:"16px 24px",cursor:"pointer",letterSpacing:"0.08em" },
+  existingBtn: { border:"none",borderRadius:50,fontSize:15,fontWeight:700,fontFamily:FONT,padding:"16px 24px",cursor:"pointer",letterSpacing:"0.08em" },
 };

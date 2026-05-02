@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { API_BASE } from "../config/api.js";
 import CameraCapture from "./CameraCapture.jsx";
+import { useTheme } from "../context/ThemeContext.jsx";
 
 export default function ProfileScreen({ user, onBack, onUserUpdate }) {
+  const { colors } = useTheme();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -74,10 +76,9 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
   };
 
   return (
-    <div style={styles.screen}>
+    <div style={{ ...styles.screen, background: colors.bg }}>
       {showCamera && (
-        <CameraCapture
-          facingMode="user"
+        <CameraCapture facingMode="user"
           onCapture={(file) => { setShowCamera(false); handlePhotoFile(file); }}
           onClose={() => setShowCamera(false)}
         />
@@ -85,12 +86,12 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
       {showPhotoPicker && (
         <div>
           <div style={styles.pickerBackdrop} onClick={() => setShowPhotoPicker(false)} />
-          <div style={styles.pickerSheet}>
+          <div style={{ ...styles.pickerSheet, background: colors.surface }}>
             <div style={styles.pickerHandle} />
-            <p style={styles.pickerTitle}>Profile Photo</p>
-            <button style={styles.pickerBtn} onClick={() => { setShowPhotoPicker(false); setShowCamera(true); }}>Camera</button>
-            <button style={styles.pickerBtn} onClick={() => { setShowPhotoPicker(false); galleryInputRef.current?.click(); }}>Gallery</button>
-            <button style={styles.pickerCancelBtn} onClick={() => setShowPhotoPicker(false)}>Cancel</button>
+            <p style={{ ...styles.pickerTitle, color: colors.text }}>Profile Photo</p>
+            <button style={{ ...styles.pickerBtn, color: colors.text }} onClick={() => { setShowPhotoPicker(false); setShowCamera(true); }}>Camera</button>
+            <button style={{ ...styles.pickerBtn, color: colors.text }} onClick={() => { setShowPhotoPicker(false); galleryInputRef.current?.click(); }}>Gallery</button>
+            <button style={{ ...styles.pickerCancelBtn, color: colors.textMuted }} onClick={() => setShowPhotoPicker(false)}>Cancel</button>
           </div>
         </div>
       )}
@@ -98,7 +99,7 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
         onChange={(e) => handlePhotoFile(e.target.files?.[0])}
         onClick={(e) => { e.target.value = ""; }} />
 
-      <button onClick={onBack} style={styles.backBtn}>Back</button>
+      <button onClick={onBack} style={{ ...styles.backBtn, color: colors.textMuted }}>Back</button>
 
       <div style={styles.avatarWrap} onClick={() => !photoUploading && setShowPhotoPicker(true)}>
         <div style={styles.hexOuter}>
@@ -109,31 +110,31 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
             }
           </div>
         </div>
-        <div style={styles.editPhotoHint}>{photoUploading ? "Uploading..." : "Tap to change photo"}</div>
+        <div style={{ ...styles.editPhotoHint, color: colors.textMuted }}>{photoUploading ? "Uploading..." : "Tap to change photo"}</div>
       </div>
 
       <div style={{ width: "80%", display: "flex", flexDirection: "column", alignItems: "center" }}>
         {editing ? (
           <>
-            <input style={styles.editInput} placeholder="First Name" value={form.firstName}
+            <input style={{ ...styles.editInput, color: colors.text, background: colors.surface }} placeholder="First Name" value={form.firstName}
               onChange={(e) => setForm(f => ({ ...f, firstName: e.target.value }))} />
-            <div style={styles.divider} />
-            <input style={styles.editInput} placeholder="Last Name" value={form.lastName}
+            <div style={{ ...styles.divider, background: colors.border }} />
+            <input style={{ ...styles.editInput, color: colors.text, background: colors.surface }} placeholder="Last Name" value={form.lastName}
               onChange={(e) => setForm(f => ({ ...f, lastName: e.target.value }))} />
-            <div style={styles.divider} />
-            <input style={styles.editInput} type="date" value={form.dateOfBirth}
+            <div style={{ ...styles.divider, background: colors.border }} />
+            <input style={{ ...styles.editInput, color: colors.text, background: colors.surface }} type="date" value={form.dateOfBirth}
               onChange={(e) => setForm(f => ({ ...f, dateOfBirth: e.target.value }))} />
           </>
         ) : (
           <>
-            <div style={styles.name}>{((form.firstName || "") + " " + (form.lastName || "")).toUpperCase()}</div>
-            <div style={styles.divider} />
-            <div style={styles.field}>{dobDisplay}</div>
-            <div style={styles.divider} />
-            <div style={styles.field}>{user?.mobile || ""}</div>
-            <div style={styles.divider} />
-            <div style={{ ...styles.field, fontSize: 11, color: "rgba(255,255,255,0.5)" }}>{user?.securityQuestion || "Security Question"}</div>
-            <div style={styles.divider} />
+            <div style={{ ...styles.name, color: colors.text }}>{((form.firstName || "") + " " + (form.lastName || "")).toUpperCase()}</div>
+            <div style={{ ...styles.divider, background: colors.border }} />
+            <div style={{ ...styles.field, color: colors.text }}>{dobDisplay}</div>
+            <div style={{ ...styles.divider, background: colors.border }} />
+            <div style={{ ...styles.field, color: colors.text }}>{user?.mobile || ""}</div>
+            <div style={{ ...styles.divider, background: colors.border }} />
+            <div style={{ ...styles.field, fontSize: 11, color: colors.textMuted }}>{user?.securityQuestion || "Security Question"}</div>
+            <div style={{ ...styles.divider, background: colors.border }} />
           </>
         )}
       </div>
@@ -141,12 +142,12 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
       <div style={styles.buttonRow}>
         {editing ? (
           <>
-            <button style={styles.editBtn} onClick={() => setEditing(false)} disabled={saving}>Cancel</button>
+            <button style={{ ...styles.editBtn, color: colors.text, borderColor: colors.border }} onClick={() => setEditing(false)} disabled={saving}>Cancel</button>
             <button style={styles.doneBtn} onClick={handleSave} disabled={saving}>{saving ? "Saving..." : "DONE"}</button>
           </>
         ) : (
           <>
-            <button style={styles.editBtn} onClick={() => setEditing(true)}>EDIT</button>
+            <button style={{ ...styles.editBtn, color: colors.text, borderColor: colors.border }} onClick={() => setEditing(true)}>EDIT</button>
             <button style={styles.doneBtn} onClick={onBack}>DONE</button>
           </>
         )}

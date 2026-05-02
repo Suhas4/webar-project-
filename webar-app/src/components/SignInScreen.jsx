@@ -1,5 +1,8 @@
 import { useState, useCallback } from "react";
 import { API_BASE } from "../config/api.js";
+import { useLanguage } from "../context/LanguageContext.jsx";
+import { T } from "../config/translations.js";
+import { useTheme } from "../context/ThemeContext.jsx";
 
 export default function SignInScreen({ onSuccess, onGoForgotPassword, successMessage }) {
   const [mobile, setMobile] = useState("");
@@ -7,6 +10,9 @@ export default function SignInScreen({ onSuccess, onGoForgotPassword, successMes
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const { lang } = useLanguage();
+  const tr = T[lang] || T.en;
+  const { colors } = useTheme();
 
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
@@ -29,24 +35,24 @@ export default function SignInScreen({ onSuccess, onGoForgotPassword, successMes
   }, [mobile, password, onSuccess]);
 
   return (
-    <div style={styles.screen}>
+    <div style={{ ...styles.screen, background: colors.bg === styles.screen.background ? styles.screen.background : `${colors.bg}` }}>
       <div style={styles.orb1}/><div style={styles.orb2}/>
       <div style={styles.container}>
         <img src="/logo.png" alt="Memoera" style={styles.logo} />
-        <div style={styles.card}>
-          <h2 style={styles.heading}>WELCOME BACK</h2>
+        <div style={{ ...styles.card, background: colors.surface, border: `1px solid ${colors.border}` }}>
+          <h2 style={{ ...styles.heading, color: colors.text }}>{tr.welcomeBack}</h2>
           {successMessage && <div style={styles.successBox}>{successMessage}</div>}
           {error && <div style={styles.errorBox}>{error}</div>}
           <form onSubmit={handleSubmit} style={styles.form}>
             <div style={styles.fieldWrap}>
-              <label style={styles.label}>Mobile Number</label>
-              <input style={styles.input} type="tel" placeholder="Enter mobile number"
+              <label style={{ ...styles.label, color: colors.textMuted }}>{tr.mobileNumber}</label>
+              <input style={{ ...styles.input, color: colors.text, background: colors.surface }} type="tel" placeholder="Enter mobile number"
                 value={mobile} onChange={(e) => setMobile(e.target.value)} maxLength={10} />
             </div>
             <div style={styles.fieldWrap}>
-              <label style={styles.label}>Password</label>
+              <label style={{ ...styles.label, color: colors.textMuted }}>{tr.password}</label>
               <div style={styles.passwordWrap}>
-                <input style={{ ...styles.input, paddingRight: 44 }}
+                <input style={{ ...styles.input, paddingRight: 44, color: colors.text, background: colors.surface }}
                   type={showPass ? "text" : "password"} placeholder="Enter password"
                   value={password} onChange={(e) => setPassword(e.target.value)} />
                 <button type="button" style={styles.eyeBtn}
@@ -55,10 +61,10 @@ export default function SignInScreen({ onSuccess, onGoForgotPassword, successMes
                 </button>
               </div>
             </div>
-            <button type="button" style={styles.forgotLink} onClick={onGoForgotPassword}>Forgot Password?</button>
+            <button type="button" style={styles.forgotLink} onClick={onGoForgotPassword}>{tr.forgotPassword}</button>
             <button type="submit" disabled={loading}
               style={{ ...styles.submitBtn, ...(loading ? styles.submitBtnDisabled : {}) }}>
-              {loading ? <Spinner /> : "Sign In"}
+              {loading ? <Spinner /> : tr.signIn}
             </button>
           </form>
         </div>

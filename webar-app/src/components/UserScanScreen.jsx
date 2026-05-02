@@ -1,5 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { loadTargets, loadPublicTargets } from '../hooks/useArStorage.js';
+import { useLanguage } from '../context/LanguageContext.jsx';
+import { T } from '../config/translations.js';
+import { useTheme } from '../context/ThemeContext.jsx';
+
+// Session-level cache — skip recompiling if the merged target set hasn't changed
+let _cachedUserMind = null; // { key: string, mindBlobUrl: string, arTargets: array }
+export function invalidateUserCache() { _cachedUserMind = null; }
 
 const FONT = "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif";
 const BG = 'linear-gradient(160deg, #061A1F 0%, #0A2229 50%, #061820 100%)';
@@ -14,6 +21,9 @@ export default function UserScanScreen({ onReady, onBack }) {
   const [progress, setProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState('');
   const cancelledRef = useRef(false);
+  const { lang } = useLanguage();
+  const tr = T[lang] || T.en;
+  const { colors } = useTheme();
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -66,6 +76,14 @@ export default function UserScanScreen({ onReady, onBack }) {
           return;
         }
 
+        // Cache key: sorted image URLs
+        const cacheKey = merged.map(t => t.imageUrl).sort().join('|');
+        if (_cachedUserMind && _cachedUserMind.key === cacheKey) {
+          blobHandedOff = true;
+          onReady({ targets: _cachedUserMind.arTargets, mindFileUrl: _cachedUserMind.mindBlobUrl });
+          return;
+        }
+
         setPhase('compiling');
 
         const imageElements = await Promise.all(
@@ -112,6 +130,9 @@ export default function UserScanScreen({ onReady, onBack }) {
           urlLink: t.urlLink || '',
         }));
 
+        // Store in session cache
+        _cachedUserMind = { key: cacheKey, mindBlobUrl, arTargets };
+
         blobHandedOff = true;
         onReady({ targets: arTargets, mindFileUrl: mindBlobUrl });
       } catch (err) {
@@ -130,26 +151,24 @@ export default function UserScanScreen({ onReady, onBack }) {
   }, [onReady]);
 
   return (
-    <div style={s.screen}>
+    <div style={{ ...s.screen, background: colors.bg }}>
       <div style={s.watermark}>
         <img src="/logo.png" alt="" style={s.watermarkImg} />
       </div>
-      <button onClick={onBack} style={s.backBtn}>&#8592;</button>
+      <button onClick={onBack} style={{ ...s.backBtn, color: colors.textMuted }}>&#8592;</button>
       <div style={s.center}>
         {phase === 'error' ? (
           <>
             <div style={s.errorIcon}>!</div>
             <p style={s.errorText}>{errorMsg}</p>
-            <button onClick={onBack} style={s.retryBtn}>Go Back</button>
+            <button onClick={onBack} style={s.retryBtn}>{tr.back}</button>
           </>
         ) : (
           <>
             <ScannerIcon />
-            <p style={s.scanLabel}>PREPARING SCANNER</p>
-            <p style={s.statusText}>
-              {phase === 'fetching'
-                ? 'Loading your targets...'
-                : 'Compiling scanner... ' + progress + '%'}
+            <p style={{ ...s.scanLabel, color: colors.textMuted }}>PREPARING SCANNER</p>
+            <p style={{ ...s.statusText, color: colors.textMuted }}>
+              {phase === 'fetching' ? tr.loadingTargets : tr.compilingScanner + ' ' + progress + '%'}
             </p>
             <div style={s.progressBar}>
               <div style={{ ...s.progressFill, width: phase === 'fetching' ? '10%' : progress + '%' }} />

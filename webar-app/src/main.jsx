@@ -2,6 +2,8 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
 import App from './App.jsx';
+import { LanguageProvider } from './context/LanguageContext.jsx';
+import { ThemeProvider } from './context/ThemeContext.jsx';
 
 // NOTE on StrictMode + MindAR:
 // React 18 StrictMode intentionally double-invokes effects in development.
@@ -11,6 +13,10 @@ import App from './App.jsx';
 // remove <StrictMode> for debugging. Always restore it before production.
 createRoot(document.getElementById('root')).render(
   <StrictMode>
-    <App />
+    <ThemeProvider>
+      <LanguageProvider>
+        <App />
+      </LanguageProvider>
+    </ThemeProvider>
   </StrictMode>
 );

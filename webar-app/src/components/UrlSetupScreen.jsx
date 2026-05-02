@@ -1,6 +1,9 @@
 import { useState, useCallback, useRef } from 'react';
 import UploadProgressOverlay from './UploadProgressOverlay.jsx';
 import { saveTargets } from '../hooks/useArStorage.js';
+import { useLanguage } from '../context/LanguageContext.jsx';
+import { T } from '../config/translations.js';
+import { useTheme } from '../context/ThemeContext.jsx';
 
 const ASPECT_MAP = { '16:9': 0.5625, '4:3': 0.75, '1:1': 1.0, '9:16': 1.7778 };
 
@@ -14,9 +17,13 @@ export default function UrlSetupScreen({ onStart, onSignOut, isPublic }) {
   const [compileProgress, setCompileProgress] = useState(0);
   const [compileError, setCompileError] = useState('');
   const [showValidation, setShowValidation] = useState(false);
+  const { lang } = useLanguage();
+  const tr = T[lang] || T.en;
+  const { colors } = useTheme();
 
   const isCompiling = ['compiling', 'saving', 'uploading', 'finalizing'].includes(compileState);
   const canStart = cards.length > 0 && cards.every((c) => c.imageFile && c.urlLink.trim());
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const handleImageFile = useCallback((index, file) => {
     if (!file) return;
@@ -132,8 +139,20 @@ export default function UrlSetupScreen({ onStart, onSignOut, isPublic }) {
   }, [cards, canStart, onStart, isPublic]);
 
   return (
-    <div style={styles.screen}>
+    <div style={{ ...styles.screen, background: colors.bg }}>
       {isCompiling && <UploadProgressOverlay compileState={compileState} progress={compileProgress} />}
+
+      {showConfirm && (
+        <div style={confirmStyles.overlay}>
+          <div style={confirmStyles.box}>
+            <p style={confirmStyles.text}>Are you sure you want to upload?</p>
+            <div style={confirmStyles.btns}>
+              <button onClick={() => setShowConfirm(false)} style={confirmStyles.cancel}>Cancel</button>
+              <button onClick={() => { setShowConfirm(false); handleStart(); }} style={confirmStyles.confirm}>Upload</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={styles.orb1} />
       <div style={styles.orb2} />
@@ -142,7 +161,7 @@ export default function UrlSetupScreen({ onStart, onSignOut, isPublic }) {
         <div style={styles.headerRow}>
           <h1 style={styles.bigTitle}>UPLOAD</h1>
           {onSignOut && (
-            <button onClick={onSignOut} style={styles.signOutBtn}>Sign Out</button>
+            <button onClick={onSignOut} style={styles.signOutBtn}>{tr.signOut}</button>
           )}
         </div>
         <div style={styles.visibilityBadge}>
@@ -180,7 +199,7 @@ export default function UrlSetupScreen({ onStart, onSignOut, isPublic }) {
         {showValidation && !canStart && compileState === 'idle' && (
           <p style={styles.validationHint}>Each target needs a marker image and a URL.</p>
         )}
-        <button onClick={handleStart} disabled={isCompiling}
+        <button onClick={() => { if (!canStart) { setShowValidation(true); return; } setShowConfirm(true); }} disabled={isCompiling}
           style={{ ...styles.startButton, ...(isCompiling ? styles.startButtonDisabled : {}) }}>
           Upload &rarr;
         </button>
@@ -312,6 +331,15 @@ const styles = {
   validationHint: { fontSize: 13, color: '#ff8080', fontFamily: FONT, margin: 0, textAlign: 'center' },
   startButton: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, background: `linear-gradient(135deg, ${TEAL}, ${CYAN})`, border: 'none', borderRadius: 50, color: '#080C18', fontSize: 17, fontWeight: 700, fontFamily: FONT, padding: '16px 24px', cursor: 'pointer', letterSpacing: '0.05em', boxShadow: `0 4px 28px rgba(0,201,167,0.35)` },
   startButtonDisabled: { opacity: 0.6, cursor: 'not-allowed', boxShadow: 'none' },
+};
+
+const confirmStyles = {
+  overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 },
+  box: { background: '#0E1628', border: `1px solid ${BORDER}`, borderRadius: 20, padding: '28px 24px', maxWidth: 320, width: '90%', display: 'flex', flexDirection: 'column', gap: 20 },
+  text: { fontSize: 16, color: '#fff', fontFamily: FONT, textAlign: 'center', margin: 0 },
+  btns: { display: 'flex', gap: 12 },
+  cancel: { flex: 1, background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 50, color: 'rgba(255,255,255,0.6)', fontSize: 15, fontFamily: FONT, padding: '12px 0', cursor: 'pointer' },
+  confirm: { flex: 1, background: `linear-gradient(135deg, ${TEAL}, ${CYAN})`, border: 'none', borderRadius: 50, color: BG, fontSize: 15, fontWeight: 700, fontFamily: FONT, padding: '12px 0', cursor: 'pointer' },
 };
 
 const card_s = {

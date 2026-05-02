@@ -2,6 +2,9 @@ import { useState, useCallback } from 'react';
 import TargetCard from './TargetCard.jsx';
 import UploadProgressOverlay from './UploadProgressOverlay.jsx';
 import { saveTargets } from '../hooks/useArStorage.js';
+import { useLanguage } from '../context/LanguageContext.jsx';
+import { T } from '../config/translations.js';
+import { useTheme } from '../context/ThemeContext.jsx';
 
 
 function emptyCard(index) {
@@ -15,6 +18,10 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
   const [compileProgress, setCompileProgress] = useState(0);
   const [compileError, setCompileError] = useState('');
   const [showValidation, setShowValidation] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const { lang } = useLanguage();
+  const tr = T[lang] || T.en;
+  const { colors } = useTheme();
 
   const isCompiling = compileState === 'compiling' || compileState === 'saving' || compileState === 'uploading' || compileState === 'finalizing';
   const canStart = cards.length > 0 && cards.every((c) => c.imageFile && c.videoFile);
@@ -132,8 +139,21 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
   }, [cards, canStart, onStart]);
 
   return (
-    <div style={styles.screen}>
+    <div style={{ ...styles.screen, background: colors.bg }}>
       {isCompiling && <UploadProgressOverlay compileState={compileState} progress={compileProgress} />}
+
+      {/* Confirm Upload Modal */}
+      {showConfirm && (
+        <div style={confirmStyles.overlay}>
+          <div style={confirmStyles.box}>
+            <p style={confirmStyles.text}>Are you sure you want to upload?</p>
+            <div style={confirmStyles.btns}>
+              <button onClick={() => setShowConfirm(false)} style={confirmStyles.cancel}>Cancel</button>
+              <button onClick={() => { setShowConfirm(false); handleStart(); }} style={confirmStyles.confirm}>Upload</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={styles.orb1} />
       <div style={styles.orb2} />
@@ -145,11 +165,11 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
               <img src="/logo.png" alt="Memoera" style={{ width: 130, objectFit: 'contain' }} />
             </div>
           {onSignOut && (
-            <button onClick={onSignOut} style={styles.signOutBtn}>Sign Out</button>
+            <button onClick={onSignOut} style={styles.signOutBtn}>{tr.signOut}</button>
           )}
         </div>
         <div style={styles.divider} />
-        <h1 style={styles.title}>Upload Your Files</h1>
+        <h1 style={{ ...styles.title, color: colors.text }}>{tr.uploadTitle}</h1>
         <p style={styles.subtitle}>
           {isPublic
             ? 'PUBLIC — your AR targets will be visible to all guests when they scan'
@@ -188,7 +208,7 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
             Launch AR with saved files →
           </button>
         )}
-        <button onClick={handleStart} disabled={isCompiling}
+        <button onClick={() => { if (!canStart) { setShowValidation(true); return; } setShowConfirm(true); }} disabled={isCompiling}
           style={{ ...styles.startButton, ...(isCompiling ? styles.startButtonDisabled : {}) }}>
           Upload →
         </button>
@@ -286,4 +306,13 @@ const styles = {
     fontSize: 15, fontWeight: 600, fontFamily: FONT, padding: '13px 24px',
     cursor: 'pointer', letterSpacing: '0.02em',
   },
+};
+
+const confirmStyles = {
+  overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100 },
+  box: { background: '#0E1628', border: '1px solid rgba(0,201,167,0.3)', borderRadius: 20, padding: '28px 24px', maxWidth: 320, width: '90%', display: 'flex', flexDirection: 'column', gap: 20 },
+  text: { fontSize: 16, color: '#fff', fontFamily: FONT, textAlign: 'center', margin: 0 },
+  btns: { display: 'flex', gap: 12 },
+  cancel: { flex: 1, background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 50, color: 'rgba(255,255,255,0.6)', fontSize: 15, fontFamily: FONT, padding: '12px 0', cursor: 'pointer' },
+  confirm: { flex: 1, background: `linear-gradient(135deg, ${TEAL}, ${CYAN})`, border: 'none', borderRadius: 50, color: BG, fontSize: 15, fontWeight: 700, fontFamily: FONT, padding: '12px 0', cursor: 'pointer' },
 };

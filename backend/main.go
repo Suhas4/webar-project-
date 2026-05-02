@@ -56,6 +56,7 @@ type SignUpRequest struct {
 	OTP              string `json:"otp"`
 	SecurityQuestion string `json:"securityQuestion"`
 	SecurityAnswer   string `json:"securityAnswer"`
+	ReferralCode     string `json:"referralCode"`
 }
 
 type SignInRequest struct {
@@ -167,6 +168,8 @@ func initDB(ctx context.Context) error {
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS is_public BOOLEAN NOT NULL DEFAULT false`)
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS target_type TEXT NOT NULL DEFAULT 'video'`)
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS url_link TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS file_size_bytes BIGINT NOT NULL DEFAULT 0`)
 	// Migrate unique constraint: (user_id, target_index) → (user_id, target_index, is_public)
 	// so public and private targets can coexist at the same index for the same user.
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets DROP CONSTRAINT IF EXISTS ar_targets_user_id_target_index_key`)
@@ -555,10 +558,10 @@ func signUpHandler(w http.ResponseWriter, r *http.Request) {
 
 	var userID int64
 	err := db.QueryRow(r.Context(), `
-		INSERT INTO users (mobile, first_name, last_name, password_hash, security_question, security_answer, date_of_birth)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO users (mobile, first_name, last_name, password_hash, security_question, security_answer, date_of_birth, referral_code)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id`,
-		req.Mobile, req.FirstName, req.LastName, passwordHash, req.SecurityQuestion, answerHash, req.DateOfBirth,
+		req.Mobile, req.FirstName, req.LastName, passwordHash, req.SecurityQuestion, answerHash, req.DateOfBirth, req.ReferralCode,
 	).Scan(&userID)
 
 	if err != nil {
@@ -1173,15 +1176,16 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Targets []struct {
-			TargetIndex  int     `json:"targetIndex"`
-			Label        string  `json:"label"`
-			PlaneWidth   float64 `json:"planeWidth"`
-			PlaneHeight  float64 `json:"planeHeight"`
-			PlaneOffsetY float64 `json:"planeOffsetY"`
-			ImageKey     string  `json:"imageKey"`
-			VideoKey     string  `json:"videoKey"`
-			TargetType   string  `json:"targetType"`
-			URLLink      string  `json:"urlLink"`
+			TargetIndex   int     `json:"targetIndex"`
+			Label         string  `json:"label"`
+			PlaneWidth    float64 `json:"planeWidth"`
+			PlaneHeight   float64 `json:"planeHeight"`
+			PlaneOffsetY  float64 `json:"planeOffsetY"`
+			ImageKey      string  `json:"imageKey"`
+			VideoKey      string  `json:"videoKey"`
+			TargetType    string  `json:"targetType"`
+			URLLink       string  `json:"urlLink"`
+			FileSizeBytes int64   `json:"fileSizeBytes"`
 		} `json:"targets"`
 		MindKey  string `json:"mindKey"`
 		IsPublic bool   `json:"isPublic"`
@@ -1195,7 +1199,7 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Delete old targets first, then insert new ones in a transaction
+	// Append new targets instead of replacing — find the next available index
 	tx, err := db.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to start transaction")
@@ -1203,11 +1207,12 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 
-	_, err = tx.Exec(r.Context(), "DELETE FROM ar_targets WHERE user_id=$1 AND is_public=$2", userID, req.IsPublic)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "Failed to clear old targets")
-		return
-	}
+	var maxIdx int
+	_ = tx.QueryRow(r.Context(),
+		"SELECT COALESCE(MAX(target_index), -1) FROM ar_targets WHERE user_id=$1 AND is_public=$2",
+		userID, req.IsPublic,
+	).Scan(&maxIdx)
+	startIdx := maxIdx + 1
 
 	for i, t := range req.Targets {
 		targetType := t.TargetType
@@ -1215,10 +1220,10 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 			targetType = "video"
 		}
 		_, err = tx.Exec(r.Context(), `
-			INSERT INTO ar_targets (user_id, target_index, label, plane_width, plane_height, plane_offset_y, image_key, video_key, mind_key, is_public, target_type, url_link)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-			userID, i, t.Label, t.PlaneWidth, t.PlaneHeight, t.PlaneOffsetY, t.ImageKey, t.VideoKey, req.MindKey,
-			req.IsPublic, targetType, t.URLLink,
+			INSERT INTO ar_targets (user_id, target_index, label, plane_width, plane_height, plane_offset_y, image_key, video_key, mind_key, is_public, target_type, url_link, file_size_bytes)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+			userID, startIdx+i, t.Label, t.PlaneWidth, t.PlaneHeight, t.PlaneOffsetY, t.ImageKey, t.VideoKey, req.MindKey,
+			req.IsPublic, targetType, t.URLLink, t.FileSizeBytes,
 		)
 		if err != nil {
 			log.Printf("[saveTargets] insert error: %v", err)
@@ -1382,6 +1387,42 @@ func deleteTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// GET /api/storage — returns bytes used per visibility for the authenticated user.
+func getStorageHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	rows, err := db.Query(r.Context(),
+		"SELECT is_public, COALESCE(SUM(file_size_bytes),0) FROM ar_targets WHERE user_id=$1 GROUP BY is_public", userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to query storage")
+		return
+	}
+	defer rows.Close()
+
+	var privateBytes, publicBytes int64
+	for rows.Next() {
+		var isPublic bool
+		var total int64
+		if err := rows.Scan(&isPublic, &total); err != nil { continue }
+		if isPublic { publicBytes = total } else { privateBytes = total }
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"privateBytes": privateBytes,
+		"publicBytes":  publicBytes,
+		"limitBytes":   int64(500 * 1024 * 1024),
+	})
+}
+
 // ─── Reset Token ──────────────────────────────────────────────────────────────
 
 func makeResetToken(mobile string) string {
@@ -1511,6 +1552,7 @@ func main() {
 	mux.HandleFunc("/api/targets/public", getPublicTargetsHandler)
 	mux.HandleFunc("/api/targets", getTargetsHandler)
 	mux.HandleFunc("/api/targets/delete", deleteTargetsHandler)
+	mux.HandleFunc("/api/storage", getStorageHandler)
 
 	handler := loggingMiddleware(corsMiddleware(allowedOrigin, mux))
 

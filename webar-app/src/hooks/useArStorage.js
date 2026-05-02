@@ -142,17 +142,23 @@ export async function saveTargets(targetsMeta, mindBuffer, videoBlobs, imageBlob
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
     body: JSON.stringify({
-      targets: targetsMeta.map((meta, i) => ({
-        targetIndex: i,
-        label: meta.label,
-        planeWidth: meta.planeWidth,
-        planeHeight: meta.planeHeight,
-        planeOffsetY: meta.planeOffsetY,
-        imageKey: imageKeys[i],
-        videoKey: videoKeys[i],
-        targetType: meta.targetType || "video",
-        urlLink: meta.urlLink || "",
-      })),
+      targets: targetsMeta.map((meta, i) => {
+        const imgBytes = imageBlobs[i]?.size || 0;
+        const vidBytes = hasVideos ? (videoBlobs[i]?.size || 0) : 0;
+        const mindShare = Math.round(mindBuffer.byteLength / n);
+        return {
+          targetIndex: i,
+          label: meta.label,
+          planeWidth: meta.planeWidth,
+          planeHeight: meta.planeHeight,
+          planeOffsetY: meta.planeOffsetY,
+          imageKey: imageKeys[i],
+          videoKey: videoKeys[i],
+          targetType: meta.targetType || "video",
+          urlLink: meta.urlLink || "",
+          fileSizeBytes: imgBytes + vidBytes + mindShare,
+        };
+      }),
       mindKey,
       isPublic,
     }),

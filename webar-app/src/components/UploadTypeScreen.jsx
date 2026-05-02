@@ -1,18 +1,20 @@
 import { useState } from "react";
+import { useTheme } from "../context/ThemeContext.jsx";
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const GOLD = "#C9A84C";
 
-export default function UploadTypeScreen({ onPhotoVideo, onPhotoUrl, onBack }) {
+export default function UploadTypeScreen({ onPhotoVideo, onPhotoUrl, onBack, visibility }) {
   const [showGuide, setShowGuide] = useState(false);
+  const { colors } = useTheme();
   return (
-    <div style={s.screen}>
+    <div style={{ ...s.screen, background: colors.bg }}>
       {showGuide && (
         <div style={s.modalOverlay} onClick={() => setShowGuide(false)}>
-          <div style={s.modal} onClick={e => e.stopPropagation()}>
-            <h3 style={s.modalTitle}>Guide — Upload Type</h3>
-            <p style={s.modalText}><strong style={{color:GOLD}}>PHOTO WITH VIDEO</strong> — Upload a marker image and a video. When someone scans the marker image, the video plays fullscreen.</p>
-            <p style={s.modalText}><strong style={{color:GOLD}}>PHOTO WITH URL / LINK</strong> — Upload a marker image and attach a URL. When someone scans the image, a button appears to open the link.</p>
+          <div style={{ ...s.modal, background: colors.surface }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ ...s.modalTitle, color: colors.text }}>Guide — Upload Type</h3>
+            <p style={{ ...s.modalText, color: colors.textMuted }}><strong style={{color:GOLD}}>PHOTO WITH VIDEO</strong> — Upload a marker image and a video. When someone scans the marker image, the video plays fullscreen.</p>
+            <p style={{ ...s.modalText, color: colors.textMuted }}><strong style={{color:GOLD}}>PHOTO WITH URL / LINK</strong> — Upload a marker image and attach a URL. When someone scans the image, a button appears to open the link.</p>
             <button style={s.modalClose} onClick={() => setShowGuide(false)}>Close</button>
           </div>
         </div>
@@ -20,30 +22,31 @@ export default function UploadTypeScreen({ onPhotoVideo, onPhotoUrl, onBack }) {
       <div style={s.watermark}>
         <img src="/logo.png" alt="" style={s.watermarkImg} />
       </div>
-
-      {onBack && (
-        <button onClick={onBack} style={s.backBtn}>&#8592;</button>
-      )}
-
+      {onBack && <button onClick={onBack} style={{ ...s.backBtn, color: colors.textMuted }}>&#8592;</button>}
       <div style={s.top}>
-        <h1 style={s.title}>Select Your Goal</h1>
+        <h1 style={{ ...s.title, color: colors.text }}>Select Your Goal</h1>
+        {visibility && (
+          <div style={{ ...s.visibilityBadge, background: visibility === 'public' ? 'rgba(0,201,167,0.15)' : 'rgba(201,168,76,0.15)', border: `1px solid ${visibility === 'public' ? '#00C9A7' : GOLD}` }}>
+            <span style={{ color: visibility === 'public' ? '#00C9A7' : GOLD, fontSize: 12, fontWeight: 700, fontFamily: FONT, letterSpacing: '0.1em' }}>
+              {visibility.toUpperCase()}
+            </span>
+          </div>
+        )}
       </div>
-
       <div style={s.btnArea}>
-        <button onClick={onPhotoVideo} style={s.goalBtn}>
-          <span style={s.btnLabel}>UPLOAD PHOTO<br />WITH VIDEO</span>
+        <button onClick={onPhotoVideo} style={{ ...s.goalBtn, border: `1.5px solid ${colors.border}`, background: colors.surface }}>
+          <span style={{ ...s.btnLabel, color: colors.text }}>UPLOAD PHOTO<br />WITH VIDEO</span>
         </button>
-        <button onClick={onPhotoUrl} style={s.goalBtn}>
-          <span style={s.btnLabel}>UPLOAD PHOTO<br />WITH URL / LINK</span>
+        <button onClick={onPhotoUrl} style={{ ...s.goalBtn, border: `1.5px solid ${colors.border}`, background: colors.surface }}>
+          <span style={{ ...s.btnLabel, color: colors.text }}>UPLOAD PHOTO<br />WITH URL / LINK</span>
         </button>
       </div>
-
       <div style={s.guideArea}>
         <button onClick={() => setShowGuide(true)} style={s.guideBtn}>
-          <div style={s.guideDot}>
-            <span style={s.guideI}>i</span>
+          <div style={{ ...s.guideDot, borderColor: colors.textMuted }}>
+            <span style={{ ...s.guideI, color: colors.textMuted }}>i</span>
           </div>
-          <span style={s.guideLabel}>GUIDE</span>
+          <span style={{ ...s.guideLabel, color: colors.textMuted }}>GUIDE</span>
         </button>
       </div>
     </div>
@@ -71,9 +74,10 @@ const s = {
   },
   top: { padding: "72px 32px 0" },
   title: {
-    fontSize: 28, fontWeight: 300, color: "#ffffff",
+    fontSize: 28, fontWeight: 300,
     fontFamily: FONT, margin: 0, letterSpacing: "0.01em",
   },
+  visibilityBadge: { display: 'inline-flex', alignItems: 'center', padding: '4px 14px', borderRadius: 20, marginTop: 10 },
   btnArea: {
     flex: 1, display: "flex", flexDirection: "column",
     justifyContent: "center", gap: 28, padding: "0 28px",

@@ -1,11 +1,17 @@
 import { useState, useEffect } from "react";
 import { loadTargets } from "../hooks/useArStorage.js";
 import { API_BASE } from "../config/api.js";
+import { useLanguage } from "../context/LanguageContext.jsx";
+import { T } from "../config/translations.js";
+import { useTheme } from "../context/ThemeContext.jsx";
 
 export default function GalleryScreen({ onBack }) {
   const [targets, setTargets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [playingVideo, setPlayingVideo] = useState(null);
+  const { lang } = useLanguage();
+  const tr = T[lang] || T.en;
+  const { colors } = useTheme();
 
   useEffect(() => {
     loadTargets().then(({ targets }) => {
@@ -25,34 +31,43 @@ export default function GalleryScreen({ onBack }) {
   }
 
   return (
-    <div style={styles.screen}>
+    <div style={{ ...styles.screen, background: colors.bg }}>
       <div style={styles.header}>
-        <button onClick={onBack} style={styles.backBtn}>Back</button>
-        <h2 style={styles.title}>Gallery</h2>
+        <button onClick={onBack} style={{ ...styles.backBtn, color: colors.textMuted }}>{tr.back}</button>
+        <h2 style={{ ...styles.title, color: colors.text }}>{tr.galleryTitle}</h2>
       </div>
       {loading ? (
-        <div style={styles.empty}>Loading...</div>
+        <div style={{ ...styles.empty, color: colors.textMuted }}>Loading...</div>
       ) : targets.length === 0 ? (
-        <div style={styles.empty}>No uploaded targets yet.</div>
+        <div style={{ ...styles.empty, color: colors.textMuted }}>{tr.noTargets}</div>
       ) : (
         <div style={styles.grid}>
           {targets.map((t, i) => (
-            <div key={i} style={styles.card}>
+            <div key={i} style={{ ...styles.card, background: colors.surface, border: `1px solid ${colors.border}` }}>
               {t._imagePreviewUrl ? (
                 <img src={t._imagePreviewUrl} style={styles.thumb} alt={t.label} />
               ) : (
                 <div style={styles.thumbPlaceholder}><span style={{fontSize:24}}>IMG</span></div>
               )}
               <div style={styles.cardInfo}>
-                <span style={styles.cardLabel}>{t.label || "Target "+(i+1)}</span>
+                <span style={{ ...styles.cardLabel, color: colors.text }}>{t.label || "Target "+(i+1)}</span>
+                {t.targetType === 'url' && t.urlLink && (
+                  <span style={styles.urlDisplay} title={t.urlLink}>
+                    🔗 {t.urlLink.length > 40 ? t.urlLink.slice(0, 40) + '…' : t.urlLink}
+                  </span>
+                )}
                 <div style={styles.cardActions}>
                   {t.videoUrl && (
-                    <button style={styles.playBtn} onClick={() => setPlayingVideo(t.videoUrl)}>Play</button>
+                    <button style={styles.playBtn} onClick={() => setPlayingVideo(t.videoUrl)}>{tr.play}</button>
                   )}
                 </div>
               </div>
             </div>
           ))}
+          {/* Ad banner at very bottom */}
+          <div style={styles.adBanner}>
+            <p style={styles.adLabel}>Advertisement</p>
+          </div>
         </div>
       )}
     </div>
@@ -80,11 +95,18 @@ const styles = {
     color:"rgba(255,255,255,0.3)" },
   cardInfo: { flex:1,display:"flex",flexDirection:"column",gap:8 },
   cardLabel: { fontSize:14,fontWeight:600,color:"#fff",fontFamily:FONT },
+  urlDisplay: { fontSize:11,color:TEAL,fontFamily:FONT,wordBreak:'break-all',lineHeight:1.4 },
   cardActions: { display:"flex",gap:8 },
   playBtn: { background:"rgba(0,201,167,0.15)",border:"1px solid rgba(0,201,167,0.4)",
     borderRadius:8,color:TEAL,fontSize:12,fontFamily:FONT,padding:"5px 14px",cursor:"pointer" },
   deleteBtn: { background:"rgba(255,80,80,0.12)",border:"1px solid rgba(255,80,80,0.35)",
     borderRadius:8,color:"#ff8080",fontSize:12,fontFamily:FONT,padding:"5px 14px",cursor:"pointer" },
+  adBanner: {
+    height:80, borderRadius:12,
+    background:'rgba(255,255,255,0.03)', border:'1px dashed rgba(255,255,255,0.12)',
+    display:'flex', alignItems:'center', justifyContent:'center', marginTop:8,
+  },
+  adLabel: { fontSize:12, color:'rgba(255,255,255,0.2)', fontFamily:FONT, margin:0, letterSpacing:'0.08em' },
   videoScreen: { position:"fixed",inset:0,background:"#000",display:"flex",flexDirection:"column" },
   closeVideoBtn: { position:"absolute",top:20,left:20,zIndex:10,background:"rgba(0,0,0,0.5)",
     border:"1px solid rgba(255,255,255,0.3)",borderRadius:20,color:"#fff",

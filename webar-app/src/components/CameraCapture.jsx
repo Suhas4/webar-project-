@@ -47,7 +47,12 @@ export default function CameraCapture({ onCapture, onClose, facingMode = 'enviro
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
+    const ctx = canvas.getContext('2d');
+    if (facingMode === 'user') {
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+    }
+    ctx.drawImage(video, 0, 0);
     canvas.toBlob((blob) => {
       if (!blob) return;
       const file = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
@@ -79,7 +84,8 @@ export default function CameraCapture({ onCapture, onClose, facingMode = 'enviro
         </div>
       ) : (
         <>
-          <video ref={videoRef} autoPlay playsInline muted style={s.video} />
+          <video ref={videoRef} autoPlay playsInline muted
+            style={{ ...s.video, ...(facingMode === 'user' ? { transform: 'scaleX(-1)' } : {}) }} />
           <div style={s.controls}>
             <button style={s.cancelBtn} onClick={() => { streamRef.current?.getTracks().forEach(t => t.stop()); onClose(); }}>Cancel</button>
             <button style={{ ...s.captureBtn, ...(ready ? {} : s.captureBtnDisabled) }} onClick={handleCapture} disabled={!ready}>

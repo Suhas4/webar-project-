@@ -1,5 +1,8 @@
 import { useState, useCallback } from 'react';
 import { API_BASE } from '../config/api.js';
+import { useLanguage } from '../context/LanguageContext.jsx';
+import { T } from '../config/translations.js';
+import { useTheme } from '../context/ThemeContext.jsx';
 
 const SECURITY_QUESTIONS = [
   "What was the name of your first pet?",
@@ -10,11 +13,15 @@ const SECURITY_QUESTIONS = [
 ];
 
 export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
+  const { lang } = useLanguage();
+  const tr = T[lang] || T.en;
+  const { colors } = useTheme();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({
     firstName: '', lastName: '', mobile: '', dateOfBirth: '',
     password: '', confirmPassword: '',
     securityQuestion: SECURITY_QUESTIONS[0], securityAnswer: '',
+    referralCode: '',
   });
   const [otp, setOtp] = useState('');
   const [maskedMobile, setMaskedMobile] = useState('');
@@ -65,6 +72,7 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
           mobile: form.mobile.replace(/\s/g, ''), dateOfBirth: form.dateOfBirth,
           password: form.password, otp: otp.trim(),
           securityQuestion: form.securityQuestion, securityAnswer: form.securityAnswer,
+          referralCode: form.referralCode || '',
         }),
       });
       const data = await res.json();
@@ -83,33 +91,33 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
   }, [form, otp, onSuccess, onOtpFail]);
 
   return (
-    <div style={S.screen}>
+    <div style={{ ...S.screen, background: colors.bg }}>
       <div style={S.orb1}/><div style={S.orb2}/>
       <div style={S.container}>
         <img src="/logo.png" alt="Memoera" style={S.logo} />
-        <div style={S.card}>
+        <div style={{ ...S.card, background: colors.surface, border: `1px solid ${colors.border}` }}>
           {step === 1 ? (
             <>
-              <h2 style={S.heading}>CREATE ACCOUNT</h2>
+              <h2 style={{ ...S.heading, color: colors.text }}>{tr.createAccountTitle}</h2>
               {error && <div style={S.errorBox}>{error}</div>}
               <form onSubmit={handleSendOTP} style={S.form}>
                 <div style={S.row}>
-                  <Field label="First Name" style={{ flex:1 }}>
-                    <input style={S.input} type="text" placeholder="First name" value={form.firstName} onChange={set('firstName')} />
+                  <Field label={tr.firstName} style={{ flex:1 }}>
+                    <input style={{ ...S.input, color: colors.text, background: colors.surface }} type="text" placeholder="First name" value={form.firstName} onChange={set('firstName')} />
                   </Field>
-                  <Field label="Last Name" style={{ flex:1 }}>
-                    <input style={S.input} type="text" placeholder="Last name" value={form.lastName} onChange={set('lastName')} />
+                  <Field label={tr.lastName} style={{ flex:1 }}>
+                    <input style={{ ...S.input, color: colors.text, background: colors.surface }} type="text" placeholder="Last name" value={form.lastName} onChange={set('lastName')} />
                   </Field>
                 </div>
-                <Field label="Mobile Number">
-                  <input style={S.input} type="tel" placeholder="10-digit mobile number" value={form.mobile} onChange={set('mobile')} maxLength={10} />
+                <Field label={tr.mobileNumber}>
+                  <input style={{ ...S.input, color: colors.text, background: colors.surface }} type="tel" placeholder="10-digit mobile number" value={form.mobile} onChange={set('mobile')} maxLength={10} />
                 </Field>
-                <Field label="Date of Birth">
-                  <input style={S.input} type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} />
+                <Field label={tr.dateOfBirth}>
+                  <input style={{ ...S.input, color: colors.text, background: colors.surface }} type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} />
                 </Field>
-                <Field label="Create Password">
+                <Field label={tr.createPassword}>
                   <div style={{ position:'relative' }}>
-                    <input style={{ ...S.input, paddingRight:44 }}
+                    <input style={{ ...S.input, paddingRight:44, color: colors.text, background: colors.surface }}
                       type={showPass ? 'text' : 'password'} placeholder="Min. 6 characters"
                       value={form.password} onChange={set('password')} />
                     <button type="button" style={S.eyeBtn} onClick={() => setShowPass(v => !v)}>
@@ -117,46 +125,49 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
                     </button>
                   </div>
                 </Field>
-                <Field label="Confirm Password">
-                  <input style={S.input} type={showPass ? 'text' : 'password'}
+                <Field label={tr.confirmPassword}>
+                  <input style={{ ...S.input, color: colors.text, background: colors.surface }} type={showPass ? 'text' : 'password'}
                     placeholder="Re-enter password" value={form.confirmPassword} onChange={set('confirmPassword')} />
                 </Field>
-                <Field label="Security Question">
+                <Field label={tr.securityQuestion}>
                   <div style={{ position: 'relative' }}>
-                    <select style={{ ...S.input, cursor:'pointer', paddingRight: 32, appearance: 'none', WebkitAppearance: 'none' }} value={form.securityQuestion} onChange={set('securityQuestion')}>
+                    <select style={{ ...S.input, cursor:'pointer', paddingRight: 32, appearance: 'none', WebkitAppearance: 'none', color: colors.text, background: colors.surface }} value={form.securityQuestion} onChange={set('securityQuestion')}>
                       {SECURITY_QUESTIONS.map(q => <option key={q} value={q} style={{ background:'#0d1220', color:'#fff' }}>{q}</option>)}
                     </select>
                     <span style={{ position:'absolute', right:12, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', color:'rgba(255,255,255,0.5)', fontSize:12 }}>▼</span>
                   </div>
                 </Field>
-                <Field label="Security Answer">
-                  <input style={S.input} type="text" placeholder="Your answer" value={form.securityAnswer} onChange={set('securityAnswer')} />
+                <Field label={tr.securityAnswer}>
+                  <input style={{ ...S.input, color: colors.text, background: colors.surface }} type="text" placeholder="Your answer" value={form.securityAnswer} onChange={set('securityAnswer')} />
+                </Field>
+                <Field label={tr.referralCode}>
+                  <input style={{ ...S.input, color: colors.text, background: colors.surface }} type="text" placeholder="Code (if any)" value={form.referralCode} onChange={set('referralCode')} />
                 </Field>
                 <button type="submit" disabled={loading} style={{ ...S.btn, ...(loading ? S.btnDisabled : {}) }}>
-                  {loading ? 'Sending OTP...' : 'Create'}
+                  {loading ? 'Sending OTP...' : tr.sendOtp}
                 </button>
               </form>
             </>
           ) : (
             <>
-              <h2 style={S.heading}>VERIFY OTP</h2>
+              <h2 style={{ ...S.heading, color: colors.text }}>{tr.verifyOtp}</h2>
               <p style={S.hint}>OTP sent to {maskedMobile}. Valid for 10 minutes.</p>
               {error && <div style={S.errorBox}>{error}</div>}
               <form onSubmit={handleVerifyOTP} style={S.form}>
-                <input style={{ ...S.input, letterSpacing:'0.3em', fontSize:22, textAlign:'center' }}
+                <input style={{ ...S.input, letterSpacing:'0.3em', fontSize:22, textAlign:'center', color: colors.text, background: colors.surface }}
                   type="text" inputMode="numeric" maxLength={6} placeholder="000000"
                   value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} />
                 <button type="submit" disabled={loading} style={{ ...S.btn, ...(loading ? S.btnDisabled : {}) }}>
-                  {loading ? 'Verifying...' : 'Verify OTP'}
+                  {loading ? 'Verifying...' : tr.verifyOtpBtn}
                 </button>
                 <button type="button" disabled={resendCooldown > 0} onClick={handleSendOTP} style={S.resendBtn}>
-                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend OTP'}
+                  {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : tr.resendOtp}
                 </button>
               </form>
             </>
           )}
         </div>
-        <button onClick={step === 2 ? () => setStep(1) : onBack} style={S.backBtn}>Back</button>
+        <button onClick={step === 2 ? () => setStep(1) : onBack} style={S.backBtn}>{tr.back}</button>
       </div>
     </div>
   );

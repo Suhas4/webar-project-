@@ -1,10 +1,20 @@
 import { useState, useEffect, useRef } from "react";
 import { loadPublicTargets } from "../hooks/useArStorage.js";
+import { useLanguage } from "../context/LanguageContext.jsx";
+import { T } from "../config/translations.js";
+import { useTheme } from "../context/ThemeContext.jsx";
+
+// Session-level cache: skip recompiling if public targets haven't changed
+let _cachedPublicMind = null; // { key: string, mindBlobUrl: string, arTargets: array }
+export function invalidateGuestCache() { _cachedPublicMind = null; }
 
 const FONT = "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif";
 const BG = "linear-gradient(160deg, #061A1F 0%, #0A2229 50%, #061820 100%)";
 
-export default function GuestScanScreen({ onReady, onBack }) {
+export default function GuestScanScreen({ onReady, onBack, prefetchedTargets }) {
+  const { lang } = useLanguage();
+  const tr = T[lang] || T.en;
+  const { colors } = useTheme();
   const [phase, setPhase] = useState("fetching"); // fetching | compiling | error
   const [progress, setProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState("");
@@ -20,12 +30,22 @@ export default function GuestScanScreen({ onReady, onBack }) {
     async function prepare() {
       try {
         setPhase("fetching");
-        const publicTargets = await loadPublicTargets();
+        const publicTargets = prefetchedTargets && prefetchedTargets.length > 0
+          ? prefetchedTargets
+          : await loadPublicTargets();
         if (cancelledRef.current) return;
 
         if (!publicTargets || publicTargets.length === 0) {
           setErrorMsg("No public AR targets available yet. Check back later!");
           setPhase("error");
+          return;
+        }
+
+        // Build a cache key from the image URLs — if unchanged, skip recompiling
+        const cacheKey = publicTargets.map(t => t.imageUrl).sort().join('|');
+        if (_cachedPublicMind && _cachedPublicMind.key === cacheKey) {
+          blobHandedOff = true;
+          onReady({ targets: _cachedPublicMind.arTargets, mindFileUrl: _cachedPublicMind.mindBlobUrl });
           return;
         }
 
@@ -80,6 +100,9 @@ export default function GuestScanScreen({ onReady, onBack }) {
           urlLink: t.urlLink || "",
         }));
 
+        // Store in session cache so next scan is instant
+        _cachedPublicMind = { key: cacheKey, mindBlobUrl, arTargets };
+
         blobHandedOff = true;
         onReady({ targets: arTargets, mindFileUrl: mindBlobUrl });
       } catch (err) {
@@ -100,26 +123,26 @@ export default function GuestScanScreen({ onReady, onBack }) {
   }, [onReady]);
 
   return (
-    <div style={s.screen}>
+    <div style={{ ...s.screen, background: colors.bg }}>
       <div style={s.watermark}>
         <img src="/logo.png" alt="" style={s.watermarkImg} />
       </div>
 
-      <button onClick={onBack} style={s.backBtn}>&larr;</button>
+      <button onClick={onBack} style={{ ...s.backBtn, color: colors.textMuted }}>&larr;</button>
 
       <div style={s.center}>
         {phase === "error" ? (
           <>
             <div style={s.errorIcon}>!</div>
             <p style={s.errorText}>{errorMsg}</p>
-            <button onClick={onBack} style={s.retryBtn}>Go Back</button>
+            <button onClick={onBack} style={s.retryBtn}>{tr.back}</button>
           </>
         ) : (
           <>
             <ScannerIcon />
-            <p style={s.scanLabel}>SCAN AS GUEST</p>
-            <p style={s.statusText}>
-              {phase === "fetching" ? "Finding public targets\u2026" : "Preparing scanner\u2026 " + progress + "%"}
+            <p style={{ ...s.scanLabel, color: colors.textMuted }}>{tr.scanAsGuest}</p>
+            <p style={{ ...s.statusText, color: colors.textMuted }}>
+              {phase === "fetching" ? tr.findingTargets : tr.preparingScanner + " " + progress + "%"}
             </p>
             <div style={s.progressBar}>
               <div style={{ ...s.progressFill, width: phase === "fetching" ? "15%" : progress + "%" }} />
@@ -156,4 +179,5 @@ const s = {
   errorIcon: { width: 64, height: 64, borderRadius: "50%", background: "rgba(255,80,80,0.15)", border: "2px solid rgba(255,80,80,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, color: "#ff8080", marginBottom: 16 },
   errorText: { fontSize: 15, color: "rgba(255,255,255,0.7)", fontFamily: FONT, textAlign: "center", marginBottom: 24 },
   retryBtn: { background: "transparent", border: "1.5px solid rgba(255,255,255,0.35)", borderRadius: 50, color: "#ffffff", fontSize: 15, fontFamily: FONT, padding: "14px 32px", cursor: "pointer" },
+  langSelect: { marginTop: 20, background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: 20, color: "rgba(255,255,255,0.6)", fontSize: 13, fontFamily: FONT, padding: "6px 14px", cursor: "pointer", outline: "none" },
 };

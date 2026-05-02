@@ -1,13 +1,12 @@
 import { useEffect, useRef } from 'react';
 
-export default function VideoOverlay({ src, onDone }) {
+export default function VideoOverlay({ src, onDone, fallbackMs = 8000 }) {
   const ref = useRef(null);
 
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
-    // Fallback: if video can't play or errors, call onDone after 3s
-    const fallback = setTimeout(() => onDone && onDone(), 3000);
+    const fallback = setTimeout(() => onDone && onDone(), fallbackMs);
     const onEnd = () => { clearTimeout(fallback); onDone && onDone(); };
     const onError = () => { clearTimeout(fallback); onDone && onDone(); };
     v.addEventListener('ended', onEnd);
@@ -18,7 +17,7 @@ export default function VideoOverlay({ src, onDone }) {
       v.removeEventListener('ended', onEnd);
       v.removeEventListener('error', onError);
     };
-  }, [onDone]);
+  }, [onDone, fallbackMs]);
 
   return (
     <div style={styles.overlay}>

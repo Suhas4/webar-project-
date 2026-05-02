@@ -1,18 +1,20 @@
 import { useState } from "react";
+import { useTheme } from "../context/ThemeContext.jsx";
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const GOLD = "#C9A84C";
 
 export default function GoalSelectScreen({ onPrivate, onPublic, onBack }) {
   const [showGuide, setShowGuide] = useState(false);
+  const { colors } = useTheme();
   return (
-    <div style={s.screen}>
+    <div style={{ ...s.screen, background: colors.bg }}>
       {showGuide && (
         <div style={s.modalOverlay} onClick={() => setShowGuide(false)}>
-          <div style={s.modal} onClick={e => e.stopPropagation()}>
-            <h3 style={s.modalTitle}>Guide — Select Your Goal</h3>
-            <p style={s.modalText}><strong style={{color:GOLD}}>PRIVATE</strong> — Your AR targets are only visible to you when you scan. Use this for personal memories or confidential content.</p>
-            <p style={s.modalText}><strong style={{color:GOLD}}>PUBLIC</strong> — Your AR targets are visible to all users and guests when they scan. Use this for marketing, events, or shared experiences.</p>
+          <div style={{ ...s.modal, background: colors.surface }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ ...s.modalTitle, color: colors.text }}>Guide — Select Your Goal</h3>
+            <p style={{ ...s.modalText, color: colors.textMuted }}><strong style={{color:GOLD}}>PRIVATE</strong> — Your AR targets are only visible to you when you scan.</p>
+            <p style={{ ...s.modalText, color: colors.textMuted }}><strong style={{color:GOLD}}>PUBLIC</strong> — Your AR targets are visible to all users and guests when they scan.</p>
             <button style={s.modalClose} onClick={() => setShowGuide(false)}>Close</button>
           </div>
         </div>
@@ -20,32 +22,26 @@ export default function GoalSelectScreen({ onPrivate, onPublic, onBack }) {
       <div style={s.watermark}>
         <img src="/logo.png" alt="" style={s.watermarkImg} />
       </div>
-
-      {onBack && (
-        <button onClick={onBack} style={s.backBtn}>&#8592;</button>
-      )}
-
+      {onBack && <button onClick={onBack} style={{ ...s.backBtn, color: colors.textMuted }}>&#8592;</button>}
       <div style={s.top}>
-        <h1 style={s.title}>Select Your Goal</h1>
+        <h1 style={{ ...s.title, color: colors.text }}>Select Your Goal</h1>
       </div>
-
       <div style={s.btnArea}>
-        <button onClick={onPrivate} style={s.goalBtn}>
+        <button onClick={onPrivate} style={{ ...s.goalBtn, border: `1.5px solid ${colors.border}`, background: colors.surface }}>
           <span style={s.iconWrap}><LockIcon /></span>
-          <span style={s.btnLabel}>PRIVATE</span>
+          <span style={{ ...s.btnLabel, color: colors.text }}>PRIVATE</span>
         </button>
-        <button onClick={onPublic} style={s.goalBtn}>
+        <button onClick={onPublic} style={{ ...s.goalBtn, border: `1.5px solid ${colors.border}`, background: colors.surface }}>
           <span style={s.iconWrap}><PeopleIcon /></span>
-          <span style={s.btnLabel}>PUBLIC</span>
+          <span style={{ ...s.btnLabel, color: colors.text }}>PUBLIC</span>
         </button>
       </div>
-
       <div style={s.guideArea}>
         <button onClick={() => setShowGuide(true)} style={s.guideBtn}>
-          <div style={s.guideDot}>
-            <span style={s.guideI}>i</span>
+          <div style={{ ...s.guideDot, borderColor: colors.textMuted }}>
+            <span style={{ ...s.guideI, color: colors.textMuted }}>i</span>
           </div>
-          <span style={s.guideLabel}>GUIDE</span>
+          <span style={{ ...s.guideLabel, color: colors.textMuted }}>GUIDE</span>
         </button>
       </div>
     </div>
