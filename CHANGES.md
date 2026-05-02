@@ -7,6 +7,198 @@ A mobile-friendly WebAR application where users sign up/sign in, upload marker i
 
 ## Changelog
 
+### Session 8 — Full Feature Overhaul
+
+#### 1. HelloScreen — Heartbeat Animation (replaced popup)
+- Removed the auto-popup modal that appeared 500ms after mount
+- The **SCAN AS GUEST** icon now pulses with a CSS `@keyframes heartbeat` animation (double-beat rhythm, 1.8s cycle) — draws attention without interrupting the user
+- Language selector added to the top-right corner of HelloScreen (first screen the user sees)
+- All text (HELLO, button labels) uses translation keys so language changes take effect immediately
+
+#### 2. Theme System — App-Wide Dark / Light Mode
+- New `src/context/ThemeContext.jsx` with `dark` and `light` theme palettes
+- Toggle button (☀ / ◑) in HomeScreen header; preference saved to `localStorage`
+- Every major screen (`HelloScreen`, `SignInScreen`, `SignUpScreen`, `HomeScreen`, `GalleryScreen`, `GuestScanScreen`, `UserScanScreen`, `SetupScreen`, `UrlSetupScreen`, `GoalSelectScreen`, `UploadTypeScreen`, `ProfileScreen`, `SettingsScreen`, `PremiumScreen`) now reads `colors.bg`, `colors.text`, `colors.textMuted`, `colors.surface`, `colors.border` from `useTheme()`
+- Light mode palette: soft teal-green gradient background, dark (`#061A1F`) text — all buttons and labels remain readable
+- Nav bar icons accept a `color` prop driven by `colors.navIcon` (dark in light mode, light in dark mode)
+- `main.jsx` wrapped in `<ThemeProvider>`
+
+| Token | Dark | Light |
+|---|---|---|
+| `bg` | `linear-gradient(#061A1F…)` | `linear-gradient(#e8f4f2…)` |
+| `text` | `#ffffff` | `#061A1F` |
+| `textMuted` | `rgba(255,255,255,0.5)` | `rgba(6,26,31,0.5)` |
+| `navBg` | `rgba(255,255,255,0.97)` | `#061A1F` |
+| `navIcon` | `#555` | `#fff` |
+
+#### 3. Language System — 5 Languages App-Wide
+- New `src/context/LanguageContext.jsx` and `src/config/translations.js`
+- Languages: **English, हिंदी, ಕನ್ನಡ, தமிழ், తెలుగు**
+- Translation keys cover all major UI text: screen titles, button labels, field labels, status messages, nav items
+- Language selector (dropdown) on **HelloScreen** (top-right) and **HomeScreen** (header)
+- All screens import `useLanguage()` and render `T[lang]` strings
+- Language preference saved to `localStorage` as `memoera_lang`
+- `main.jsx` wrapped in `<LanguageProvider>`
+
+#### 4. HomeScreen — Power Button + Premium Nav Icon
+- **Sign Out** text button replaced with a circular **power icon** button (SVG `⏻` symbol) with themed border — consistent with OS-style shutdown button
+- **Profile** removed from the nav bar (moved inside Settings, see item 5)
+- New **Diamond (Premium)** icon added as the last nav item — opens `PremiumScreen`
+- Theme toggle (☀/◑), power button, and language selector all in header right cluster
+
+#### 5. Settings — Profile Row + Storage Meter
+- `SettingsScreen` completely rewritten:
+  - **Profile** row at top — taps navigate to `ProfileScreen`
+  - **Storage** expandable accordion showing private and public usage vs 500 MB limit each
+  - Animated horizontal progress bars (gold for private, teal for public)
+- `onProfile` prop passed from `App.jsx` to `SettingsScreen`
+- `ProfileScreen` removed from HomeScreen nav — only accessible via Settings
+- Backend: new `GET /api/storage` endpoint returns `{ privateBytes, publicBytes, limitBytes }`
+- DB: `file_size_bytes BIGINT DEFAULT 0` column added to `ar_targets`; sizes computed from image + video + mind blobs at upload time and stored per target
+
+#### 6. PremiumScreen — New Screen
+- New `src/components/PremiumScreen.jsx`
+- Diamond SVG icon, feature list, "Coming Soon" CTA button
+- Fully theme-aware
+- Routed as `appView === 'premium'` from the diamond nav icon
+
+#### 7. Upload Flow — Confirmation Modal
+- Both `SetupScreen` and `UrlSetupScreen` now show a **confirm modal** before upload starts
+- "Are you sure you want to upload?" → Cancel returns to form, Upload proceeds
+- Prevents accidental uploads
+
+#### 8. Upload Progress Overlay — Ad Banner + Horizontal Bar
+- `UploadProgressOverlay` redesigned:
+  - **Ad banner** fills the top portion of the screen (large dashed placeholder)
+  - **Progress section** pinned at the bottom: label + percentage (inline) + full-width shimmer bar
+  - Replaced circular ring with a horizontal `linear-gradient` bar with shimmer animation
+  - Layout: `flex-column`, banner takes `flex: 1`, progress section fixed height at bottom
+
+#### 9. Post-Upload Video — Wings to Memories
+- After any upload completes (`onStart` called), `App.jsx` plays `/wings-to-memories.mp4` as a full-screen video overlay before launching AR
+- `Wings to Memories1.mp4` from Downloads copied as `public/wings-to-memories.mp4`
+- Video overlay uses `fallbackMs: 30000` so the full video plays to its natural end
+- Flow: upload → wings-to-memories video → AR view
+- `pendingARRef` (module ref) used to avoid stale closure issues in the callback chain
+- Caches are invalidated on upload so next scan recompiles with fresh targets
+
+#### 10. Pre-Gallery Video — Review Our Album
+- When the Gallery nav button is tapped, `App.jsx` plays `/review-our-album.mp4` before opening the gallery
+- `Review Our Album.mp4` from Downloads copied as `public/review-our-album.mp4`
+- Flow: Gallery tap → video overlay (next: 'gallery') → GalleryScreen
+
+#### 11. Gallery — Ad Banner + URL Display
+- Small **ad banner** appended at the very bottom of the targets list (scrollable, inside the grid)
+- URL-type targets now show `🔗 https://...` as plain truncated text (≤40 chars) instead of an auto-open button — link is visible but not accidentally opened
+- "Open Link" button removed; link display is read-only
+
+#### 12. GoalSelectScreen + UploadTypeScreen — Themed + Visibility Badge
+- Both screens apply `colors.bg`, `colors.text`, `colors.surface`, `colors.border` from `useTheme()`
+- `UploadTypeScreen` now receives a `visibility` prop (`'private'` | `'public'`) from `App.jsx`
+- A colored badge appears below "Select Your Goal" showing **PRIVATE** (gold) or **PUBLIC** (teal) — reminds the user what they selected on the previous screen
+
+#### 13. Scanner Speed — Session Cache
+- `GuestScanScreen` and `UserScanScreen` each maintain a **module-level session cache** (`_cachedPublicMind` / `_cachedUserMind`)
+- Cache key: sorted image URLs joined as a string
+- On first scan: compiles as before, stores `{ key, mindBlobUrl, arTargets }` in the cache
+- On subsequent scans (same session, same targets): returns cached result **instantly** — skips image download + recompilation
+- After a new upload: `App.jsx` calls `invalidateGuestCache()` + `invalidateUserCache()` so the next scan recompiles with the latest targets
+- Exported as named exports: `export function invalidateGuestCache()` / `export function invalidateUserCache()`
+
+#### 14. Back Button Auth Guard
+- `App.jsx` `handlePop` (popstate) rewritten to use `isGuestRef` (avoids stale closure)
+- Unauthenticated or guest users pressing browser back are always routed to `'hello'`, never `'home'`
+- Race-condition guard on `'home'` render: if token missing at render time, redirects to `'hello'`
+
+#### 15. Multiple Targets — Append Instead of Replace
+- **Backend fix:** `saveTargetsHandler` previously deleted all targets of the same visibility before inserting new ones — uploading twice wiped the first batch
+- Now queries `MAX(target_index)` for `(user_id, is_public)` and starts new indices from `max + 1`
+- Old targets are preserved; new targets are appended with non-conflicting indices
+- Scanning always recompiles from all stored images, so indices stay consistent
+
+#### 16. Selfie Camera — Mirror Image Fix
+- `CameraCapture.jsx`: video element gets `transform: scaleX(-1)` when `facingMode === 'user'`
+- Canvas capture also mirrors the draw (`ctx.translate + ctx.scale(-1,1)`) so the saved image is correctly oriented (not flipped)
+
+#### 17. ProfileScreen — Full Theme Support
+- Background, text, dividers, buttons, input fields, picker sheet all use `colors.*` tokens
+- Cancel/Edit buttons use `colors.text` and `colors.border` so they remain visible in light mode
+
+#### 18. VideoOverlay — Configurable Fallback Duration
+- `VideoOverlay` accepts `fallbackMs` prop (default: `8000` ms)
+- `App.jsx` passes `fallbackMs={30000}` for `welcome-hand.mp4` and `wings-to-memories.mp4` so they play to their natural end without being cut off by the old 3s fallback
+
+#### 19. Referral Code Field
+- Optional **Employee / Referral Code** field added to `SignUpScreen`
+- Sent to backend and stored in `users.referral_code` column (`TEXT NOT NULL DEFAULT ''`)
+- DB migration: `ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code TEXT NOT NULL DEFAULT ''`
+
+#### 20. MindAR Compiler Preload
+- `App.jsx` dynamically imports `mindar-image.prod.js` in the background while user is idle on `'hello'` or `'home'` screen
+- By the time the user taps Scan, the compiler (~1.1 MB) is already loaded — eliminates the network fetch from the critical path
+
+#### 21. Public Targets Prefetch
+- `App.jsx` calls `loadPublicTargets()` while user is on `'hello'` screen, stores result in `prefetchedPublicTargetsRef`
+- `GuestScanScreen` uses the prefetched data if available, skipping the network call on tap
+
+---
+
+#### New Files
+
+| File | Purpose |
+|---|---|
+| `webar-app/src/context/ThemeContext.jsx` | Dark/light theme context + `useTheme` hook |
+| `webar-app/src/context/LanguageContext.jsx` | Language context + `useLanguage` hook |
+| `webar-app/src/config/translations.js` | UI strings for EN / HI / KN / TA / TE |
+| `webar-app/src/components/PremiumScreen.jsx` | Premium features placeholder screen |
+| `webar-app/src/components/AdsPlaceholder.jsx` | Fallback ads screen (retained as view) |
+| `webar-app/public/review-our-album.mp4` | Video shown before opening Gallery |
+| `webar-app/public/wings-to-memories.mp4` | Video shown after upload completes (replaced) |
+
+#### Modified Files
+
+| File | Key Changes |
+|---|---|
+| `App.jsx` | Wings video after upload, gallery video intercept, cache invalidation, handleSignOut restored, pendingARRef pattern, premium + settings routing |
+| `HelloScreen.jsx` | Heartbeat animation, language selector, theme-aware, no popup |
+| `HomeScreen.jsx` | Power button sign-out, no profile in nav, premium icon, full theme tokens, translated nav labels |
+| `SettingsScreen.jsx` | Profile row, storage accordion with progress bars |
+| `GalleryScreen.jsx` | Ad banner at bottom, URL link as text, theme-aware |
+| `GoalSelectScreen.jsx` | Theme-aware |
+| `UploadTypeScreen.jsx` | Theme-aware, visibility badge |
+| `SetupScreen.jsx` | Confirm modal, translated labels, theme-aware |
+| `UrlSetupScreen.jsx` | Confirm modal, translated sign-out, theme-aware |
+| `SignInScreen.jsx` | Theme-aware, translated labels |
+| `SignUpScreen.jsx` | Theme-aware, translated labels, referral code field |
+| `GuestScanScreen.jsx` | Session cache, translated labels, theme-aware |
+| `UserScanScreen.jsx` | Session cache, translated labels, theme-aware |
+| `ProfileScreen.jsx` | Full theme support |
+| `VideoOverlay.jsx` | Configurable `fallbackMs` prop |
+| `UploadProgressOverlay.jsx` | Ad banner top, horizontal shimmer bar bottom |
+| `CameraCapture.jsx` | Mirror selfie (video + canvas flip) |
+| `main.jsx` | Wrapped in `<ThemeProvider>` + `<LanguageProvider>` |
+| `useArStorage.js` | `fileSizeBytes` per target computed and sent to backend |
+| `backend/main.go` | Append targets, `file_size_bytes` column, `GET /api/storage`, referral_code |
+
+#### Backend Changes
+
+| Change | Detail |
+|---|---|
+| `saveTargetsHandler` | Append targets (offset index from MAX) instead of DELETE + re-insert |
+| `file_size_bytes` column | Added to `ar_targets`; image + video + mind share stored per target at upload time |
+| `GET /api/storage` | Returns `privateBytes`, `publicBytes`, `limitBytes` (500 MB) for authenticated user |
+| `referral_code` column | Added to `users`; stored from signup request |
+| `SignUpRequest.ReferralCode` | New field in Go struct |
+
+#### DB Migrations (auto-applied on backend start)
+
+```sql
+ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS file_size_bytes BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_code TEXT NOT NULL DEFAULT '';
+```
+
+---
+
 ### Session 6 — Public/Private Uploads, URL Targets, Guest Scan
 
 #### 🔒 Public / Private Upload Flow
