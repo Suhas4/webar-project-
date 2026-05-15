@@ -196,6 +196,7 @@ export async function loadTargets() {
     videoUrl: t.videoUrl,
     targetType: t.targetType || "video",
     urlLink: t.urlLink || "",
+    isPublic: t.isPublic ?? false,
     _imagePreviewUrl: t.imageUrl,
     _videoBlob: null,
     _imageBlob: null,
@@ -241,4 +242,34 @@ export async function clearTargets() {
 export async function hasStoredTargets() {
   const { hasData } = await loadTargets();
   return hasData;
+}
+
+// Uploads the pre-built combined public .mind and its fingerprint to R2.
+// Called in the background after any public target upload so future guest scans
+// can download one binary file instead of re-compiling from scratch.
+export async function uploadPublicCombinedMind(mindBuffer, fingerprint) {
+  const token = getToken();
+  if (!token) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/upload/presign-public-mind`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return;
+    const { mindUrl, fingerprintUrl } = await res.json();
+    await Promise.all([
+      fetch(mindUrl, {
+        method: 'PUT',
+        body: new Blob([mindBuffer], { type: 'application/octet-stream' }),
+        headers: { 'Content-Type': 'application/octet-stream' },
+      }),
+      fetch(fingerprintUrl, {
+        method: 'PUT',
+        body: fingerprint,
+        headers: { 'Content-Type': 'text/plain' },
+      }),
+    ]);
+  } catch {
+    // Fire-and-forget — failure is non-critical
+  }
 }

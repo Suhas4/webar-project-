@@ -46,7 +46,7 @@ export default function HelloScreen({ onCreateAccount, onExisting, onGuestScan }
 
       <div style={styles.buttons}>
         <button onClick={onCreateAccount} style={{ ...styles.createBtn, borderColor: colors.text, color: colors.text }}>{s.createAccount}</button>
-        <button onClick={onExisting} style={{ ...styles.existingBtn, background: colors.text, color: colors.bg }}>{s.existingAccount}</button>
+        <button onClick={onExisting} style={{ ...styles.existingBtn, background: colors.text, color: colors.bgSolid }}>{s.existingAccount}</button>
       </div>
     </div>
   );

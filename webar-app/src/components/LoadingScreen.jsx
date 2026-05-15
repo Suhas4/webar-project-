@@ -27,8 +27,8 @@ function LoadingState() {
     <>
       <Spinner />
       <Card>
-        <p style={styles.title}>Initializing AR</p>
-        <p style={styles.subtitle}>Allow camera access when prompted</p>
+        <p style={styles.title}>Loading targets</p>
+        <p style={styles.subtitle}>Please wait…</p>
       </Card>
     </>
   );

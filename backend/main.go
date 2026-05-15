@@ -974,6 +974,53 @@ func presignUploadHandler(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"url": presignResult.URL, "key": req.Key})
 }
 
+// POST /api/upload/presign-public-mind
+// Auth required. Generates two pre-signed PUT URLs for uploading the pre-built combined
+// public .mind file and its fingerprint to R2 under public/.
+// Returns: {"mindUrl": "...", "fingerprintUrl": "..."}
+func presignPublicMindHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if _, _, err := getUserFromToken(r); err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	mindResult, err := presignClient.PresignPutObject(r.Context(), &s3.PutObjectInput{
+		Bucket:      aws.String(r2Bucket),
+		Key:         aws.String("public/combined.mind"),
+		ContentType: aws.String("application/octet-stream"),
+	}, func(opts *s3.PresignOptions) {
+		opts.Expires = 15 * time.Minute
+	})
+	if err != nil {
+		log.Printf("[presign-public-mind] mind presign error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to generate upload URL")
+		return
+	}
+
+	fpResult, err := presignClient.PresignPutObject(r.Context(), &s3.PutObjectInput{
+		Bucket:      aws.String(r2Bucket),
+		Key:         aws.String("public/combined-fingerprint.txt"),
+		ContentType: aws.String("text/plain"),
+	}, func(opts *s3.PresignOptions) {
+		opts.Expires = 15 * time.Minute
+	})
+	if err != nil {
+		log.Printf("[presign-public-mind] fingerprint presign error: %v", err)
+		writeError(w, http.StatusInternalServerError, "Failed to generate upload URL")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"mindUrl":        mindResult.URL,
+		"fingerprintUrl": fpResult.URL,
+	})
+}
+
 // POST /api/upload/multipart/init
 // Body: {"key": "users/1/videos/0.mp4", "contentType": "video/mp4"}
 // Returns: {"uploadId": "...", "key": "..."}
@@ -1542,6 +1589,7 @@ func main() {
 
 	// File upload (presigned URLs + multipart)
 	mux.HandleFunc("/api/upload/presign", presignUploadHandler)
+	mux.HandleFunc("/api/upload/presign-public-mind", presignPublicMindHandler)
 	mux.HandleFunc("/api/upload/multipart/init", multipartInitHandler)
 	mux.HandleFunc("/api/upload/multipart/part-url", multipartPartURLHandler)
 	mux.HandleFunc("/api/upload/multipart/complete", multipartCompleteHandler)

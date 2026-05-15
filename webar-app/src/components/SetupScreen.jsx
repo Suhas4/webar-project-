@@ -1,19 +1,21 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import TargetCard from './TargetCard.jsx';
 import UploadProgressOverlay from './UploadProgressOverlay.jsx';
-import { saveTargets } from '../hooks/useArStorage.js';
+import { saveTargets, loadTargets } from '../hooks/useArStorage.js';
+import { rebuildPublicMindInBackground } from '../utils/rebuildPublicMind.js';
 import { useLanguage } from '../context/LanguageContext.jsx';
 import { T } from '../config/translations.js';
 import { useTheme } from '../context/ThemeContext.jsx';
 
 
-function emptyCard(index) {
-  return { label: `Target ${index + 1}`, imageFile: null, imagePreviewUrl: null,
+function emptyCard(absoluteNumber) {
+  return { label: `Target ${absoluteNumber}`, imageFile: null, imagePreviewUrl: null,
     videoFile: null, videoName: null, videoSize: null };
 }
 
 export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSignOut, user, isPublic = false }) {
-  const [cards, setCards] = useState(() => initialCards?.length ? initialCards : [emptyCard(0)]);
+  const [cards, setCards] = useState(() => initialCards?.length ? initialCards : [emptyCard(1)]);
+  const [startIndex, setStartIndex] = useState(0);
   const [compileState, setCompileState] = useState('idle');
   const [compileProgress, setCompileProgress] = useState(0);
   const [compileError, setCompileError] = useState('');
@@ -23,6 +25,19 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
   const tr = T[lang] || T.en;
   const { colors } = useTheme();
 
+  // Fetch existing count to offset default labels (e.g. already have 3 → next is "Target 4")
+  useEffect(() => {
+    if (initialCards?.length) return;
+    loadTargets().then(({ targets }) => {
+      const count = targets ? targets.filter((t) => t.isPublic === isPublic).length : 0;
+      setStartIndex(count);
+      setCards((prev) => prev.map((card, i) => {
+        if (!/^Target \d+$/.test(card.label)) return card;
+        return { ...card, label: `Target ${count + i + 1}` };
+      }));
+    }).catch(() => {});
+  }, [isPublic, initialCards]);
+
   const isCompiling = compileState === 'compiling' || compileState === 'saving' || compileState === 'uploading' || compileState === 'finalizing';
   const canStart = cards.length > 0 && cards.every((c) => c.imageFile && c.videoFile);
 
@@ -31,15 +46,18 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
   }, []);
 
   const handleAddCard = useCallback(() => {
-    setCards((prev) => [...prev, emptyCard(prev.length)]);
-  }, []);
+    setCards((prev) => [...prev, emptyCard(startIndex + prev.length + 1)]);
+  }, [startIndex]);
 
   const handleRemoveCard = useCallback((index) => {
     setCards((prev) => {
       const next = prev.filter((_, i) => i !== index);
-      return next.map((card, i) => ({ ...card, label: `Target ${i + 1}` }));
+      return next.map((card, i) => {
+        if (!/^Target \d+$/.test(card.label)) return card;
+        return { ...card, label: `Target ${startIndex + i + 1}` };
+      });
     });
-  }, []);
+  }, [startIndex]);
 
   const handleStart = useCallback(async () => {
     if (!canStart) { setShowValidation(true); return; }
@@ -131,6 +149,10 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
         urlLink: '',
       }));
       onStart({ targets: arTargets, mindFileUrl: localMindUrl });
+
+      // After a public upload, rebuild the shared combined .mind in R2 so
+      // future guest scans download one file instead of recompiling from scratch.
+      if (isPublic) rebuildPublicMindInBackground();
     } catch (err) {
       console.error('[SetupScreen] Compilation failed:', err);
       setCompileState('error');

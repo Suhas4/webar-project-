@@ -64,12 +64,11 @@ export default function GalleryScreen({ onBack }) {
               </div>
             </div>
           ))}
-          {/* Ad banner at very bottom */}
-          <div style={styles.adBanner}>
-            <p style={styles.adLabel}>Advertisement</p>
-          </div>
         </div>
       )}
+      <div style={styles.adBanner}>
+        <p style={styles.adLabel}>Advertisement</p>
+      </div>
     </div>
   );
 }
@@ -79,16 +78,16 @@ const TEAL = '#00C9A7';
 const styles = {
   screen: { position:"fixed",inset:0,
     background:"linear-gradient(160deg, #061A1F 0%, #0A2229 50%, #061820 100%)",
-    display:"flex",flexDirection:"column",fontFamily:FONT,overflowY:"auto" },
-  header: { display:"flex",alignItems:"center",gap:12,padding:"48px 20px 16px" },
+    display:"flex",flexDirection:"column",fontFamily:FONT,overflow:"hidden" },
+  header: { display:"flex",alignItems:"center",gap:12,padding:"48px 20px 16px",flexShrink:0 },
   backBtn: { background:"transparent",border:"none",color:"rgba(255,255,255,0.6)",
     fontSize:14,fontFamily:FONT,cursor:"pointer" },
   title: { fontSize:22,fontWeight:700,color:"#fff",margin:0 },
   empty: { flex:1,display:"flex",alignItems:"center",justifyContent:"center",
     color:"rgba(255,255,255,0.4)",fontSize:16,fontFamily:FONT,padding:40 },
-  grid: { padding:"0 16px 40px",display:"flex",flexDirection:"column",gap:12 },
+  grid: { flex:1,overflowY:"auto",padding:"0 16px 16px",display:"flex",flexDirection:"column",gap:12 },
   card: { background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",
-    borderRadius:16,overflow:"hidden",display:"flex",alignItems:"center",gap:12,padding:12 },
+    borderRadius:16,overflow:"hidden",display:"flex",alignItems:"center",gap:12,padding:12,flexShrink:0 },
   thumb: { width:80,height:80,objectFit:"cover",borderRadius:10,flexShrink:0 },
   thumbPlaceholder: { width:80,height:80,background:"rgba(255,255,255,0.07)",
     borderRadius:10,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",
@@ -102,9 +101,9 @@ const styles = {
   deleteBtn: { background:"rgba(255,80,80,0.12)",border:"1px solid rgba(255,80,80,0.35)",
     borderRadius:8,color:"#ff8080",fontSize:12,fontFamily:FONT,padding:"5px 14px",cursor:"pointer" },
   adBanner: {
-    height:80, borderRadius:12,
-    background:'rgba(255,255,255,0.03)', border:'1px dashed rgba(255,255,255,0.12)',
-    display:'flex', alignItems:'center', justifyContent:'center', marginTop:8,
+    flexShrink:0,height:60,
+    background:'rgba(255,255,255,0.03)', borderTop:'1px solid rgba(255,255,255,0.08)',
+    display:'flex', alignItems:'center', justifyContent:'center',
   },
   adLabel: { fontSize:12, color:'rgba(255,255,255,0.2)', fontFamily:FONT, margin:0, letterSpacing:'0.08em' },
   videoScreen: { position:"fixed",inset:0,background:"#000",display:"flex",flexDirection:"column" },

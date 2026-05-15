@@ -1,18 +1,20 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import UploadProgressOverlay from './UploadProgressOverlay.jsx';
-import { saveTargets } from '../hooks/useArStorage.js';
+import { saveTargets, loadTargets } from '../hooks/useArStorage.js';
+import { rebuildPublicMindInBackground } from '../utils/rebuildPublicMind.js';
 import { useLanguage } from '../context/LanguageContext.jsx';
 import { T } from '../config/translations.js';
 import { useTheme } from '../context/ThemeContext.jsx';
 
 const ASPECT_MAP = { '16:9': 0.5625, '4:3': 0.75, '1:1': 1.0, '9:16': 1.7778 };
 
-function emptyCard(index) {
-  return { label: `Target ${index + 1}`, imageFile: null, imagePreviewUrl: null, urlLink: '' };
+function emptyCard(absoluteNumber) {
+  return { label: `Target ${absoluteNumber}`, imageFile: null, imagePreviewUrl: null, urlLink: '' };
 }
 
 export default function UrlSetupScreen({ onStart, onSignOut, isPublic }) {
-  const [cards, setCards] = useState(() => [emptyCard(0)]);
+  const [cards, setCards] = useState(() => [emptyCard(1)]);
+  const [startIndex, setStartIndex] = useState(0);
   const [compileState, setCompileState] = useState('idle');
   const [compileProgress, setCompileProgress] = useState(0);
   const [compileError, setCompileError] = useState('');
@@ -20,6 +22,18 @@ export default function UrlSetupScreen({ onStart, onSignOut, isPublic }) {
   const { lang } = useLanguage();
   const tr = T[lang] || T.en;
   const { colors } = useTheme();
+
+  // Offset default labels by existing target count for this visibility type
+  useEffect(() => {
+    loadTargets().then(({ targets }) => {
+      const count = targets ? targets.filter((t) => t.isPublic === isPublic).length : 0;
+      setStartIndex(count);
+      setCards((prev) => prev.map((card, i) => {
+        if (!/^Target \d+$/.test(card.label)) return card;
+        return { ...card, label: `Target ${count + i + 1}` };
+      }));
+    }).catch(() => {});
+  }, [isPublic]);
 
   const isCompiling = ['compiling', 'saving', 'uploading', 'finalizing'].includes(compileState);
   const canStart = cards.length > 0 && cards.every((c) => c.imageFile && c.urlLink.trim());
@@ -41,15 +55,18 @@ export default function UrlSetupScreen({ onStart, onSignOut, isPublic }) {
   }, []);
 
   const handleAddCard = useCallback(() => {
-    setCards((prev) => [...prev, emptyCard(prev.length)]);
-  }, []);
+    setCards((prev) => [...prev, emptyCard(startIndex + prev.length + 1)]);
+  }, [startIndex]);
 
   const handleRemoveCard = useCallback((index) => {
     setCards((prev) => {
       const next = prev.filter((_, i) => i !== index);
-      return next.map((card, i) => ({ ...card, label: `Target ${i + 1}` }));
+      return next.map((card, i) => {
+        if (!/^Target \d+$/.test(card.label)) return card;
+        return { ...card, label: `Target ${startIndex + i + 1}` };
+      });
     });
-  }, []);
+  }, [startIndex]);
 
   const handleStart = useCallback(async () => {
     if (!canStart) { setShowValidation(true); return; }
@@ -131,6 +148,8 @@ export default function UrlSetupScreen({ onStart, onSignOut, isPublic }) {
         urlLink: meta.urlLink,
       }));
       onStart({ targets: arTargets, mindFileUrl: localMindUrl });
+
+      if (isPublic) rebuildPublicMindInBackground();
     } catch (err) {
       console.error('[UrlSetupScreen] failed:', err);
       setCompileState('error');
