@@ -383,23 +383,30 @@ This code expires in 10 minutes. Do not share it with anyone.
 }
 
 func sendSMSOTP(mobile, otp string) error {
-	apiKey := os.Getenv("TWOFACTOR_API_KEY")
-	if apiKey == "" {
-		log.Printf("[OTP] 2Factor not configured — OTP for %s: %s", mobile, otp)
+	authKey := os.Getenv("MSG91_AUTH_KEY")
+	templateID := os.Getenv("MSG91_TEMPLATE_ID")
+	if authKey == "" || templateID == "" {
+		log.Printf("[OTP] MSG91 not configured — OTP for %s: %s", mobile, otp)
 		return nil
 	}
 	to := strings.TrimPrefix(mobile, "+")
 	if !strings.HasPrefix(to, "91") {
 		to = "91" + to
 	}
-	url := fmt.Sprintf("https://2factor.in/API/V1/%s/SMS/%s/%s/OTP1", apiKey, to, otp)
-	resp, err := http.Get(url)
+	payload := fmt.Sprintf(`{"template_id":"%s","mobile":"%s","otp":"%s"}`, templateID, to, otp)
+	req, err := http.NewRequest(http.MethodPost, "https://control.msg91.com/api/v5/otp", strings.NewReader(payload))
 	if err != nil {
-		return fmt.Errorf("2Factor request failed: %w", err)
+		return fmt.Errorf("MSG91 request build failed: %w", err)
+	}
+	req.Header.Set("authkey", authKey)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("MSG91 request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("2Factor error: status %d", resp.StatusCode)
+		return fmt.Errorf("MSG91 error: status %d", resp.StatusCode)
 	}
 	return nil
 }
