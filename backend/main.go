@@ -390,9 +390,7 @@ func sendSMSOTP(mobile, otp string) error {
 		return nil
 	}
 	to := strings.TrimPrefix(mobile, "+")
-	if !strings.HasPrefix(to, "91") {
-		to = "91" + to
-	}
+	to = strings.TrimPrefix(to, "91") // VOICE API expects 10-digit number only
 	url := fmt.Sprintf("https://2factor.in/API/V1/%s/VOICE/%s/%s", apiKey, to, otp)
 	resp, err := http.Get(url)
 	if err != nil {
