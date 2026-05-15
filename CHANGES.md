@@ -7,7 +7,96 @@ A mobile-friendly WebAR application where users sign up/sign in, upload marker i
 
 ## Changelog
 
-### Session 8 — Full Feature Overhaul
+### Session 9 — Camera-First Scan, IDB Cache, Consecutive Labels, UI Fixes
+
+#### 1. Camera-First Loading (GuestScanScreen + UserScanScreen)
+- Camera opens **immediately** when the scan screen mounts — user sees the viewfinder straight away instead of a loading spinner
+- Compilation pipeline runs in the background while the camera is already live
+- New `ViewfinderBrackets` SVG component (corner brackets in teal `#00C9A7`) overlaid on the live camera feed
+- Progress bar + status label shown in a bottom bar overlay while loading
+- Fallback to old dark-screen UI if camera permission is denied
+
+#### 2. Three-Tier .mind Cache (GuestScanScreen)
+Guest scans now check three cache layers before compiling from scratch:
+1. **Session cache** — instant, in-memory (already existed from Session 8)
+2. **IndexedDB cache** (`useMindCache.js`) — survives page refreshes; stores raw `ArrayBuffer` keyed by image-URL fingerprint
+3. **R2 pre-built file** — after any public upload, `public/combined.mind` is uploaded to R2; subsequent guest scans download one binary file instead of recompiling N images
+
+#### 3. IndexedDB Cache for User Scan (UserScanScreen)
+- Same session → IndexedDB two-tier cache applied to logged-in user scans
+- Cache key: sorted image URLs of the merged (own + public) target set
+- `useMindCache.js` stores both public and user caches under separate keys (`mind-public`, `mind-user`)
+
+#### 4. New: `useMindCache.js`
+- Thin wrapper around `idb-keyval` for persisting compiled `.mind` files
+- Exports: `getCachedPublicMind`, `setCachedPublicMind`, `getCachedUserMind`, `setCachedUserMind`
+- Gracefully swallows quota errors — session cache still works if IDB write fails
+
+#### 5. Background Public Mind Rebuild (`rebuildPublicMind.js`)
+- After any **public** upload (`SetupScreen` or `UrlSetupScreen`), `rebuildPublicMindInBackground()` runs fire-and-forget
+- Recompiles all public targets, uploads `public/combined.mind` + `public/combined-fingerprint.txt` to R2
+- Also warms the local IndexedDB cache so the uploader's next guest scan is instant too
+
+#### 6. Backend: `POST /api/upload/presign-public-mind`
+- New authenticated endpoint — generates two pre-signed R2 PUT URLs:
+  - `public/combined.mind` (binary, `application/octet-stream`)
+  - `public/combined-fingerprint.txt` (sorted image-URL fingerprint, `text/plain`)
+- Returns `{ mindUrl, fingerprintUrl }`
+
+#### 7. Consecutive Target Labels (SetupScreen + UrlSetupScreen)
+- Default card labels ("Target 1", "Target 2" …) now continue from the user's **existing** target count for that visibility type
+- Example: already have 3 private targets → next private upload starts at "Target 4"
+- On mount, both screens call `loadTargets()`, filter by `isPublic`, and offset labels accordingly
+- "Add card" and "Remove card" also respect the offset
+- User-renamed labels (not matching `^Target \d+$`) are never overwritten
+
+#### 8. `useArStorage.js` — `isPublic` Exposed
+- `loadTargets()` now includes `isPublic: t.isPublic` in each mapped target object
+- Required for the label-offset feature and any future per-visibility logic
+
+#### 9. `api.js` — `R2_PUBLIC_URL` Constant
+- New export: `R2_PUBLIC_URL` (reads `VITE_R2_PUBLIC_URL` env var, defaults to the live R2 CDN URL)
+- Used by `GuestScanScreen` to fetch `public/combined.mind` and `public/combined-fingerprint.txt`
+
+#### 10. Gallery — Ad Banner Fixed at Bottom
+- Ad banner moved **out** of the scrollable target list and pinned as a fixed-height bar at the bottom of the screen
+- Previously it scrolled with the list and was buried below all targets when there were many entries
+- Screen: `overflow: hidden`; grid: `flex: 1, overflowY: auto`; ad bar: `flexShrink: 0`
+
+#### 11. LoadingScreen — "Loading targets"
+- Replaced "Initializing AR" with **"Loading targets"** and "Please wait…" subtitle
+- Removed Yes/No buttons that were briefly added and then removed
+
+#### 12. HelloScreen — Light Mode Button Fix
+- "Existing Account" button was invisible in light mode: `color: colors.bg` passed a gradient string to CSS `color`, which is invalid — browser fell back to black text on a dark button
+- Fix: added `bgSolid` key to both theme palettes (`#061A1F` dark, `#e8f4f2` light) and used `colors.bgSolid` as the button text color
+
+#### New Files
+
+| File | Purpose |
+|---|---|
+| `webar-app/src/hooks/useMindCache.js` | IndexedDB cache for compiled `.mind` files |
+| `webar-app/src/utils/rebuildPublicMind.js` | Background recompile + R2 upload after public uploads |
+
+#### Modified Files
+
+| File | Key Changes |
+|---|---|
+| `GuestScanScreen.jsx` | Camera-first UI, 3-tier cache (session → IDB → R2 → compile), ViewfinderBrackets |
+| `UserScanScreen.jsx` | Camera-first UI, session → IDB 2-tier cache, ViewfinderBrackets |
+| `SetupScreen.jsx` | Consecutive label offset from existing count, call rebuild after public upload |
+| `UrlSetupScreen.jsx` | Consecutive label offset, call rebuild after public upload |
+| `useArStorage.js` | `isPublic` in mapped targets, new `uploadPublicCombinedMind()` function |
+| `api.js` | Added `R2_PUBLIC_URL` export |
+| `GalleryScreen.jsx` | Ad banner fixed at screen bottom (not scrollable) |
+| `LoadingScreen.jsx` | "Loading targets" instead of "Initializing AR" |
+| `HelloScreen.jsx` | Use `colors.bgSolid` for existing-account button text |
+| `ThemeContext.jsx` | Added `bgSolid` solid color token to both themes |
+| `backend/main.go` | New `presignPublicMindHandler` + route `/api/upload/presign-public-mind` |
+
+---
+
+
 
 #### 1. HelloScreen — Heartbeat Animation (replaced popup)
 - Removed the auto-popup modal that appeared 500ms after mount
