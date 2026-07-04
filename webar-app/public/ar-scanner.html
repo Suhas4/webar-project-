@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Memoera AR Scanner</title>
+
+  <!-- Bundled locally — no CDN round-trip, loads instantly from APK storage -->
+  <script src="/libs/aframe.min.js"></script>
+  <script src="/libs/mindar-image-aframe.prod.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; font-family: 'Outfit', sans-serif; }
+    html { background: #000; }
+    /* MindAR injects the live camera <video> directly into <body> with a
+       negative z-index. A static <body> with an opaque background paints
+       OVER negative-z-index children (classic stacking-context gotcha),
+       which hid the camera feed behind solid black. Keep body transparent
+       so the video shows through to <html>'s black backdrop during startup. */
+    body { background: transparent; }
+
+    @keyframes spin    { to { transform: rotate(360deg); } }
+    @keyframes initBar {
+      0%   { width: 0%; }
+      60%  { width: 75%; }
+      90%  { width: 92%; }
+      100% { width: 100%; }
+    }
+
+    /* ── Startup overlay — transparent so the live camera feed shows through
+       the instant MindAR attaches it; only exists to fade out smoothly and
+       to keep a stable element for the JS hide/show hooks below. ── */
+    #startup-overlay {
+      position: fixed; inset: 0; z-index: 9998;
+      background: transparent;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 16px;
+      pointer-events: none;
+    }
+    #startup-overlay.hidden { display: none; }
+
+    #startup-overlay #startup-ring {
+      width: 46px; height: 46px;
+      border: 4px solid rgba(0,201,167,0.18);
+      border-top-color: #00C9A7;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    #startup-overlay #startup-label {
+      font-size: 13px; color: rgba(255,255,255,0.6); font-family: inherit;
+      letter-spacing: 0.04em;
+    }
+
+    /* ── Camera/AR error overlay — shown when getUserMedia or MindAR fails ── */
+    #ar-error-overlay {
+      position: fixed; inset: 0; z-index: 9997;
+      background: #040D0B;
+      display: none;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 16px; padding: 32px; text-align: center;
+    }
+    #ar-error-overlay.visible { display: flex; }
+    #ar-error-icon { font-size: 40px; }
+    #ar-error-text {
+      font-size: 15px; color: rgba(255,255,255,0.75); font-family: inherit;
+      max-width: 320px; line-height: 1.5;
+    }
+    #ar-error-back-btn, #ar-error-retry-btn {
+      border: none; border-radius: 50px;
+      font-family: inherit; font-size: 14px; font-weight: 700;
+      padding: 12px 30px; cursor: pointer;
+    }
+    #ar-error-retry-btn {
+      background: #00C9A7; color: #040D0B;
+    }
+    #ar-error-back-btn {
+      background: transparent; color: rgba(255,255,255,0.7);
+      border: 1.5px solid rgba(255,255,255,0.3);
+    }
+    #ar-error-buttons { display: flex; gap: 10px; }
+    #ar-error-diag {
+      margin-top: 20px; max-width: 320px; font-size: 10px; line-height: 1.6;
+      color: rgba(255,255,255,0.35); font-family: monospace; text-align: left;
+      background: rgba(255,255,255,0.04); border-radius: 8px; padding: 10px 12px;
+      word-break: break-word; white-space: pre-wrap;
+    }
+
+    /* ── Back button ── */
+    #back-btn {
+      position: fixed; top: 48px; left: 16px; z-index: 9000;
+      background: rgba(0,0,0,0.55); border: 1px solid rgba(0,201,167,0.5);
+      border-radius: 22px; color: #00C9A7;
+      font-size: 13px; font-weight: 700; font-family: inherit;
+      padding: 8px 16px; cursor: pointer;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+
+    /* ── Torch button ── */
+    #torch-btn {
+      position: fixed; top: 48px; right: 16px; z-index: 9000;
+      background: rgba(0,0,0,0.55); border: 1px solid rgba(0,201,167,0.5);
+      border-radius: 22px; color: #00C9A7;
+      font-size: 13px; font-weight: 700; font-family: inherit;
+      padding: 8px 16px; cursor: pointer;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+      display: none; align-items: center; gap: 7px;
+    }
+    #torch-btn.on {
+      background: rgba(255,220,0,0.28);
+      border-color: rgba(255,220,0,0.7);
+      color: #FFE066;
+    }
+
+    /* ── Slim progress bar ── */
+    #init-bar {
+      position: fixed; top: 0; left: 0; height: 3px; z-index: 9001;
+      background: #00C9A7;
+      animation: initBar 3s ease-in-out forwards;
+    }
+    #init-bar.done { display: none; }
+
+    /* ── Full-screen video overlay ── */
+    #fs-overlay {
+      position: fixed; inset: 0; z-index: 9999;
+      background: #000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    #fs-overlay.visible { display: flex; }
+
+    #fs-video {
+      width: 100%; height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+    #fs-close-btn {
+      position: absolute; top: 48px; left: 16px; z-index: 10000;
+      background: rgba(0,0,0,0.60); border: 1px solid rgba(0,201,167,0.5);
+      border-radius: 22px; color: #00C9A7;
+      font-size: 13px; font-weight: 700; font-family: inherit;
+      padding: 8px 18px; cursor: pointer;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+
+    /* Video loader spinner */
+    #fs-loader {
+      position: absolute; inset: 0; z-index: 10002;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: #000; gap: 16px;
+    }
+    #fs-loader.hidden { display: none; }
+    #fs-loader-ring {
+      width: 52px; height: 52px;
+      border: 4px solid rgba(0,201,167,0.18);
+      border-top-color: #00C9A7;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+    }
+    #fs-loader-text { font-size: 13px; color: rgba(255,255,255,0.45); font-family: inherit; }
+
+    /* Hide A-Frame's built-in VR / AR entry buttons */
+    .a-enter-vr-button, .a-enter-ar-button,
+    .a-enter-vr, .a-enter-ar { display: none !important; }
+
+    /* Rotate button — shown while video is open */
+    #rotate-btn {
+      position: absolute;
+      bottom: 36px; right: 20px; z-index: 10001;
+      background: rgba(0,0,0,0.60);
+      border: 1px solid rgba(0,201,167,0.55);
+      border-radius: 22px; color: #00C9A7;
+      font-size: 13px; font-weight: 700; font-family: inherit;
+      padding: 9px 18px; cursor: pointer;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+      display: none; align-items: center; gap: 7px;
+    }
+
+    /* Replay button — shown when video ends */
+    #replay-btn {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 10001;
+      background: rgba(0,0,0,0.78);
+      border: 2px solid #00C9A7;
+      border-radius: 50px;
+      color: #00C9A7;
+      font-size: 17px; font-weight: 700; font-family: inherit;
+      padding: 14px 40px;
+      cursor: pointer;
+      backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+      display: none;
+    }
+
+    /* URL badge */
+    #url-badge {
+      position: fixed; bottom: 52px; left: 50%; transform: translateX(-50%);
+      z-index: 9000;
+      background: rgba(0,201,167,0.18); border: 1px solid rgba(0,201,167,0.5);
+      border-radius: 50px; color: #00C9A7;
+      font-size: 13px; font-weight: 700; padding: 10px 24px;
+      white-space: nowrap; backdrop-filter: blur(8px);
+      display: none; cursor: pointer;
+    }
+    #url-badge.visible { display: block; }
+  </style>
+</head>
+<body>
+
+  <!-- Startup overlay: shown until the camera feed is live, so the user sees
+       active progress instead of a blank black screen while it loads. -->
+  <div id="startup-overlay">
+    <div id="startup-ring"></div>
+    <div id="startup-label">Opening camera…</div>
+  </div>
+
+  <!-- Error overlay: shown if the camera/AR engine fails to start -->
+  <div id="ar-error-overlay">
+    <div id="ar-error-icon">⚠️</div>
+    <div id="ar-error-text">Camera unavailable. Please check camera permissions for this site and try again.</div>
+    <div id="ar-error-buttons">
+      <button id="ar-error-retry-btn" onclick="retryCamera()">↻ Try Again</button>
+      <button id="ar-error-back-btn" onclick="goBack()">← Go Back</button>
+    </div>
+    <div id="ar-error-diag"></div>
+    <div style="position:fixed;bottom:10px;left:0;right:0;text-align:center;font-size:9px;color:rgba(255,255,255,0.25);">build 2026-06-21-5</div>
+  </div>
+
+  <!-- Progress bar -->
+  <div id="init-bar"></div>
+
+  <!-- Back button -->
+  <button id="back-btn" onclick="goBack()">← Back</button>
+
+  <!-- Torch button (revealed after arReady) -->
+  <button id="torch-btn" onclick="toggleTorch()">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 2h8l2 6H6L8 2z"/>
+      <path d="M6 8l1.5 12a1 1 0 001 .9h7a1 1 0 001-.9L18 8"/>
+      <line x1="12" y1="12" x2="12" y2="17"/>
+    </svg>
+    <span id="torch-label">Torch</span>
+  </button>
+
+  <!-- URL tap-to-open badge -->
+  <div id="url-badge" onclick="handleBadgeTap()"></div>
+
+  <!-- Full-screen video overlay -->
+  <div id="fs-overlay">
+    <button id="fs-close-btn" onclick="closeFullscreen()">← Scan Again</button>
+    <video id="fs-video" playsinline webkit-playsinline style="visibility:hidden"></video>
+    <div id="fs-loader">
+      <div id="fs-loader-ring"></div>
+      <div id="fs-loader-text">Loading video…</div>
+    </div>
+    <button id="replay-btn" onclick="replayVideo()">↺ Replay</button>
+    <button id="rotate-btn" onclick="rotateVideo()">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 2v6h-6"/>
+        <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+        <path d="M3 22v-6h6"/>
+        <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+      </svg>
+      <span id="rotate-label">Landscape</span>
+    </button>
+  </div>
+
+  <!-- A-Frame AR Scene -->
+  <a-scene id="ar-scene"
+    color-space="sRGB"
+    renderer="colorManagement: true; physicallyCorrectLights: true"
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: false">
+
+    <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+  </a-scene>
+
+  <script>
+    var initBar        = document.getElementById('init-bar');
+    var backBtn        = document.getElementById('back-btn');
+    var torchBtn       = document.getElementById('torch-btn');
+    var torchLabel     = document.getElementById('torch-label');
+    var startupOverlay = document.getElementById('startup-overlay');
+    var fsOverlay      = document.getElementById('fs-overlay');
+    var fsVideo        = document.getElementById('fs-video');
+    var fsLoader       = document.getElementById('fs-loader');
+    var replayBtn      = document.getElementById('replay-btn');
+    var rotateBtn      = document.getElementById('rotate-btn');
+    var rotateLabel    = document.getElementById('rotate-label');
+    var urlBadge       = document.getElementById('url-badge');
+    var scene          = document.getElementById('ar-scene');
+    var arErrorOverlay = document.getElementById('ar-error-overlay');
+    var arErrorText    = document.getElementById('ar-error-text');
+    var arErrorDiag    = document.getElementById('ar-error-diag');
+
+    var dataReceived      = false;
+    var sceneRenderStarted = false;
+    var arHasStarted      = false;
+    var arRetried         = false;
+    var lastMindSrc        = null;
+    var fsOpen            = false;
+    var pendingUrl        = null;
+    var pendingDoc        = null;  // { url, category, previewUrl, fileName } for the currently-found document target
+    var torchOn           = false;
+    var arTrack           = null;
+    var lastCloseTime     = 0;   // set by parent when reloading after "Scan Again"
+    var needTargetLost    = false; // true after reload: require camera to leave target first
+    var videoLandscape    = false; // tracks the forced orientation state
+    var foundTargets      = {};    // targetIndex -> target data, while currently detected
+    var diag               = {};   // diagnostic state surfaced on the error screen
+
+    // ── Track the scene's 'renderstart' event from the EARLIEST possible
+    //    moment. MindAR's mindar-image component only calls system.start()
+    //    (which is what actually opens the camera) inside a 'renderstart'
+    //    listener it registers when the component initializes. 'renderstart'
+    //    fires exactly ONCE, the moment A-Frame's render loop begins — which
+    //    for this trivially simple scene (just one <a-camera>, no heavy
+    //    assets) often happens almost immediately, frequently BEFORE the
+    //    postMessage round-trip from the parent app even delivers the mind
+    //    data. If that happens, MindAR's own listener (registered later, once
+    //    we set the mindar-image attribute) misses the event entirely and
+    //    silently never starts the camera — no error, just a permanent hang.
+    //    Tracking it ourselves lets us manually call start() as a fallback.
+    scene.addEventListener('renderstart', function() { sceneRenderStarted = true; });
+
+    // Sets the mindar-image attribute, then manually starts the system if
+    // 'renderstart' already fired before this point — see the long comment
+    // on the listener above for why this is necessary.
+    function setMindArAttribute(src) {
+      scene.setAttribute('mindar-image', {
+        imageTargetSrc: src,
+        autoStart: true,
+        uiLoading: 'no',
+        uiScanning: 'no',
+        uiError: 'no'
+      });
+      diag.renderStartedBeforeInit = sceneRenderStarted;
+      if (sceneRenderStarted) {
+        setTimeout(function() {
+          try {
+            var sys = scene.systems && scene.systems['mindar-image-system'];
+            if (sys && sys.start) { sys.start(); diag.manualStartCalled = true; }
+          } catch (e) { diag.manualStartError = e && e.message; }
+        }, 0);
+      }
+    }
+
+    // ── Suppress the native gray "play button" poster on MindAR's camera <video> ──
+    // MindAR injects a bare <video> into <body> and attaches the camera stream
+    // asynchronously via srcObject; in the gap before the stream attaches, Chrome/
+    // WebView renders its built-in placeholder (gray box + play-button ring) at the
+    // element's default 300×150 size, overlapping the Back button. A transparent
+    // poster suppresses that built-in graphic without affecting the live feed.
+    var TRANSPARENT_POSTER = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+    function suppressVideoPoster(v) {
+      if (v.id !== 'fs-video' && !v.dataset.posterFixed) {
+        v.dataset.posterFixed = '1';
+        v.setAttribute('poster', TRANSPARENT_POSTER);
+      }
+    }
+    // MindAR's internal camera <video> only sets the bare "autoplay" HTML
+    // attribute and never calls .play() itself — if the browser doesn't
+    // honor that automatically (varies by context/version), the video never
+    // fires 'loadedmetadata', MindAR's _startAR() never runs, arReady never
+    // fires, and — critically — MindAR emits NO error for this case either,
+    // so it hangs silently forever. Force-start playback ourselves as soon
+    // as the stream is attached, so this can't silently stall.
+    function forceStartCameraVideo(v) {
+      if (v.id === 'fs-video' || v.dataset.forcePlayBound) return;
+      v.dataset.forcePlayBound = '1';
+      diag.camVideoFound = true;
+      var tryPlay = function() {
+        v.play().then(function() { diag.playResolved = true; })
+                .catch(function(e) { diag.playError = e && e.name; });
+      };
+      if (v.srcObject) tryPlay();
+      v.addEventListener('loadedmetadata', function() { diag.loadedMetadataFired = true; tryPlay(); });
+      v.addEventListener('canplay', function() { diag.canplayFired = true; tryPlay(); });
+      v.addEventListener('error', function() { diag.videoElError = true; });
+      // srcObject is assigned async after the element is created — watch for it.
+      var checks = 0;
+      var poll = setInterval(function() {
+        checks++;
+        diag.lastReadyState = v.readyState;
+        diag.lastVideoWH = v.videoWidth + 'x' + v.videoHeight;
+        if (v.srcObject) { diag.srcObjectSeen = true; tryPlay(); clearInterval(poll); }
+        else if (checks > 40) clearInterval(poll); // give up after ~4s
+      }, 100);
+    }
+    function handleNewVideo(v) {
+      suppressVideoPoster(v);
+      forceStartCameraVideo(v);
+    }
+    Array.prototype.forEach.call(document.querySelectorAll('video'), handleNewVideo);
+    new MutationObserver(function(mutations) {
+      mutations.forEach(function(m) {
+        Array.prototype.forEach.call(m.addedNodes, function(node) {
+          if (node.nodeType !== 1) return;
+          if (node.tagName === 'VIDEO') handleNewVideo(node);
+          else if (node.querySelectorAll) Array.prototype.forEach.call(node.querySelectorAll('video'), handleNewVideo);
+        });
+      });
+    }).observe(document.body, { childList: true, subtree: true });
+
+    // ── arReady: camera feed is live — hide startup overlay, show torch ───────
+    scene.addEventListener('arReady', function onArReady() {
+      arHasStarted = true;
+      scene.removeEventListener('arReady', onArReady);
+      initBar.classList.add('done');
+      startupOverlay.classList.add('hidden');   // camera feed now visible
+      torchBtn.style.display = 'flex';          // torch button available
+
+      // Let camera stabilize for 500ms before starting AR frame processing
+      // This reduces lag on older/slower devices by allowing the camera sensor
+      // and processing pipeline to settle before heavy ML model inference begins.
+      setTimeout(function() {
+        // Grab MindAR's internal camera track for torch control
+        var videos = document.querySelectorAll('video');
+        for (var i = 0; i < videos.length; i++) {
+          if (videos[i].id !== 'fs-video' && videos[i].srcObject) {
+            var tracks = videos[i].srcObject.getVideoTracks();
+            if (tracks.length > 0) { arTrack = tracks[0]; break; }
+          }
+        }
+      }, 500);
+    });
+
+    // Known in-app browsers (Instagram, Facebook, etc.) sandbox their embedded
+    // WebView and refuse camera access outright, no matter what permission the
+    // user grants — the only fix is opening the link in a real browser.
+    function detectInAppBrowser() {
+      var ua = navigator.userAgent || '';
+      if (/Instagram/i.test(ua)) return 'Instagram';
+      if (/FBAN|FBAV|FB_IAB/i.test(ua)) return 'Facebook';
+      if (/Line\//i.test(ua)) return 'LINE';
+      if (/MicroMessenger/i.test(ua)) return 'WeChat';
+      if (/Snapchat/i.test(ua)) return 'Snapchat';
+      if (/TikTok/i.test(ua)) return 'TikTok';
+      return null;
+    }
+
+    // ── arError: camera/AR engine failed to start — show a real error screen
+    //    instead of leaving the user on a blank black void. ──────────────────
+    function showArError(message) {
+      startupOverlay.classList.add('hidden');
+      initBar.classList.add('done');
+      backBtn.style.display = 'none';
+      if (message) arErrorText.textContent = message;
+      arErrorOverlay.classList.add('visible');
+
+      // Surface internal state directly on screen so a screenshot is enough
+      // to diagnose this remotely — no remote debugging session needed.
+      diag.arHasStarted    = arHasStarted;
+      diag.dataReceived    = dataReceived;
+      diag.arRetried       = arRetried;
+      diag.ua               = navigator.userAgent;
+      var lines = [
+        'ua: ' + (diag.ua || '').slice(0, 60),
+        'dataReceived: ' + !!diag.dataReceived,
+        'camVideoFound: ' + !!diag.camVideoFound,
+        'srcObjectSeen: ' + !!diag.srcObjectSeen,
+        'lastReadyState: ' + (diag.lastReadyState != null ? diag.lastReadyState : '-'),
+        'lastVideoWH: ' + (diag.lastVideoWH || '-'),
+        'loadedMetadataFired: ' + !!diag.loadedMetadataFired,
+        'canplayFired: ' + !!diag.canplayFired,
+        'playResolved: ' + !!diag.playResolved,
+        'playError: ' + (diag.playError || '-'),
+        'videoElError: ' + !!diag.videoElError,
+        'arHasStarted: ' + !!diag.arHasStarted,
+        'arRetried: ' + !!diag.arRetried,
+        'probeSucceeded: ' + !!diag.probeSucceeded,
+        'probeTrackCount: ' + (diag.probeTrackCount != null ? diag.probeTrackCount : '-'),
+        'probeError: ' + (diag.probeError || '-'),
+        'sceneHasLoaded: ' + !!scene.hasLoaded,
+        'sceneLoadedAtSignal: ' + !!diag.sceneLoadedAtSignal,
+        'sceneLoadedAtStart: ' + !!diag.sceneLoadedAtStart,
+        'sceneRenderStarted: ' + !!sceneRenderStarted,
+        'renderStartedBeforeInit: ' + !!diag.renderStartedBeforeInit,
+        'manualStartCalled: ' + !!diag.manualStartCalled,
+        'manualStartError: ' + (diag.manualStartError || '-')
+      ];
+      arErrorDiag.textContent = lines.join('\n');
+    }
+
+    // ── Direct camera probe (DIAGNOSIS ONLY — never runs alongside MindAR's
+    //    own getUserMedia call) ─────────────────────────────────────────────
+    // The Permissions API ('navigator.permissions.query({name:'camera'})') is
+    // NOT reliably supported on many mobile browsers, so it can't tell us why
+    // a failure happened. This probe gets the browser's REAL, specific error —
+    // but it must only run once MindAR's own attempt has already finished
+    // (succeeded or failed). Running it in parallel/before MindAR's request
+    // causes an acquire-then-release-then-reacquire race that itself produces
+    // "camera busy" failures — exactly the bug this is meant to diagnose.
+    function probeCamera() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showArError('Camera is not supported in this browser. Please try Chrome or Safari.');
+        return;
+      }
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280, max: 1920 }, height: { ideal: 720, max: 1080 } }, audio: false })
+        .then(function(stream) {
+          diag.probeSucceeded = true;
+          diag.probeTrackCount = stream.getVideoTracks().length;
+          stream.getTracks().forEach(function(t) { t.stop(); });
+          // The probe succeeded but MindAR still hasn't — likely just slow
+          // hardware init, not a permission/hardware problem. Let the normal
+          // 7 s fallback keep waiting rather than showing a confusing error.
+        })
+        .catch(function(err) {
+          diag.probeError = (err && err.name) || 'unknown';
+          if (arHasStarted) return;
+          var name = err && err.name;
+          var inApp = detectInAppBrowser();
+          var message =
+            name === 'NotAllowedError' && inApp ?
+              'Camera access is blocked by the ' + inApp + ' in-app browser — this is a restriction ' + inApp + ' applies to every site it opens, not a Memoera problem. Tap the ••• or ⋮ menu and choose "Open in Browser" (Safari or Chrome), then try again.' :
+            name === 'NotAllowedError' ?
+              'Camera access is blocked for this site. Tap the lock/info icon next to the address bar → Permissions → Camera → Allow, then go back and try again.' :
+            name === 'NotReadableError' || name === 'TrackStartError' ?
+              'Your camera is being used by another app. Close any other camera/video apps and try again.' :
+            name === 'NotFoundError' || name === 'DevicesNotFoundError' ?
+              'No camera was found on this device.' :
+            name === 'OverconstrainedError' ?
+              'Could not find a rear camera on this device.' :
+              'Could not access the camera (' + (name || 'unknown error') + '). Please check your device settings and try again.';
+          showArError(message);
+        });
+    }
+
+    // ── Retry: re-check the camera without leaving the page ─────────────────
+    function retryCamera() {
+      arErrorOverlay.classList.remove('visible');
+      backBtn.style.display = 'flex';
+      startupOverlay.classList.remove('hidden');
+      initBar.classList.remove('done');
+      arHasStarted = false;
+      arRetried    = false;
+      // Re-attempt the real AR engine — let IT try the camera first (probe
+      // runs later, only if this attempt doesn't succeed in time).
+      if (dataReceived && lastMindSrc) {
+        try {
+          scene.removeAttribute('mindar-image');
+          setMindArAttribute(lastMindSrc);
+          setTimeout(function() {
+            if (!arHasStarted) probeCamera();
+          }, 1500);
+        } catch (e) {
+          probeCamera();
+        }
+      } else {
+        probeCamera();
+      }
+    }
+
+    scene.addEventListener('arError', function onArError(e) {
+      var reason = e.detail && e.detail.error;
+
+      // Most "camera busy" failures are transient (camera hardware still
+      // releasing from the previous screen) — automatically retry once
+      // before bothering the user with an error screen.
+      if (reason === 'VIDEO_FAIL' && !arRetried && lastMindSrc) {
+        arRetried = true;
+        setTimeout(function() {
+          if (arHasStarted) return; // succeeded on its own in the meantime
+          try {
+            scene.removeAttribute('mindar-image');
+            setMindArAttribute(lastMindSrc);
+          } catch (retryErr) {
+            showArError('Camera unavailable. Please check your device settings and try again.');
+          }
+        }, 600);
+        return;
+      }
+
+      scene.removeEventListener('arError', onArError);
+      var inAppOnError = detectInAppBrowser();
+      var message = inAppOnError
+        ? 'Camera access is blocked by the ' + inAppOnError + ' in-app browser — this is a restriction ' + inAppOnError + ' applies to every site it opens, not a Memoera problem. Tap the ••• or ⋮ menu and choose "Open in Browser" (Safari or Chrome), then try again.'
+        : reason === 'VIDEO_FAIL'
+        ? 'Could not access the camera. Please allow camera permission for this site (check the site/lock icon in your browser\'s address bar) and try again.'
+        : 'Camera unavailable. Please check your device settings and try again.';
+      showArError(message);
+    });
+
+    // ── Torch ─────────────────────────────────────────────────────────────────
+    function toggleTorch() {
+      torchOn = !torchOn;
+      if (arTrack) {
+        arTrack.applyConstraints({ advanced: [{ torch: torchOn }] }).catch(function() {});
+      }
+      if (torchOn) {
+        torchBtn.classList.add('on');
+        torchLabel.textContent = 'On';
+      } else {
+        torchBtn.classList.remove('on');
+        torchLabel.textContent = 'Torch';
+      }
+    }
+
+    function torchOff() {
+      if (!torchOn) return;
+      torchOn = false;
+      if (arTrack) arTrack.applyConstraints({ advanced: [{ torch: false }] }).catch(function() {});
+      torchBtn.classList.remove('on');
+      torchLabel.textContent = 'Torch';
+    }
+
+    // ── Open full-screen video ────────────────────────────────────────────────
+    function openFullscreen(videoUrl, force) {
+      if (!videoUrl || fsOpen) return;
+      // A deliberate tap overrides the cooldown guards below — those exist to
+      // stop an *accidental* instant re-trigger right after closing, not to
+      // block the user from manually choosing to play it again.
+      if (!force) {
+        // Block if within 3 s of the last "Scan Again" close
+        if (Date.now() - lastCloseTime < 3000) return;
+        // Block if this iframe was reloaded after a scan and the camera hasn't
+        // moved away from the target yet (needTargetLost still true)
+        if (needTargetLost) return;
+      }
+      fsOpen = true;
+
+      backBtn.style.display  = 'none';
+      torchBtn.style.display = 'none';
+      urlBadge.classList.remove('visible');
+      replayBtn.style.display = 'none';
+      videoLandscape = false;
+      rotateLabel.textContent = 'Landscape';
+      rotateBtn.style.display = 'flex';
+
+      // Video hidden until ready — prevents gray Android placeholder
+      fsVideo.style.visibility = 'hidden';
+      fsLoader.classList.remove('hidden');
+      fsOverlay.classList.add('visible');
+
+      // Must start MUTED — Android WebView blocks unmuted autoplay
+      fsVideo.muted = true;
+      fsVideo.src   = videoUrl;
+
+      function onReady() {
+        fsVideo.removeEventListener('canplay',  onReady);
+        fsVideo.removeEventListener('playing',  onReady);
+        fsLoader.classList.add('hidden');
+        fsVideo.style.visibility = 'visible';
+        setTimeout(function() { if (fsOpen) fsVideo.muted = false; }, 200);
+      }
+      fsVideo.addEventListener('canplay',  onReady);
+      fsVideo.addEventListener('playing',  onReady);
+
+      // Show Replay button when video finishes
+      fsVideo.addEventListener('ended', function onEnded() {
+        fsVideo.removeEventListener('ended', onEnded);
+        replayBtn.style.display = 'block';
+      });
+
+      fsVideo.play().catch(function() {
+        fsLoader.classList.add('hidden');
+        fsVideo.style.visibility = 'visible';
+        // Autoplay was blocked and stayed muted — at least let it play silently
+        // rather than showing a play-button overlay.
+        fsVideo.muted = true;
+        fsVideo.play().catch(function() {});
+      });
+    }
+
+    // ── Screen rotation ───────────────────────────────────────────────────────
+    function rotateVideo() {
+      var target = videoLandscape ? 'portrait' : 'landscape';
+      if (screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock(target).then(function() {
+          videoLandscape = !videoLandscape;
+          rotateLabel.textContent = videoLandscape ? 'Portrait' : 'Landscape';
+        }).catch(function() {
+          cssFallbackRotate();
+        });
+      } else {
+        cssFallbackRotate();
+      }
+    }
+
+    function cssFallbackRotate() {
+      videoLandscape = !videoLandscape;
+      rotateLabel.textContent = videoLandscape ? 'Portrait' : 'Landscape';
+      if (videoLandscape) {
+        fsVideo.style.transform = 'rotate(90deg)';
+        fsVideo.style.width     = '100vh';
+        fsVideo.style.height    = '100vw';
+        fsVideo.style.objectFit = 'contain';
+      } else {
+        fsVideo.style.transform = '';
+        fsVideo.style.width     = '100%';
+        fsVideo.style.height    = '100%';
+        fsVideo.style.objectFit = 'contain';
+      }
+    }
+
+    function resetRotation() {
+      if (screen.orientation && screen.orientation.unlock) {
+        try { screen.orientation.unlock(); } catch(e) {}
+      }
+      if (videoLandscape) {
+        fsVideo.style.transform = '';
+        fsVideo.style.width     = '100%';
+        fsVideo.style.height    = '100%';
+      }
+      videoLandscape = false;
+      rotateBtn.style.display = 'none';
+      rotateLabel.textContent = 'Landscape';
+    }
+
+    function replayVideo() {
+      replayBtn.style.display = 'none';
+      fsVideo.currentTime = 0;
+      fsVideo.muted = false;
+      fsVideo.play().catch(function() {
+        fsVideo.muted = true;
+        fsVideo.play().catch(function() {});
+      });
+      // Re-attach ended listener for subsequent replays
+      fsVideo.addEventListener('ended', function onEnded() {
+        fsVideo.removeEventListener('ended', onEnded);
+        replayBtn.style.display = 'block';
+      });
+    }
+
+    function closeFullscreen() {
+      lastCloseTime = Date.now();
+      fsOpen = false;
+      fsVideo.pause();
+      fsVideo.src = '';
+      fsVideo.style.visibility = 'hidden';
+      fsLoader.classList.add('hidden');
+      replayBtn.style.display = 'none';
+      resetRotation();
+      fsOverlay.classList.remove('visible');
+
+      // Stop MindAR first so Android fully releases the camera stream.
+      // Without this the new iframe requests the camera while the old stream is
+      // still held, producing a permanent black screen.
+      try {
+        var sys = scene.systems && scene.systems['mindar-image-system'];
+        if (sys && sys.stop) sys.stop();
+      } catch (stopErr) {}
+
+      // 800 ms gives the OS time to release the camera hardware before the
+      // fresh iframe requests it again.
+      setTimeout(function() {
+        window.parent.postMessage({ type: 'ar-scan-again' }, '*');
+      }, 800);
+    }
+
+    // ── Document type → confirmation strategy ──────────────────────────────
+    // PDF/AI render natively in Chrome; Office formats preview via Microsoft's
+    // online viewer; PSD/CDR have no browser renderer at all, so the server
+    // generates a real JPG thumbnail (previewUrl) the user can check before
+    // committing to a download; anything else falls back to filename-only.
+    function docCategory(link) {
+      var ext = (link.split('.').pop() || '').split('?')[0].toLowerCase();
+      if (ext === 'pdf' || ext === 'ai') return 'preview';
+      if (['doc','docx','ppt','pptx','xls','xlsx'].indexOf(ext) >= 0) return 'office';
+      if (ext === 'psd' || ext === 'cdr') return 'thumb';
+      return 'download';
+    }
+    function openDocument(doc) {
+      if (doc.category === 'office') {
+        window.parent.postMessage({ type: 'ar-open-link', url: 'https://view.officeapps.live.com/op/view.aspx?src=' + encodeURIComponent(doc.url), label: doc.fileName || '' }, '*');
+      } else if (doc.category === 'thumb' && doc.previewUrl) {
+        window.parent.postMessage({ type: 'ar-document-preview', previewUrl: doc.previewUrl, fileName: doc.fileName || '', openUrl: doc.url }, '*');
+      } else {
+        window.parent.postMessage({ type: 'ar-open-link', url: doc.url, label: doc.fileName || '' }, '*');
+      }
+    }
+
+    // ── Tap-to-play: tapping the live camera view while a target is detected
+    //    (re)triggers its content on demand, bypassing the auto-replay cooldown
+    //    since this is a deliberate user action. ───────────────────────────────
+    function triggerFoundTarget(t) {
+      if (t.targetType === 'video' && t.videoUrl) {
+        openFullscreen(t.videoUrl, true);
+      } else if (t.targetType === 'animation' && t.urlLink) {
+        window.parent.postMessage({ type: 'ar-animation-triggered', animId: t.urlLink, label: t.label || '' }, '*');
+      } else if (t.targetType === 'document' && t.urlLink) {
+        openDocument({ url: t.urlLink, category: docCategory(t.urlLink), previewUrl: t.previewUrl || '', fileName: t.fileName || '' });
+      } else if (t.urlLink && /\.(glb|gltf|obj|fbx)/i.test(t.urlLink)) {
+        window.parent.postMessage({ type: 'ar-view-in-space', glbUrl: t.urlLink }, '*');
+      } else if (t.urlLink) {
+        // Let the parent app open it (Chrome Custom Tabs on native Android
+        // via the Capacitor Browser plugin) instead of window.open() here —
+        // the WebView this iframe runs in has no PDF renderer of its own,
+        // so a raw window.open() to a PDF just triggers a bare download.
+        window.parent.postMessage({ type: 'ar-open-link', url: t.urlLink, label: t.label || '' }, '*');
+      }
+    }
+    function handleBadgeTap() {
+      var keys = Object.keys(foundTargets);
+      if (keys.length && !fsOpen) { triggerFoundTarget(foundTargets[keys[0]]); return; }
+      if (pendingDoc) { openDocument(pendingDoc); return; }
+      if (pendingUrl) window.parent.postMessage({ type: 'ar-open-link', url: pendingUrl, label: '' }, '*');
+    }
+    scene.addEventListener('click', function() {
+      var keys = Object.keys(foundTargets);
+      if (!keys.length || fsOpen) return;
+      triggerFoundTarget(foundTargets[keys[0]]);
+    });
+
+    // ── Receive mind data from parent React app ───────────────────────────────
+    window.addEventListener('message', function(e) {
+      if (!e.data || e.data.type !== 'ar-mind-data' || dataReceived) return;
+      dataReceived = true;
+
+      // Restore the close-time from before the iframe was reloaded so the
+      // 3-second cooldown still applies in this fresh iframe instance.
+      if (e.data.lastCloseTime) {
+        lastCloseTime  = e.data.lastCloseTime;
+        needTargetLost = true; // require camera to leave image before next play
+
+        // Safety timer: clear the guard after 3 s even if the camera never
+        // leaves the target (targetLost won't fire if target stays in frame,
+        // so without this timer the video could be blocked forever).
+        setTimeout(function() { needTargetLost = false; }, 3000);
+      }
+
+      var mindBuffer = e.data.mindBuffer;
+      var targets    = e.data.targets || [];
+
+      var mindSrc = '';
+      try {
+        mindSrc = URL.createObjectURL(new Blob([mindBuffer], { type: 'application/octet-stream' }));
+      } catch(err) { return; }
+      lastMindSrc = mindSrc;
+
+      // The parent can send data proactively as soon as its own fetch
+      // resolves — which can easily race ahead of A-Frame finishing scene
+      // init (especially since mindFileUrl is a blob: URL, resolving almost
+      // instantly). Setting the mindar-image component before the scene has
+      // loaded makes it silently never start. Defer until truly ready.
+      if (!scene.hasLoaded) {
+        scene.addEventListener('loaded', function onSceneLoaded() {
+          scene.removeEventListener('loaded', onSceneLoaded);
+          startMindAR();
+        });
+        return;
+      }
+      startMindAR();
+
+      function startMindAR() {
+      diag.sceneLoadedAtStart = !!scene.hasLoaded;
+      setMindArAttribute(mindSrc);
+
+      // Camera access begins now. Give MindAR's own attempt 1.5 s to succeed
+      // or fail on its own; only then run the diagnostic probe (never in
+      // parallel — see note on probeCamera above). Final 7 s fallback covers
+      // the rare case where neither path resolves.
+      setTimeout(function() {
+        if (!arHasStarted) probeCamera();
+      }, 1500);
+      setTimeout(function() {
+        if (!arHasStarted) {
+          showArError('Camera is taking too long to start. Please check camera permissions and try again.');
+        }
+      }, 7000);
+
+      targets.forEach(function(t, i) {
+        var idx    = (t.targetIndex !== undefined) ? t.targetIndex : i;
+        var entity = document.createElement('a-entity');
+        entity.setAttribute('mindar-image-target', 'targetIndex: ' + idx);
+
+        // Track which target is currently visible/found so a manual tap on
+        // the live camera view can (re)trigger its content on demand.
+        entity.addEventListener('targetFound', function() { foundTargets[idx] = t; });
+        entity.addEventListener('targetLost',  function() { delete foundTargets[idx]; });
+
+        // Subtle haptic tick the moment a marker is recognized — works across all target types
+        entity.addEventListener('targetFound', function() {
+          try { if (navigator.vibrate) navigator.vibrate(60); } catch(_) {}
+        });
+
+        if (t.targetType === 'video' && t.videoUrl) {
+          // Invisible 1px plane keeps the AR entity valid; video plays fullscreen
+          var plane = document.createElement('a-plane');
+          plane.setAttribute('width', '0.01');
+          plane.setAttribute('height', '0.01');
+          plane.setAttribute('opacity', '0');
+          entity.appendChild(plane);
+
+          (function(url) {
+            entity.addEventListener('targetFound', function() {
+              openFullscreen(url);
+              urlBadge.textContent = '👆 Tap to replay';
+              urlBadge.classList.add('visible');
+            });
+            // When camera moves away, clear the reload-guard so the next
+            // point-at-photo triggers playback normally
+            entity.addEventListener('targetLost', function() {
+              needTargetLost = false;
+              urlBadge.classList.remove('visible');
+            });
+          })(t.videoUrl);
+
+        } else if (t.targetType === 'animation' && t.urlLink) {
+          // Animation target — tell parent to open the frame overlay
+          var animPlane = document.createElement('a-plane');
+          animPlane.setAttribute('width',   '0.01');
+          animPlane.setAttribute('height',  '0.01');
+          animPlane.setAttribute('opacity', '0');
+          entity.appendChild(animPlane);
+
+          (function(animId, animLabel) {
+            entity.addEventListener('targetFound', function() {
+              urlBadge.textContent = '👆 Tap to replay';
+              urlBadge.classList.add('visible');
+              if (Date.now() - lastCloseTime < 3000) return;
+              if (needTargetLost) return;
+              window.parent.postMessage({ type: 'ar-animation-triggered', animId: animId, label: animLabel }, '*');
+            });
+            entity.addEventListener('targetLost', function() {
+              needTargetLost = false;
+              urlBadge.classList.remove('visible');
+              window.parent.postMessage({ type: 'ar-animation-lost' }, '*');
+            });
+          })(t.urlLink, t.label || '');
+
+        } else if (t.targetType === 'document' && t.urlLink) {
+          // Document target (PDF, PSD, CDR, AI, DOC...) — invisible plane keeps
+          // the AR entity trackable; tapping routes through docCategory()/
+          // openDocument() so the user gets real confirmation before opening:
+          // PDF/AI preview directly, Office formats preview via Microsoft's
+          // online viewer, PSD/CDR show a server-generated thumbnail first.
+          var docPlane = document.createElement('a-plane');
+          docPlane.setAttribute('width', '0.01');
+          docPlane.setAttribute('height', '0.01');
+          docPlane.setAttribute('opacity', '0');
+          entity.appendChild(docPlane);
+
+          (function(link, fileName, previewUrl) {
+            var cat = docCategory(link);
+            var name = fileName || 'Document';
+            entity.addEventListener('targetFound', function() {
+              pendingDoc = { url: link, category: cat, previewUrl: previewUrl, fileName: fileName };
+              if (cat === 'preview' || cat === 'office') {
+                urlBadge.textContent = '👆 Tap to view document';
+              } else if (cat === 'thumb' && previewUrl) {
+                urlBadge.textContent = '👆 ' + name + ' — tap to preview';
+              } else {
+                urlBadge.textContent = '👆 ' + name + ' — tap to download';
+              }
+              urlBadge.classList.add('visible');
+            });
+            entity.addEventListener('targetLost', function() {
+              pendingDoc = null;
+              urlBadge.classList.remove('visible');
+            });
+          })(t.urlLink, t.fileName || '', t.previewUrl || '');
+
+        } else if (t.urlLink && /\.(glb|gltf|obj|fbx)/i.test(t.urlLink)) {
+          // 3D model target — invisible plane keeps the AR entity trackable;
+          // on found, tell the parent to open the full-screen 3D viewer
+          var glbPlane = document.createElement('a-plane');
+          glbPlane.setAttribute('width', '0.01');
+          glbPlane.setAttribute('height', '0.01');
+          glbPlane.setAttribute('opacity', '0');
+          entity.appendChild(glbPlane);
+
+          (function(link) {
+            entity.addEventListener('targetFound', function() {
+              urlBadge.textContent = '👆 Tap to view in 3D';
+              urlBadge.classList.add('visible');
+              if (Date.now() - lastCloseTime < 3000) return;
+              if (needTargetLost) return;
+              window.parent.postMessage({ type: 'ar-view-in-space', glbUrl: link }, '*');
+            });
+            entity.addEventListener('targetLost', function() {
+              needTargetLost = false;
+              urlBadge.classList.remove('visible');
+            });
+          })(t.urlLink);
+
+        } else if (t.urlLink) {
+          (function(link) {
+            entity.addEventListener('targetFound', function() {
+              pendingUrl = link;
+              urlBadge.textContent = '✓ Detected — tap to open';
+              urlBadge.classList.add('visible');
+            });
+            entity.addEventListener('targetLost', function() {
+              pendingUrl = null;
+              urlBadge.classList.remove('visible');
+            });
+          })(t.urlLink);
+        }
+
+        scene.appendChild(entity);
+      });
+      } // end startMindAR
+    });
+
+    // Signal parent that iframe is ready to receive data — but only once
+    // A-Frame has actually finished initializing the scene. Setting the
+    // mindar-image attribute (which happens as soon as data arrives) before
+    // the scene fires 'loaded' causes the component to silently never start:
+    // no video element, no error, no arReady — exactly the hang this is
+    // meant to prevent.
+    function signalIframeReady() {
+      diag.sceneLoadedAtSignal = !!scene.hasLoaded;
+      if (window.parent !== window) {
+        window.parent.postMessage({ type: 'ar-iframe-ready' }, '*');
+      }
+    }
+    if (scene.hasLoaded) {
+      signalIframeReady();
+    } else {
+      scene.addEventListener('loaded', signalIframeReady);
+    }
+
+    // Back navigation
+    function goBack() {
+      torchOff();
+      var sys = scene.systems && scene.systems['mindar-image-system'];
+      if (sys && sys.stop) { try { sys.stop(); } catch(e) {} }
+      try { fsVideo.pause(); fsVideo.src = ''; } catch(e) {}
+      try { window.parent.postMessage({ type: 'ar-scanner-back' }, '*'); } catch(e) {}
+      try { window.history.back(); } catch(e) {}
+    }
+  </script>
+</body>
+</html>

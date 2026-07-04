@@ -1,0 +1,71 @@
+[build]
+  # If you put webar-app/ inside a monorepo root, set base = "webar-app"
+  # in the Netlify UI (Site settings → Build & deploy → Base directory).
+  command = "npm run build"
+  publish = "dist"
+
+# ── Security + Camera Permission Headers ─────────────────────────────────────
+# These are REQUIRED for WebAR to work on deployed Netlify sites.
+# Without Permissions-Policy, some browsers block camera even over HTTPS.
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    # Allow camera from this origin (required for getUserMedia)
+    Permissions-Policy = "camera=(*), microphone=()"
+
+    # NOTE: COEP/COOP removed — MindAR 1.2.5 does NOT need SharedArrayBuffer.
+    # These headers were blocking MindAR's CDN chunk files from loading in production.
+
+    # Standard hardening headers
+    X-Frame-Options = "SAMEORIGIN"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+# ── SPA Routing ───────────────────────────────────────────────────────────────
+# Redirect all paths to index.html so React Router (if added later) works.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# ── Asset Caching ─────────────────────────────────────────────────────────────
+# Videos are large — cache them aggressively.
+# If you update a video, rename the file (e.g. demo1-v2.mp4) to bust the cache.
+[[headers]]
+  for = "/videos/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# The .mind file changes rarely — cache for 1 day.
+[[headers]]
+  for = "/targets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
+# A-Frame + MindAR AR runtime (~3 MB) — loaded by /ar-scanner.html on every
+# scan. Cache aggressively so repeat scans (and return visits) never re-fetch.
+# If these files are ever updated, rename them to bust the cache.
+[[headers]]
+  for = "/libs/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+# ar-scanner.html itself changes frequently during active development of the
+# AR camera flow — force browsers to ALWAYS fetch the latest copy instead of
+# silently reusing a stale cached version (which would make every fix here
+# appear to have no effect on a device that already cached an old copy).
+[[headers]]
+  for = "/ar-scanner.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/ar-scanner-jsfeat.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
+[[headers]]
+  for = "/ar-scanner-capture.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"

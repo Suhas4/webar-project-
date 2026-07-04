@@ -1,0 +1,13 @@
+services:
+  # ── Go Backend ─────────────────────────────────────────────────────────────
+  - type: web
+    name: webar-backend
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: FRONTEND_ORIGIN
+        value: https://memoera.in
+      # PORT is injected automatically by Render — do not add it here

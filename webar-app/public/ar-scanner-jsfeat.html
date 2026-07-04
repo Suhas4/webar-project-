@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Memoera AR Scanner (Experimental)</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsfeat/0.0.8/jsfeat-min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; font-family: 'Outfit', sans-serif; background: #000; }
+
+    #webcam { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    #overlay-canvas { display: none; } /* used for off-screen processing only */
+
+    #back-btn, #torch-btn {
+      position: fixed; top: 48px; z-index: 9000;
+      background: rgba(0,0,0,0.55); border: 1px solid rgba(0,201,167,0.5);
+      border-radius: 22px; color: #00C9A7; font-size: 13px; font-weight: 700;
+      font-family: inherit; padding: 8px 16px; cursor: pointer;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    #back-btn  { left: 16px; }
+    #torch-btn { right: 16px; display: none; align-items: center; gap: 7px; }
+    #torch-btn.on { background: rgba(255,220,0,0.28); border-color: rgba(255,220,0,0.7); color: #FFE066; }
+
+    #status-badge {
+      position: fixed; bottom: 52px; left: 50%; transform: translateX(-50%);
+      z-index: 9000; background: rgba(0,201,167,0.18); border: 1px solid rgba(0,201,167,0.5);
+      border-radius: 50px; color: #00C9A7; font-size: 12px; font-weight: 700;
+      padding: 9px 22px; white-space: nowrap; backdrop-filter: blur(8px);
+      font-family: inherit;
+    }
+    #exp-tag {
+      position: fixed; top: 48px; left: 50%; transform: translateX(-50%);
+      z-index: 9000; background: rgba(201,168,76,0.25); border: 1px solid rgba(201,168,76,0.6);
+      border-radius: 20px; color: #C9A84C; font-size: 10px; font-weight: 700;
+      letter-spacing: 0.06em; padding: 5px 14px; font-family: inherit;
+    }
+
+    #fs-overlay {
+      position: fixed; inset: 0; z-index: 9999; background: #000;
+      display: none; align-items: center; justify-content: center;
+    }
+    #fs-overlay.visible { display: flex; }
+    #fs-video { width: 100%; height: 100%; object-fit: contain; display: block; }
+    #fs-close-btn {
+      position: absolute; top: 48px; left: 16px; z-index: 10000;
+      background: rgba(0,0,0,0.60); border: 1px solid rgba(0,201,167,0.5);
+      border-radius: 22px; color: #00C9A7; font-size: 13px; font-weight: 700;
+      font-family: inherit; padding: 8px 18px; cursor: pointer;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+
+    #startup-overlay {
+      position: fixed; inset: 0; z-index: 9998; background: #000;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+    }
+    #startup-overlay.hidden { display: none; }
+    #startup-ring {
+      width: 46px; height: 46px; border: 4px solid rgba(0,201,167,0.18);
+      border-top-color: #00C9A7; border-radius: 50%; animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #startup-label { font-size: 13px; color: rgba(255,255,255,0.6); }
+
+    #ar-error-overlay {
+      position: fixed; inset: 0; z-index: 9997; background: #040D0B;
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+      gap: 16px; padding: 32px; text-align: center;
+    }
+    #ar-error-overlay.visible { display: flex; }
+    #ar-error-text { font-size: 14px; color: rgba(255,255,255,0.75); max-width: 320px; line-height: 1.5; white-space: pre-wrap; }
+    #ar-error-back-btn {
+      background: #00C9A7; border: none; border-radius: 50px; color: #040D0B;
+      font-family: inherit; font-size: 14px; font-weight: 700; padding: 12px 30px; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <video id="webcam" autoplay playsinline muted></video>
+  <canvas id="overlay-canvas"></canvas>
+
+  <div id="startup-overlay">
+    <div id="startup-ring"></div>
+    <div id="startup-label">Opening camera…</div>
+  </div>
+
+  <div id="ar-error-overlay">
+    <div style="font-size:40px;">⚠️</div>
+    <div id="ar-error-text">Camera unavailable. Please check permissions and try again.</div>
+    <button id="ar-error-back-btn" onclick="goBack()">← Go Back</button>
+    <div style="position:fixed;bottom:10px;left:0;right:0;text-align:center;font-size:9px;color:rgba(255,255,255,0.25);">build 2026-06-20-9</div>
+  </div>
+
+  <div id="exp-tag">⚗ EXPERIMENTAL ENGINE</div>
+  <button id="back-btn" onclick="goBack()">← Back</button>
+  <button id="torch-btn" onclick="toggleTorch()">🔦 Torch</button>
+  <div id="status-badge" style="display:none;"></div>
+
+  <div id="fs-overlay">
+    <button id="fs-close-btn" onclick="closeFullscreen()">← Scan Again</button>
+    <video id="fs-video" playsinline webkit-playsinline></video>
+  </div>
+
+  <script>
+    var webcam      = document.getElementById('webcam');
+    var ovCanvas    = document.getElementById('overlay-canvas');
+    var startupOv   = document.getElementById('startup-overlay');
+    var errorOv     = document.getElementById('ar-error-overlay');
+    var errorText   = document.getElementById('ar-error-text');
+    var statusBadge = document.getElementById('status-badge');
+    var torchBtn    = document.getElementById('torch-btn');
+    var fsOverlay   = document.getElementById('fs-overlay');
+    var fsVideo     = document.getElementById('fs-video');
+
+    var VW = 480, VH = 640; // processing resolution — kept small for CPU speed
+    var MAX_CORNERS   = 250;
+    // Worst-case raw-candidate pool jsfeat's yape06.detect needs to write into
+    // (see detectAndDescribe) — allocated ONCE and reused every call instead
+    // of every frame. Sizing this to cols*rows (307,200 for 480x640) and
+    // reallocating it on every frame was the fix for the original "Cannot set
+    // properties of undefined" crash, but it meant ~300K object allocations
+    // 15-30x/second in the live scan loop — a severe, continuous GC/main-
+    // thread cost. 4000 is comfortably above any real corner count we've
+    // seen (the crash happened at 250) while being ~75x cheaper, and reusing
+    // the same array instead of recreating it removes the per-frame
+    // allocation entirely.
+    var CORNER_POOL_SIZE = 4000;
+    var cornerPool = [];
+    for (var _i = 0; _i < CORNER_POOL_SIZE; ++_i) cornerPool.push(new jsfeat.keypoint_t(0, 0, 0, 0, -1));
+    var MATCH_THRESHOLD = 22;   // min good matches to count as "found"
+    var FOUND_STREAK_NEEDED = 3; // consecutive matching frames before triggering
+    var LOST_STREAK_NEEDED  = 4; // consecutive non-matching frames before "lost"
+
+    var targets       = [];   // { ...targetData, descriptors, corners, count }
+    var currentFound   = -1;  // index into targets[], or -1
+    var foundStreak     = 0;
+    var lostStreak       = 0;
+    var lastCloseTime    = 0;
+    var arTrack          = null;
+    var torchOn           = false;
+    var fsOpen             = false;
+    var processing          = false;
+    var stream                = null;
+
+    function showError(msg) {
+      startupOv.classList.add('hidden');
+      errorText.textContent = msg;
+      errorOv.classList.add('visible');
+    }
+
+    // Known in-app browsers sandbox their embedded WebView and block camera
+    // access outright — the only fix is opening the link in a real browser.
+    function detectInAppBrowser() {
+      var ua = navigator.userAgent || '';
+      if (/Instagram/i.test(ua)) return 'Instagram';
+      if (/FBAN|FBAV|FB_IAB/i.test(ua)) return 'Facebook';
+      if (/Line\//i.test(ua)) return 'LINE';
+      if (/MicroMessenger/i.test(ua)) return 'WeChat';
+      if (/Snapchat/i.test(ua)) return 'Snapchat';
+      if (/TikTok/i.test(ua)) return 'TikTok';
+      return null;
+    }
+
+    function goBack() {
+      torchOff();
+      stopCamera();
+      try { window.parent.postMessage({ type: 'ar-scanner-back' }, '*'); } catch(e) {}
+    }
+
+    function stopCamera() {
+      if (stream) { stream.getTracks().forEach(function(t){ t.stop(); }); stream = null; }
+    }
+
+    function toggleTorch() {
+      torchOn = !torchOn;
+      if (arTrack) arTrack.applyConstraints({ advanced: [{ torch: torchOn }] }).catch(function(){});
+      torchBtn.classList.toggle('on', torchOn);
+    }
+    function torchOff() {
+      if (!torchOn) return;
+      torchOn = false;
+      if (arTrack) arTrack.applyConstraints({ advanced: [{ torch: false }] }).catch(function(){});
+    }
+
+    // ── Camera setup ────────────────────────────────────────────────────────
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+      .then(function(s) {
+        stream = s;
+        webcam.srcObject = s;
+        var track = s.getVideoTracks()[0];
+        if (track) arTrack = track;
+        webcam.addEventListener('loadedmetadata', function() {
+          startupOv.classList.add('hidden');
+          torchBtn.style.display = 'flex';
+          ovCanvas.width = VW; ovCanvas.height = VH;
+          requestAnimationFrame(processLoop);
+        });
+        webcam.play().catch(function(){});
+      })
+      .catch(function(err) {
+        var name = err && err.name;
+        var inApp = detectInAppBrowser();
+        var msg = name === 'NotAllowedError' && inApp
+          ? 'Camera access is blocked by the ' + inApp + ' in-app browser — this is a restriction ' + inApp + ' applies to every site it opens, not a Memoera problem. Tap the ••• or ⋮ menu and choose "Open in Browser" (Safari or Chrome), then try again.'
+          : name === 'NotAllowedError'
+          ? 'Camera access is blocked for this site. Check your browser permissions and try again.'
+          : 'Could not access the camera (' + (name || 'unknown') + ').';
+        showError(msg);
+      });
+
+    // ── jsfeat helpers — real ORB-style detect + describe + brute-force match ──
+    var diag = { lastRawCornerCount: null, lastDetectError: null };
+
+    function detectAndDescribe(imgU8) {
+      // Reuse the shared cornerPool (see top of file) instead of allocating a
+      // fresh array every call — this runs 15-30x/second in the live loop.
+
+      // Start lenient and only tighten if that finds far more than we need —
+      // a strict fixed threshold can yield zero corners on photos with large
+      // flat areas (logos, posters, plain backgrounds).
+      var thresholds = [10, 20, 30];
+      var count = 0;
+      diag.lastDetectError = null;
+      for (var t = 0; t < thresholds.length; t++) {
+        try {
+          jsfeat.yape06.laplacian_threshold = thresholds[t];
+          jsfeat.yape06.min_eigen_value_threshold = Math.round(thresholds[t] * 0.8);
+          count = jsfeat.yape06.detect(imgU8, cornerPool, 8);
+        } catch (e) {
+          diag.lastDetectError = (e && e.message) || String(e);
+          count = 0;
+        }
+        diag.lastRawCornerCount = count;
+        if (count >= 8) break;
+      }
+
+      // Keep only the strongest MAX_CORNERS candidates for description/matching
+      var picked = cornerPool.slice(0, count);
+      if (picked.length > MAX_CORNERS) {
+        picked.sort(function(a, b) { return b.score - a.score; });
+        picked = picked.slice(0, MAX_CORNERS);
+      }
+      count = picked.length;
+
+      if (count > 0) {
+        try {
+          // jsfeat's yape06 doesn't set orientation — orb.describe needs angle;
+          // default angle 0 still yields usable (if rotation-sensitive) descriptors,
+          // adequate for a roughly front-facing printed target.
+          var descriptors = new jsfeat.matrix_t(32, count, jsfeat.U8_t | jsfeat.C1_t);
+          jsfeat.orb.describe(imgU8, picked, count, descriptors);
+          return { corners: picked, count: count, descriptors: descriptors };
+        } catch (e) {
+          diag.lastDetectError = 'describe: ' + ((e && e.message) || String(e));
+        }
+      }
+      return { corners: picked, count: 0, descriptors: null };
+    }
+
+    function popcnt32(x) {
+      x -= ((x >> 1) & 0x55555555);
+      x = (((x >> 2) & 0x33333333) + (x & 0x33333333));
+      x = (((x >> 4) + x) & 0x0f0f0f0f);
+      x += (x >> 8);
+      x += (x >> 16);
+      return (x & 0x3f);
+    }
+
+    // Brute-force Hamming-distance match between two ORB descriptor sets.
+    // Returns count of "good" matches (closest match clearly beats 2nd-closest).
+    function countGoodMatches(descA, countA, descB, countB) {
+      if (!descA || !descB || !countA || !countB) return 0;
+      var dA = descA.data, dB = descB.data;
+      var good = 0;
+      for (var i = 0; i < countA; ++i) {
+        var off_i = i * 32;
+        var best = 256, second = 256;
+        for (var j = 0; j < countB; ++j) {
+          var off_j = j * 32, dist = 0;
+          for (var k = 0; k < 32; k += 4) {
+            dist += popcnt32(dA[off_i+k]   ^ dB[off_j+k]) +
+                    popcnt32(dA[off_i+k+1] ^ dB[off_j+k+1]) +
+                    popcnt32(dA[off_i+k+2] ^ dB[off_j+k+2]) +
+                    popcnt32(dA[off_i+k+3] ^ dB[off_j+k+3]);
+          }
+          if (dist < best) { second = best; best = dist; }
+          else if (dist < second) { second = dist; }
+        }
+        if (best < 60 && best < 0.8 * second) good++;
+      }
+      return good;
+    }
+
+    // ── Load + describe each target image once, up front ───────────────────
+    // Loads a target image via fetch()->Blob->ObjectURL rather than setting
+    // img.crossOrigin + a direct remote src. A plain crossOrigin load fails
+    // CORS validation against this app's R2/CDN host in many configurations,
+    // which taints the canvas — getImageData() then throws inside onload with
+    // no catch, so the promise never resolves and the scanner silently never
+    // gets any targets. An ObjectURL is always same-origin, so it's never
+    // tainted regardless of the remote host's CORS headers. This mirrors the
+    // existing, working fetchImageForAR.js pattern used elsewhere in this app.
+    function loadTargetDescriptors(t) {
+      if (!t.imageUrl) return Promise.resolve(null);
+      return fetch(t.imageUrl)
+        .then(function(res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.blob();
+        })
+        .then(function(blob) {
+          var blobUrl = URL.createObjectURL(blob);
+          return new Promise(function(resolve) {
+            var img = new Image();
+            img.onload = function() {
+              URL.revokeObjectURL(blobUrl);
+              try {
+                var c = document.createElement('canvas');
+                c.width = VW; c.height = VH;
+                var ctx = c.getContext('2d');
+                // letterbox the target image into the same VW x VH frame used
+                // for live camera processing, so descriptor scale roughly matches.
+                var scale = Math.min(VW / img.width, VH / img.height);
+                var w = img.width * scale, h = img.height * scale;
+                ctx.fillStyle = '#000'; ctx.fillRect(0, 0, VW, VH);
+                ctx.drawImage(img, (VW - w) / 2, (VH - h) / 2, w, h);
+                var data = ctx.getImageData(0, 0, VW, VH);
+                var gray = new jsfeat.matrix_t(VW, VH, jsfeat.U8_t | jsfeat.C1_t);
+                jsfeat.imgproc.grayscale(data.data, VW, VH, gray);
+                resolve(detectAndDescribe(gray));
+              } catch (e) { resolve(null); }
+            };
+            img.onerror = function() { URL.revokeObjectURL(blobUrl); resolve(null); };
+            img.src = blobUrl;
+          });
+        })
+        .catch(function() { return null; });
+    }
+
+    // ── Main per-frame processing loop ──────────────────────────────────────
+    var frameCanvas = document.createElement('canvas');
+    frameCanvas.width = VW; frameCanvas.height = VH;
+    var frameCtx = frameCanvas.getContext('2d');
+    var frameGray = new jsfeat.matrix_t(VW, VH, jsfeat.U8_t | jsfeat.C1_t);
+    var frameSkip = 0;
+
+    function processLoop() {
+      requestAnimationFrame(processLoop);
+      if (fsOpen || processing || !targets.length) return;
+      // Process every 2nd frame — keeps this usable on mid-range phones.
+      frameSkip = (frameSkip + 1) % 2;
+      if (frameSkip !== 0) return;
+      processing = true;
+
+      try {
+        frameCtx.drawImage(webcam, 0, 0, VW, VH);
+        var imgData = frameCtx.getImageData(0, 0, VW, VH);
+        jsfeat.imgproc.grayscale(imgData.data, VW, VH, frameGray);
+        var live = detectAndDescribe(frameGray);
+
+        var bestIdx = -1, bestScore = 0;
+        for (var i = 0; i < targets.length; i++) {
+          var t = targets[i];
+          if (!t.descriptors) continue;
+          var score = countGoodMatches(t.descriptors, t.count, live.descriptors, live.count);
+          if (score > bestScore) { bestScore = score; bestIdx = i; }
+        }
+
+        if (bestIdx >= 0 && bestScore >= MATCH_THRESHOLD) {
+          foundStreak++; lostStreak = 0;
+          if (foundStreak >= FOUND_STREAK_NEEDED && currentFound !== bestIdx) {
+            currentFound = bestIdx;
+            onTargetFound(targets[bestIdx]);
+          }
+        } else {
+          lostStreak++; foundStreak = 0;
+          if (lostStreak >= LOST_STREAK_NEEDED && currentFound !== -1) {
+            currentFound = -1;
+            onTargetLost();
+          }
+        }
+      } catch (e) { /* keep the loop alive even if one frame errors */ }
+
+      processing = false;
+    }
+
+    function onTargetFound(t) {
+      try { if (navigator.vibrate) navigator.vibrate(60); } catch(_) {}
+      statusBadge.style.display = 'block';
+      statusBadge.textContent = '✓ "' + (t.label || 'Target') + '" detected';
+      if (Date.now() - lastCloseTime < 3000) return;
+
+      if (t.targetType === 'video' && t.videoUrl) {
+        openFullscreen(t.videoUrl);
+      } else if (t.targetType === 'animation' && t.urlLink) {
+        window.parent.postMessage({ type: 'ar-animation-triggered', animId: t.urlLink, label: t.label || '' }, '*');
+      } else if (t.urlLink && /\.(glb|gltf|obj|fbx)/i.test(t.urlLink)) {
+        window.parent.postMessage({ type: 'ar-view-in-space', glbUrl: t.urlLink }, '*');
+      } else if (t.urlLink) {
+        statusBadge.textContent = '✓ Detected — tap to open';
+        statusBadge.onclick = function() { window.open(t.urlLink, '_blank', 'noopener'); };
+      }
+    }
+    function onTargetLost() {
+      statusBadge.style.display = 'none';
+      statusBadge.onclick = null;
+    }
+
+    // ── Fullscreen video playback (same UX as the MindAR scanner) ──────────
+    function openFullscreen(url) {
+      if (fsOpen) return;
+      fsOpen = true;
+      torchBtn.style.display = 'none';
+      document.getElementById('back-btn').style.display = 'none';
+      fsVideo.muted = true;
+      fsVideo.src = url;
+      fsVideo.play().catch(function(){});
+      fsOverlay.classList.add('visible');
+    }
+    function closeFullscreen() {
+      lastCloseTime = Date.now();
+      fsOpen = false;
+      fsVideo.pause();
+      fsVideo.src = '';
+      fsOverlay.classList.remove('visible');
+      torchBtn.style.display = 'flex';
+      document.getElementById('back-btn').style.display = 'block';
+      currentFound = -1;
+      foundStreak = 0; lostStreak = 0;
+    }
+
+    // ── Receive targets from parent and build descriptors for each ─────────
+    window.addEventListener('message', function(e) {
+      if (!e.data || e.data.type !== 'ar-mind-data') return;
+      var incoming = e.data.targets || [];
+      var withImageUrl = incoming.filter(function(t) { return !!t.imageUrl; }).length;
+      Promise.all(incoming.map(function(t) {
+        return loadTargetDescriptors(t).then(function(d) {
+          return Object.assign({}, t, d || { descriptors: null, count: 0 });
+        });
+      })).then(function(withDescriptors) {
+        targets = withDescriptors.filter(function(t) { return t.descriptors; });
+        if (!targets.length) {
+          if (withImageUrl < incoming.length) {
+            showError('This target has no saved photo, so the experimental engine has nothing to scan against.\n\n' +
+              'Delete this target and re-upload it (with a fresh photo) from the target screen — "Clear scan cache" will not fix this, since the photo is missing on the server, not just cached locally.\n\n' +
+              'received: ' + incoming.length + ', withImageUrl: ' + withImageUrl);
+          } else {
+            showError('Could not analyze any target images for the experimental engine.\n\n' +
+              'received: ' + incoming.length + ', withImageUrl: ' + withImageUrl + ', withDescriptors: 0\n' +
+              'lastRawCornerCount: ' + diag.lastRawCornerCount + ', lastDetectError: ' + (diag.lastDetectError || '-'));
+          }
+        }
+      });
+    });
+
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: 'ar-iframe-ready' }, '*');
+    }
+  </script>
+</body>
+</html>

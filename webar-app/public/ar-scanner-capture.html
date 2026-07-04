@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Memoera AR Scanner (Capture & Scan)</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsfeat/0.0.8/jsfeat-min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    html, body { width: 100%; height: 100%; overflow: hidden; font-family: 'Outfit', sans-serif; background: #000; touch-action: none; }
+
+    #webcam { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+    #back-btn, #torch-btn {
+      position: fixed; top: 48px; z-index: 9000;
+      background: rgba(0,0,0,0.55); border: 1px solid rgba(0,201,167,0.5);
+      border-radius: 22px; color: #00C9A7; font-size: 13px; font-weight: 700;
+      font-family: inherit; padding: 8px 16px; cursor: pointer;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    #back-btn  { left: 16px; }
+    #torch-btn { right: 16px; display: none; align-items: center; gap: 7px; }
+    #torch-btn.on { background: rgba(255,220,0,0.28); border-color: rgba(255,220,0,0.7); color: #FFE066; }
+
+    #exp-tag {
+      position: fixed; top: 48px; left: 50%; transform: translateX(-50%);
+      z-index: 9000; background: rgba(201,168,76,0.25); border: 1px solid rgba(201,168,76,0.6);
+      border-radius: 20px; color: #C9A84C; font-size: 10px; font-weight: 700;
+      letter-spacing: 0.06em; padding: 5px 14px; font-family: inherit;
+    }
+
+    /* Loose live-camera guide — purely a soft visual hint before capture,
+       no longer the actual crop region (cropping happens after capture now). */
+    #live-guide {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 74vw; max-width: 340px; height: 74vw; max-height: 340px;
+      border: 2px dashed rgba(0,201,167,0.45); border-radius: 20px;
+      pointer-events: none; z-index: 10;
+    }
+
+    #capture-btn {
+      position: fixed; bottom: 56px; left: 50%; transform: translateX(-50%);
+      z-index: 9000; width: 76px; height: 76px; border-radius: 50%;
+      background: linear-gradient(135deg,#00C9A7,#00E5CC); border: 4px solid rgba(255,255,255,0.9);
+      box-shadow: 0 4px 20px rgba(0,201,167,0.5); cursor: pointer; font-size: 28px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    #capture-btn:disabled { opacity: 0.5; }
+    #capture-hint {
+      position: fixed; bottom: 142px; left: 50%; transform: translateX(-50%);
+      z-index: 9000; font-size: 12px; color: rgba(255,255,255,0.7); font-weight: 600;
+      text-align: center; width: 100%; padding: 0 24px;
+    }
+    #scan-status {
+      position: fixed; bottom: 142px; left: 50%; transform: translateX(-50%);
+      z-index: 9001; background: rgba(0,0,0,0.7); border-radius: 50px;
+      padding: 10px 22px; font-size: 13px; font-weight: 700; display: none;
+      backdrop-filter: blur(8px);
+    }
+    #scan-status.show { display: block; }
+    #scan-status.ok   { color: #00C9A7; border: 1px solid rgba(0,201,167,0.5); }
+    #scan-status.fail { color: #FF7070; border: 1px solid rgba(255,112,112,0.5); }
+    #scan-status.busy { color: rgba(255,255,255,0.7); border: 1px solid rgba(255,255,255,0.2); }
+
+    /* ── Review/Crop screen — shown right after capture, before matching ── */
+    #review-overlay {
+      position: fixed; inset: 0; z-index: 9500; background: #000;
+      display: none; align-items: center; justify-content: center;
+    }
+    #review-overlay.visible { display: flex; }
+    #captured-img { max-width: 100%; max-height: 100%; display: block; user-select: none; -webkit-user-drag: none; }
+    #crop-mask {
+      position: absolute; pointer-events: none;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.55);
+      border: 2px solid #00C9A7; border-radius: 4px;
+    }
+    #crop-box {
+      position: absolute; cursor: move; touch-action: none;
+    }
+    .crop-handle {
+      position: absolute; width: 30px; height: 30px; border-radius: 50%;
+      background: #00C9A7; border: 3px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+      touch-action: none; z-index: 10;
+    }
+    .crop-handle[data-corner="tl"] { top: -15px; left: -15px; cursor: nwse-resize; }
+    .crop-handle[data-corner="tr"] { top: -15px; right: -15px; cursor: nesw-resize; }
+    .crop-handle[data-corner="bl"] { bottom: -15px; left: -15px; cursor: nesw-resize; }
+    .crop-handle[data-corner="br"] { bottom: -15px; right: -15px; cursor: nwse-resize; }
+    #review-hint {
+      position: fixed; top: 52px; left: 0; right: 0; text-align: center; z-index: 9600;
+      color: rgba(255,255,255,0.85); font-size: 13px; font-weight: 600; padding: 0 24px;
+    }
+    #review-actions {
+      position: fixed; bottom: 48px; left: 0; right: 0; z-index: 9600;
+      display: flex; justify-content: center; gap: 16px;
+    }
+    .review-btn {
+      border: none; border-radius: 50px; font-family: inherit; font-size: 14px;
+      font-weight: 700; padding: 13px 26px; cursor: pointer; display: flex;
+      align-items: center; gap: 6px;
+    }
+    #retake-btn { background: rgba(255,255,255,0.12); color: #fff; border: 1.5px solid rgba(255,255,255,0.3); }
+    #confirm-crop-btn { background: linear-gradient(135deg,#00C9A7,#00E5CC); color: #04140f; }
+
+    #fs-overlay {
+      position: fixed; inset: 0; z-index: 9999; background: #000;
+      display: none; align-items: center; justify-content: center;
+    }
+    #fs-overlay.visible { display: flex; }
+    #fs-video { width: 100%; height: 100%; object-fit: contain; display: block; }
+    #fs-close-btn {
+      position: absolute; top: 48px; left: 16px; z-index: 10000;
+      background: rgba(0,0,0,0.60); border: 1px solid rgba(0,201,167,0.5);
+      border-radius: 22px; color: #00C9A7; font-size: 13px; font-weight: 700;
+      font-family: inherit; padding: 8px 18px; cursor: pointer;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+
+    #startup-overlay {
+      position: fixed; inset: 0; z-index: 9998; background: #000;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+    }
+    #startup-overlay.hidden { display: none; }
+    #startup-ring {
+      width: 46px; height: 46px; border: 4px solid rgba(0,201,167,0.18);
+      border-top-color: #00C9A7; border-radius: 50%; animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #startup-label { font-size: 13px; color: rgba(255,255,255,0.6); }
+
+    #ar-error-overlay {
+      position: fixed; inset: 0; z-index: 9997; background: #040D0B;
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+      gap: 16px; padding: 32px; text-align: center;
+    }
+    #ar-error-overlay.visible { display: flex; }
+    #ar-error-text { font-size: 14px; color: rgba(255,255,255,0.75); max-width: 320px; line-height: 1.5; white-space: pre-wrap; }
+    #ar-error-back-btn {
+      background: #00C9A7; border: none; border-radius: 50px; color: #040D0B;
+      font-family: inherit; font-size: 14px; font-weight: 700; padding: 12px 30px; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <video id="webcam" autoplay playsinline muted></video>
+  <div id="live-guide"></div>
+
+  <div id="startup-overlay">
+    <div id="startup-ring"></div>
+    <div id="startup-label">Opening camera…</div>
+  </div>
+
+  <div id="ar-error-overlay">
+    <div style="font-size:40px;">⚠️</div>
+    <div id="ar-error-text">Camera unavailable. Please check permissions and try again.</div>
+    <button id="ar-error-back-btn" onclick="goBack()">← Go Back</button>
+    <div style="position:fixed;bottom:10px;left:0;right:0;text-align:center;font-size:9px;color:rgba(255,255,255,0.25);">build 2026-06-21-5</div>
+  </div>
+
+  <div id="exp-tag">📸 CAPTURE & SCAN</div>
+  <button id="back-btn" onclick="goBack()">← Back</button>
+  <button id="torch-btn" onclick="toggleTorch()">🔦 Torch</button>
+
+  <div id="capture-hint">Point at the target, then tap to capture the whole scene</div>
+  <div id="scan-status"></div>
+  <button id="capture-btn" onclick="onCaptureTapped()">📸</button>
+
+  <!-- Review / crop screen -->
+  <div id="review-overlay">
+    <div id="review-hint">Drag any corner to trim to just the target, or move the whole box — then tap ✓</div>
+    <img id="captured-img" alt="Captured photo">
+    <div id="crop-mask"></div>
+    <div id="crop-box">
+      <div class="crop-handle" data-corner="tl"></div>
+      <div class="crop-handle" data-corner="tr"></div>
+      <div class="crop-handle" data-corner="bl"></div>
+      <div class="crop-handle" data-corner="br"></div>
+    </div>
+    <div id="review-actions">
+      <button id="retake-btn" class="review-btn" onclick="retakePhoto()">↺ Retake</button>
+      <button id="confirm-crop-btn" class="review-btn" onclick="confirmCropAndScan()">✓ Use This</button>
+    </div>
+  </div>
+
+  <div id="fs-overlay">
+    <button id="fs-close-btn" onclick="closeFullscreen()">← Scan Again</button>
+    <video id="fs-video" playsinline webkit-playsinline></video>
+  </div>
+
+  <script>
+    var webcam       = document.getElementById('webcam');
+    var startupOv    = document.getElementById('startup-overlay');
+    var errorOv      = document.getElementById('ar-error-overlay');
+    var errorText    = document.getElementById('ar-error-text');
+    var torchBtn     = document.getElementById('torch-btn');
+    var captureBtn   = document.getElementById('capture-btn');
+    var scanStatus   = document.getElementById('scan-status');
+    var captureHint  = document.getElementById('capture-hint');
+    var fsOverlay    = document.getElementById('fs-overlay');
+    var fsVideo      = document.getElementById('fs-video');
+    var reviewOv     = document.getElementById('review-overlay');
+    var capturedImg  = document.getElementById('captured-img');
+    var cropMask     = document.getElementById('crop-mask');
+    var cropBox      = document.getElementById('crop-box');
+    var cropHandles  = document.querySelectorAll('.crop-handle');
+
+    var VW = 480, VH = 640;
+    var MAX_CORNERS      = 250;
+    // Worst-case raw-candidate pool jsfeat's yape06.detect needs to write
+    // into — allocated ONCE and reused, instead of cols*rows (~307,200)
+    // freshly every call. 4000 is comfortably above any real corner count
+    // seen in practice (the original crash this was sized for happened at
+    // 250) while avoiding a large one-off allocation on every capture.
+    var CORNER_POOL_SIZE = 4000;
+    var cornerPool = [];
+    for (var _i = 0; _i < CORNER_POOL_SIZE; ++_i) cornerPool.push(new jsfeat.keypoint_t(0, 0, 0, 0, -1));
+    // Confidence is scored relative to how many features the target/capture
+    // actually have — not a fixed magic number — so a simple logo (few
+    // features) and a busy photo (many features) are each held to a fair
+    // bar. Mirrors how MindAR scores a "good enough" match rather than
+    // demanding a perfect one, while still rejecting weak/ambiguous hits.
+    var MATCH_RATIO       = 0.12; // ≥12% of available features must agree
+    var MATCH_FLOOR        = 9;    // absolute minimum, even for tiny feature sets
+    var MATCH_WIN_MARGIN    = 1.25; // best target must beat runner-up by this much
+
+    var targets   = [];
+    var arTrack    = null;
+    var torchOn     = false;
+    var fsOpen       = false;
+    var scanning      = false;
+    var stream          = null;
+    var lastCloseTime    = 0;
+
+    function showError(msg) {
+      startupOv.classList.add('hidden');
+      errorText.textContent = msg;
+      errorOv.classList.add('visible');
+    }
+
+    // Known in-app browsers sandbox their embedded WebView and block camera
+    // access outright — the only fix is opening the link in a real browser.
+    function detectInAppBrowser() {
+      var ua = navigator.userAgent || '';
+      if (/Instagram/i.test(ua)) return 'Instagram';
+      if (/FBAN|FBAV|FB_IAB/i.test(ua)) return 'Facebook';
+      if (/Line\//i.test(ua)) return 'LINE';
+      if (/MicroMessenger/i.test(ua)) return 'WeChat';
+      if (/Snapchat/i.test(ua)) return 'Snapchat';
+      if (/TikTok/i.test(ua)) return 'TikTok';
+      return null;
+    }
+
+    function goBack() {
+      torchOff();
+      stopCamera();
+      try { window.parent.postMessage({ type: 'ar-scanner-back' }, '*'); } catch(e) {}
+    }
+    function stopCamera() {
+      if (stream) { stream.getTracks().forEach(function(t){ t.stop(); }); stream = null; }
+    }
+    function toggleTorch() {
+      torchOn = !torchOn;
+      if (arTrack) arTrack.applyConstraints({ advanced: [{ torch: torchOn }] }).catch(function(){});
+      torchBtn.classList.toggle('on', torchOn);
+    }
+    function torchOff() {
+      if (!torchOn) return;
+      torchOn = false;
+      if (arTrack) arTrack.applyConstraints({ advanced: [{ torch: false }] }).catch(function(){});
+    }
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280, max: 1920 }, height: { ideal: 720, max: 1080 } }, audio: false })
+      .then(function(s) {
+        stream = s;
+        webcam.srcObject = s;
+        var track = s.getVideoTracks()[0];
+        if (track) arTrack = track;
+        webcam.addEventListener('loadedmetadata', function() {
+          startupOv.classList.add('hidden');
+          torchBtn.style.display = 'flex';
+        });
+        webcam.play().catch(function(){});
+      })
+      .catch(function(err) {
+        var name = err && err.name;
+        var inApp = detectInAppBrowser();
+        var msg = name === 'NotAllowedError' && inApp
+          ? 'Camera access is blocked by the ' + inApp + ' in-app browser — this is a restriction ' + inApp + ' applies to every site it opens, not a Memoera problem. Tap the ••• or ⋮ menu and choose "Open in Browser" (Safari or Chrome), then try again.'
+          : name === 'NotAllowedError'
+          ? 'Camera access is blocked for this site. Check your browser permissions and try again.'
+          : 'Could not access the camera (' + (name || 'unknown') + ').';
+        showError(msg);
+      });
+
+    // ── Real ORB-style detect + describe + brute-force match ───────────────
+    var diag = { lastRawCornerCount: null, lastDetectError: null };
+
+    function detectAndDescribe(imgU8) {
+      var thresholds = [10, 20, 30];
+      var count = 0;
+      diag.lastDetectError = null;
+      for (var t = 0; t < thresholds.length; t++) {
+        try {
+          jsfeat.yape06.laplacian_threshold = thresholds[t];
+          jsfeat.yape06.min_eigen_value_threshold = Math.round(thresholds[t] * 0.8);
+          count = jsfeat.yape06.detect(imgU8, cornerPool, 8);
+        } catch (e) {
+          diag.lastDetectError = (e && e.message) || String(e);
+          count = 0;
+        }
+        diag.lastRawCornerCount = count;
+        if (count >= 8) break;
+      }
+
+      var picked = cornerPool.slice(0, count);
+      if (picked.length > MAX_CORNERS) {
+        picked.sort(function(a, b) { return b.score - a.score; });
+        picked = picked.slice(0, MAX_CORNERS);
+      }
+      count = picked.length;
+
+      if (count > 0) {
+        try {
+          var descriptors = new jsfeat.matrix_t(32, count, jsfeat.U8_t | jsfeat.C1_t);
+          jsfeat.orb.describe(imgU8, picked, count, descriptors);
+          return { corners: picked, count: count, descriptors: descriptors };
+        } catch (e) {
+          diag.lastDetectError = 'describe: ' + ((e && e.message) || String(e));
+        }
+      }
+      return { corners: picked, count: 0, descriptors: null };
+    }
+
+    function popcnt32(x) {
+      x -= ((x >> 1) & 0x55555555);
+      x = (((x >> 2) & 0x33333333) + (x & 0x33333333));
+      x = (((x >> 4) + x) & 0x0f0f0f0f);
+      x += (x >> 8);
+      x += (x >> 16);
+      return (x & 0x3f);
+    }
+
+    function countGoodMatches(descA, countA, descB, countB) {
+      if (!descA || !descB || !countA || !countB) return 0;
+      var dA = descA.data, dB = descB.data;
+      var good = 0;
+      for (var i = 0; i < countA; ++i) {
+        var off_i = i * 32;
+        var best = 256, second = 256;
+        for (var j = 0; j < countB; ++j) {
+          var off_j = j * 32, dist = 0;
+          for (var k = 0; k < 32; k += 4) {
+            dist += popcnt32(dA[off_i+k]   ^ dB[off_j+k]) +
+                    popcnt32(dA[off_i+k+1] ^ dB[off_j+k+1]) +
+                    popcnt32(dA[off_i+k+2] ^ dB[off_j+k+2]) +
+                    popcnt32(dA[off_i+k+3] ^ dB[off_j+k+3]);
+          }
+          if (dist < best) { second = best; best = dist; }
+          else if (dist < second) { second = dist; }
+        }
+        if (best < 60 && best < 0.8 * second) good++;
+      }
+      return good;
+    }
+
+    // Loads a target image via fetch()->Blob->ObjectURL rather than setting
+    // img.crossOrigin + a direct remote src — avoids canvas tainting against
+    // this app's R2/CDN host regardless of its CORS headers.
+    function loadTargetDescriptors(t) {
+      if (!t.imageUrl) return Promise.resolve(null);
+      return fetch(t.imageUrl)
+        .then(function(res) {
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          return res.blob();
+        })
+        .then(function(blob) {
+          var blobUrl = URL.createObjectURL(blob);
+          return new Promise(function(resolve) {
+            var img = new Image();
+            img.onload = function() {
+              URL.revokeObjectURL(blobUrl);
+              try {
+                var c = document.createElement('canvas');
+                c.width = VW; c.height = VH;
+                var ctx = c.getContext('2d');
+                var scale = Math.min(VW / img.width, VH / img.height);
+                var w = img.width * scale, h = img.height * scale;
+                ctx.fillStyle = '#000'; ctx.fillRect(0, 0, VW, VH);
+                ctx.drawImage(img, (VW - w) / 2, (VH - h) / 2, w, h);
+                var data = ctx.getImageData(0, 0, VW, VH);
+                var gray = new jsfeat.matrix_t(VW, VH, jsfeat.U8_t | jsfeat.C1_t);
+                jsfeat.imgproc.grayscale(data.data, VW, VH, gray);
+                resolve(detectAndDescribe(gray));
+              } catch (e) { resolve(null); }
+            };
+            img.onerror = function() { URL.revokeObjectURL(blobUrl); resolve(null); };
+            img.src = blobUrl;
+          });
+        })
+        .catch(function() { return null; });
+    }
+
+    var frameCanvas = document.createElement('canvas');
+    frameCanvas.width = VW; frameCanvas.height = VH;
+    var frameCtx = frameCanvas.getContext('2d');
+
+    // ── Step 1: capture the WHOLE scene at native resolution ────────────────
+    var capturedCanvas = document.createElement('canvas');
+    var capturedCtx = capturedCanvas.getContext('2d');
+
+    function onCaptureTapped() {
+      if (scanning || fsOpen || !targets.length) return;
+      var w = webcam.videoWidth || 1280, h = webcam.videoHeight || 960;
+      capturedCanvas.width = w;
+      capturedCanvas.height = h;
+      capturedCtx.drawImage(webcam, 0, 0, w, h);
+      capturedImg.src = capturedCanvas.toDataURL('image/jpeg', 0.92);
+      reviewOv.classList.add('visible');
+    }
+
+    // ── Step 2: crop UI — drag the box to move, drag any of the 4 corner
+    //    handles independently to resize from that corner (each corner
+    //    handle moves its own two edges, like a real document-scanner crop,
+    //    not a single fixed resize handle). ──────────────────────────────
+    var MIN_CROP = 60;
+    var crop = { x: 0, y: 0, w: 0, h: 0 };
+    var dragMode = null; // 'move' | 'tl' | 'tr' | 'bl' | 'br' | null
+    var dragStart = null;
+
+    function renderCrop() {
+      cropBox.style.left = crop.x + 'px';
+      cropBox.style.top = crop.y + 'px';
+      cropBox.style.width = crop.w + 'px';
+      cropBox.style.height = crop.h + 'px';
+      cropMask.style.left = crop.x + 'px';
+      cropMask.style.top = crop.y + 'px';
+      cropMask.style.width = crop.w + 'px';
+      cropMask.style.height = crop.h + 'px';
+    }
+
+    capturedImg.onload = function() {
+      // Default crop covers nearly the FULL captured photo (small margin so
+      // the corner handles are reachable) — drag corners inward to refine,
+      // rather than starting from a small centered box.
+      var rect = capturedImg.getBoundingClientRect();
+      var margin = Math.min(rect.width, rect.height) * 0.035;
+      crop.x = margin;
+      crop.y = margin;
+      crop.w = rect.width - margin * 2;
+      crop.h = rect.height - margin * 2;
+      renderCrop();
+    };
+
+    function clampCrop() {
+      var rect = capturedImg.getBoundingClientRect();
+      crop.w = Math.max(MIN_CROP, Math.min(rect.width, crop.w));
+      crop.h = Math.max(MIN_CROP, Math.min(rect.height, crop.h));
+      crop.x = Math.max(0, Math.min(rect.width - crop.w, crop.x));
+      crop.y = Math.max(0, Math.min(rect.height - crop.h, crop.y));
+    }
+
+    cropBox.addEventListener('pointerdown', function(e) {
+      dragMode = 'move';
+      dragStart = { x: e.clientX, y: e.clientY, cx: crop.x, cy: crop.y };
+      e.preventDefault();
+    });
+    cropHandles.forEach(function(handle) {
+      handle.addEventListener('pointerdown', function(e) {
+        dragMode = handle.getAttribute('data-corner');
+        dragStart = {
+          x: e.clientX, y: e.clientY,
+          left: crop.x, top: crop.y, right: crop.x + crop.w, bottom: crop.y + crop.h,
+        };
+        e.preventDefault();
+        e.stopPropagation();
+      });
+    });
+    window.addEventListener('pointermove', function(e) {
+      if (!dragMode) return;
+      var dx = e.clientX - dragStart.x, dy = e.clientY - dragStart.y;
+
+      if (dragMode === 'move') {
+        crop.x = dragStart.cx + dx;
+        crop.y = dragStart.cy + dy;
+      } else {
+        // Each corner drags its own two edges — left/top/right/bottom,
+        // clamped against the opposite edge so the box can't invert.
+        var left = dragStart.left, top = dragStart.top, right = dragStart.right, bottom = dragStart.bottom;
+        if (dragMode === 'tl') { left = Math.min(left + dx, right - MIN_CROP); top = Math.min(top + dy, bottom - MIN_CROP); }
+        else if (dragMode === 'tr') { right = Math.max(right + dx, left + MIN_CROP); top = Math.min(top + dy, bottom - MIN_CROP); }
+        else if (dragMode === 'bl') { left = Math.min(left + dx, right - MIN_CROP); bottom = Math.max(bottom + dy, top + MIN_CROP); }
+        else if (dragMode === 'br') { right = Math.max(right + dx, left + MIN_CROP); bottom = Math.max(bottom + dy, top + MIN_CROP); }
+        crop.x = left; crop.y = top; crop.w = right - left; crop.h = bottom - top;
+      }
+      clampCrop();
+      renderCrop();
+    });
+    window.addEventListener('pointerup', function() { dragMode = null; });
+
+    function retakePhoto() {
+      reviewOv.classList.remove('visible');
+    }
+
+    // ── Step 3: crop confirmed — extract just that region and match ────────
+    function confirmCropAndScan() {
+      var rect = capturedImg.getBoundingClientRect();
+      var scaleX = capturedImg.naturalWidth / rect.width;
+      var scaleY = capturedImg.naturalHeight / rect.height;
+      var sx = crop.x * scaleX, sy = crop.y * scaleY;
+      var sw = crop.w * scaleX, sh = crop.h * scaleY;
+
+      frameCtx.fillStyle = '#000';
+      frameCtx.fillRect(0, 0, VW, VH);
+      var scale = Math.min(VW / sw, VH / sh);
+      var dw = sw * scale, dh = sh * scale;
+      frameCtx.drawImage(capturedCanvas, sx, sy, sw, sh, (VW - dw) / 2, (VH - dh) / 2, dw, dh);
+
+      reviewOv.classList.remove('visible');
+      runMatch();
+    }
+
+    // ── Step 4: match the cropped region against known targets ─────────────
+    function runMatch() {
+      if (scanning) return;
+      scanning = true;
+      captureBtn.disabled = true;
+      scanStatus.className = 'show busy';
+      scanStatus.textContent = 'Scanning…';
+      captureHint.style.display = 'none';
+
+      setTimeout(function() {
+        try {
+          var imgData = frameCtx.getImageData(0, 0, VW, VH);
+          var gray = new jsfeat.matrix_t(VW, VH, jsfeat.U8_t | jsfeat.C1_t);
+          jsfeat.imgproc.grayscale(imgData.data, VW, VH, gray);
+          var live = detectAndDescribe(gray);
+
+          var bestIdx = -1, bestScore = 0, secondScore = 0;
+          for (var i = 0; i < targets.length; i++) {
+            var t = targets[i];
+            if (!t.descriptors) continue;
+            var score = countGoodMatches(t.descriptors, t.count, live.descriptors, live.count);
+            if (score > bestScore) { secondScore = bestScore; bestScore = score; bestIdx = i; }
+            else if (score > secondScore) { secondScore = score; }
+          }
+
+          var required = MATCH_FLOOR;
+          if (bestIdx >= 0) {
+            var pool = Math.min(targets[bestIdx].count, live.count);
+            required = Math.max(MATCH_FLOOR, Math.round(MATCH_RATIO * pool));
+          }
+          var beatsRunnerUp = secondScore === 0 || bestScore >= secondScore * MATCH_WIN_MARGIN;
+
+          if (bestIdx >= 0 && bestScore >= required && beatsRunnerUp) {
+            scanStatus.className = 'show ok';
+            scanStatus.textContent = '✓ "' + (targets[bestIdx].label || 'Target') + '" matched!';
+            try { if (navigator.vibrate) navigator.vibrate(60); } catch(_) {}
+            onTargetMatched(targets[bestIdx]);
+          } else {
+            scanStatus.className = 'show fail';
+            scanStatus.textContent = '✗ No match — try cropping tighter to just the photo';
+            setTimeout(function() {
+              scanStatus.className = '';
+              captureHint.style.display = 'block';
+            }, 2200);
+          }
+        } catch (e) {
+          scanStatus.className = 'show fail';
+          scanStatus.textContent = 'Scan failed — try again';
+        }
+        scanning = false;
+        captureBtn.disabled = false;
+      }, 100);
+    }
+
+    // Document type → confirmation strategy: PDF/AI render natively in Chrome,
+    // Office formats preview via Microsoft's online viewer, PSD/CDR have no
+    // browser renderer so the server-generated thumbnail (previewUrl) is
+    // shown first, anything else falls back to filename-only.
+    function docCategory(link) {
+      var ext = (link.split('.').pop() || '').split('?')[0].toLowerCase();
+      if (ext === 'pdf' || ext === 'ai') return 'preview';
+      if (['doc','docx','ppt','pptx','xls','xlsx'].indexOf(ext) >= 0) return 'office';
+      if (ext === 'psd' || ext === 'cdr') return 'thumb';
+      return 'download';
+    }
+    function openDocument(doc) {
+      if (doc.category === 'office') {
+        window.parent.postMessage({ type: 'ar-open-link', url: 'https://view.officeapps.live.com/op/view.aspx?src=' + encodeURIComponent(doc.url), label: doc.fileName || '' }, '*');
+      } else if (doc.category === 'thumb' && doc.previewUrl) {
+        window.parent.postMessage({ type: 'ar-document-preview', previewUrl: doc.previewUrl, fileName: doc.fileName || '', openUrl: doc.url }, '*');
+      } else {
+        window.parent.postMessage({ type: 'ar-open-link', url: doc.url, label: doc.fileName || '' }, '*');
+      }
+    }
+
+    function onTargetMatched(t) {
+      if (Date.now() - lastCloseTime < 1000) return;
+      if (t.targetType === 'video' && t.videoUrl) {
+        openFullscreen(t.videoUrl);
+      } else if (t.targetType === 'animation' && t.urlLink) {
+        window.parent.postMessage({ type: 'ar-animation-triggered', animId: t.urlLink, label: t.label || '' }, '*');
+      } else if (t.targetType === 'document' && t.urlLink) {
+        openDocument({ url: t.urlLink, category: docCategory(t.urlLink), previewUrl: t.previewUrl || '', fileName: t.fileName || '' });
+      } else if (t.urlLink && /\.(glb|gltf|obj|fbx)/i.test(t.urlLink)) {
+        window.parent.postMessage({ type: 'ar-view-in-space', glbUrl: t.urlLink }, '*');
+      } else if (t.urlLink) {
+        window.parent.postMessage({ type: 'ar-open-link', url: t.urlLink, label: t.label || '' }, '*');
+      }
+    }
+
+    function openFullscreen(url) {
+      if (fsOpen) return;
+      fsOpen = true;
+      torchBtn.style.display = 'none';
+      document.getElementById('back-btn').style.display = 'none';
+      captureBtn.style.display = 'none';
+      fsVideo.muted = true;
+      fsVideo.src = url;
+      fsVideo.play().catch(function(){});
+      fsOverlay.classList.add('visible');
+    }
+    function closeFullscreen() {
+      lastCloseTime = Date.now();
+      fsOpen = false;
+      fsVideo.pause();
+      fsVideo.src = '';
+      fsOverlay.classList.remove('visible');
+      torchBtn.style.display = 'flex';
+      document.getElementById('back-btn').style.display = 'block';
+      captureBtn.style.display = 'flex';
+      scanStatus.className = '';
+      captureHint.style.display = 'block';
+    }
+
+    window.addEventListener('message', function(e) {
+      if (!e.data || e.data.type !== 'ar-mind-data') return;
+      var incoming = e.data.targets || [];
+      var withImageUrl = incoming.filter(function(t) { return !!t.imageUrl; }).length;
+      Promise.all(incoming.map(function(t) {
+        return loadTargetDescriptors(t).then(function(d) {
+          return Object.assign({}, t, d || { descriptors: null, count: 0 });
+        });
+      })).then(function(withDescriptors) {
+        targets = withDescriptors.filter(function(t) { return t.descriptors; });
+        if (!targets.length) {
+          if (withImageUrl < incoming.length) {
+            showError('This target has no saved photo, so this scan mode has nothing to scan against.\n\n' +
+              'Delete this target and re-upload it (with a fresh photo) from the target screen — "Clear scan cache" will not fix this, since the photo is missing on the server, not just cached locally.\n\n' +
+              'received: ' + incoming.length + ', withImageUrl: ' + withImageUrl);
+          } else {
+            showError('Could not analyze any target images for this scan mode.\n\n' +
+              'received: ' + incoming.length + ', withImageUrl: ' + withImageUrl + ', withDescriptors: 0\n' +
+              'lastRawCornerCount: ' + diag.lastRawCornerCount + ', lastDetectError: ' + (diag.lastDetectError || '-'));
+          }
+        } else {
+          captureHint.textContent = targets.length + ' target(s) ready — tap to capture, then crop the target';
+        }
+      });
+    });
+
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: 'ar-iframe-ready' }, '*');
+    }
+  </script>
+</body>
+</html>

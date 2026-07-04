@@ -1,0 +1,31 @@
+{
+  "name": "webar-app",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:https": "vite --https",
+    "build": "vite build",
+    "preview": "vite preview",
+    "preview:https": "vite preview --https",
+    "android:build": "npm run build && npx cap sync android",
+    "android:open": "npx cap open android",
+    "android:run": "npx cap run android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.3.4",
+    "@capacitor/browser": "^8.0.3",
+    "@capacitor/cli": "^8.3.4",
+    "@capacitor/core": "^8.3.4",
+    "@imgly/background-removal": "^1.7.0",
+    "idb-keyval": "^6.2.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.150.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.3.1"
+  }
+}

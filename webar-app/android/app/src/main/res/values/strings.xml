@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Memoera</string>
+    <string name="title_activity_main">Memoera</string>
+    <string name="package_name">app.memoera.webar</string>
+    <string name="custom_url_scheme">app.memoera.webar</string>
+</resources>
