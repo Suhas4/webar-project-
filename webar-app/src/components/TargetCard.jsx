@@ -414,7 +414,7 @@ const styles = {
     background: 'rgba(0,201,167,0.02)', minHeight: 80, overflow: 'hidden',
   },
   dropZoneActive: { borderColor: TEAL, background: 'rgba(0,201,167,0.07)' },
-  dropZoneError: { borderColor: '#ff6060', background: 'rgba(255,80,80,0.05)' },
+  dropZoneError: { borderColor: '#FF6B6B', background: 'rgba(255,80,80,0.05)' },
   dropZoneContent: { display: 'flex', alignItems: 'center', gap: 12, padding: '0 16px' },
   dropZoneIcon: { fontSize: 20, flexShrink: 0 },
   dropZoneText: { fontSize: 13, color: 'rgba(255,255,255,0.28)', fontFamily: FONT },

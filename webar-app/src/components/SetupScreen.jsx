@@ -248,7 +248,7 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
                 Cancel
               </button>
               <button onClick={() => { moderationWarning.resolve(true); setModerationWarning(null); }}
-                style={{ flex: 1, background: '#E05555', border: 'none', borderRadius: 50,
+                style={{ flex: 1, background: '#FF6B6B', border: 'none', borderRadius: 50,
                   color: '#fff', fontSize: 13, fontWeight: 700, padding: '11px 0', cursor: 'pointer' }}>
                 Yes, Continue
               </button>
@@ -416,13 +416,13 @@ const styles = {
     background: 'rgba(255,80,80,0.08)', border: '1px solid rgba(255,80,80,0.3)',
     borderRadius: 12, padding: '12px 16px', display: 'flex',
     justifyContent: 'space-between', alignItems: 'center', gap: 12,
-    fontSize: 13, color: '#ff8080', fontFamily: FONT,
+    fontSize: 13, color: '#FF6B6B', fontFamily: FONT,
   },
   errorDismiss: {
-    background: 'transparent', border: 'none', color: '#ff8080',
+    background: 'transparent', border: 'none', color: '#FF6B6B',
     fontSize: 13, cursor: 'pointer', fontFamily: FONT, flexShrink: 0, textDecoration: 'underline',
   },
-  validationHint: { fontSize: 13, color: '#ff8080', fontFamily: FONT, margin: 0, textAlign: 'center' },
+  validationHint: { fontSize: 13, color: '#FF6B6B', fontFamily: FONT, margin: 0, textAlign: 'center' },
   startButton: {
     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
     background: `linear-gradient(135deg, ${TEAL}, ${CYAN})`,

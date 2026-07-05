@@ -81,7 +81,7 @@ export default function GoalSelectScreen({ onPrivate, onPublic, onBack }) {
           animation: "gs-fadeUp 0.5s ease 0.15s both",
         }}>
           <div style={{ ...s.accentBar, background: `linear-gradient(180deg, ${TEAL}, ${TEAL}55)` }} />
-          <span className="gs-badge" style={{ ...s.iconWrap, background: `linear-gradient(135deg, ${TEAL}, #00819c)`, boxShadow: `0 6px 20px ${TEAL}4d` }}>
+          <span className="gs-badge" style={{ ...s.iconWrap, background: `linear-gradient(135deg, ${TEAL}, #00E5CC)`, boxShadow: `0 6px 20px ${TEAL}4d` }}>
             <span style={s.badgeShine} />
             <img src="/public-logo.png" alt="Public" style={s.iconImg} />
           </span>

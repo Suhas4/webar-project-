@@ -201,7 +201,7 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
         >
           <BellIcon size={22} color={colors.text} />
           {(notifs.length + festivalUnread) > 0 && (
-            <span style={{ position: 'absolute', top: 4, right: 4, width: 7, height: 7, borderRadius: '50%', background: '#FF4444', border: `1.5px solid ${colors.bg}` }} />
+            <span style={{ position: 'absolute', top: 4, right: 4, width: 7, height: 7, borderRadius: '50%', background: '#FF6B6B', border: `1.5px solid ${colors.bg}` }} />
           )}
         </button>
 
@@ -249,7 +249,7 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
             display: 'flex', alignItems: 'center', gap: 8 }}>
             <BellIcon size={20} color={colors.text} />
             <span style={{ fontSize: 14, fontWeight: 700, color: colors.text, fontFamily: FONT }}>
-              Notifications {(notifs.length + festivalUnread) > 0 && <span style={{ fontSize: 11, background: '#FF4444', color: '#fff', borderRadius: 10, padding: '1px 6px', marginLeft: 4 }}>{notifs.length + festivalUnread}</span>}
+              Notifications {(notifs.length + festivalUnread) > 0 && <span style={{ fontSize: 11, background: '#FF6B6B', color: '#fff', borderRadius: 10, padding: '1px 6px', marginLeft: 4 }}>{notifs.length + festivalUnread}</span>}
             </span>
             <button onClick={() => setNotifOpen(false)}
               style={{ marginLeft: 'auto', background: 'transparent', border: 'none',
@@ -264,7 +264,7 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
                 <img src={fn.image_url} alt={fn.festival_name}
                   style={{ width: '100%', display: 'block', maxHeight: 160, objectFit: 'cover' }} />
                 {!fn.is_read && (
-                  <span style={{ position: 'absolute', top: 8, right: 8, background: '#FF4444',
+                  <span style={{ position: 'absolute', top: 8, right: 8, background: '#FF6B6B',
                     color: '#fff', fontSize: 9, fontWeight: 700, borderRadius: 8,
                     padding: '2px 7px', fontFamily: FONT }}>NEW</span>
                 )}
@@ -708,7 +708,7 @@ function DemoAndHowItWorksCard({ colors, isDark }) {
                   width: 44, height: 44, borderRadius: '50%', display: 'flex',
                   alignItems: 'center', justifyContent: 'center', fontSize: 20,
                   background: active === i
-                    ? 'linear-gradient(135deg,#00C9A7,#006EAA)'
+                    ? 'linear-gradient(135deg,#00C9A7,#00E5CC)'
                     : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'),
                   boxShadow: active === i ? '0 4px 16px rgba(0,201,167,0.5)' : 'none',
                   transition: 'background 0.3s, box-shadow 0.3s',
@@ -849,7 +849,7 @@ function HappyCustomersCard({ colors, isDark, user }) {
       <div key={active} style={{ padding: '16px 18px 6px', animation: 'hc-fadeIn 0.35s ease' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
           <div style={{ width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
-            background: 'linear-gradient(135deg,#00C9A7,#006EAA)',
+            background: 'linear-gradient(135deg,#00C9A7,#00E5CC)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>
             {r.avatar}
           </div>

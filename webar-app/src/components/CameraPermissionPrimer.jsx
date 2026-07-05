@@ -39,7 +39,7 @@ const s = {
   },
   iconWrap: {
     width: 64, height: 64, margin: '0 auto 16px', borderRadius: 20,
-    background: `linear-gradient(135deg, ${TEAL}, #00819c)`,
+    background: `linear-gradient(135deg, ${TEAL}, #00E5CC)`,
     display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30,
     boxShadow: `0 6px 20px ${TEAL}4d`,
   },

@@ -208,7 +208,7 @@ const S = {
   heading: { fontSize:22, fontWeight:700, fontFamily:FONT, color:'#ffffff', letterSpacing:'2px', marginBottom:20, textAlign:'center' },
   hint: { fontSize:13, color:'rgba(255,255,255,0.45)', fontFamily:FONT, margin:'0 0 16px', lineHeight:1.6, textAlign:'center' },
   errorBox: { background:'rgba(255,80,80,0.08)', border:'1px solid rgba(255,80,80,0.3)', borderRadius:10,
-    padding:'10px 14px', fontSize:13, color:'#ff8080', fontFamily:FONT, marginBottom:16, textAlign:'center' },
+    padding:'10px 14px', fontSize:13, color:'#FF6B6B', fontFamily:FONT, marginBottom:16, textAlign:'center' },
   form: { display:'flex', flexDirection:'column', gap:14 },
   row: { display:'flex', gap:12 },
   label: { fontSize:11, fontWeight:600, fontFamily:FONT, color:'rgba(255,255,255,0.45)', letterSpacing:'0.08em', textTransform:'uppercase' },

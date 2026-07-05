@@ -425,13 +425,13 @@ function ViewfinderBrackets() {
 }
 
 function TorchIcon({ on }) {
-  const color = on ? "#FFE066" : "rgba(255,255,255,0.85)";
+  const color = on ? "#00C9A7" : "rgba(255,255,255,0.85)";
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M8 2h8l2 6H6L8 2z" fill={on ? "rgba(255,220,0,0.35)" : "none"} />
+      <path d="M8 2h8l2 6H6L8 2z" fill={on ? "rgba(0,201,167,0.35)" : "none"} />
       <path d="M6 8l1.5 12a1 1 0 001 .9h7a1 1 0 001-.9L18 8" />
       <line x1="12" y1="12" x2="12" y2="17" />
-      {on && <circle cx="12" cy="20" r="1.5" fill="#FFE066" stroke="none" />}
+      {on && <circle cx="12" cy="20" r="1.5" fill="#00C9A7" stroke="none" />}
     </svg>
   );
 }

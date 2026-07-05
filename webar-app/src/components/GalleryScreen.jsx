@@ -237,12 +237,12 @@ export default function GalleryScreen({ onBack, onCollection }) {
         <div style={{ margin: "0 16px 12px", padding: "10px 14px", borderRadius: 12,
           background: "rgba(255,128,128,0.08)", border: "1px solid rgba(255,128,128,0.3)",
           display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12, color: "#FF8080", fontFamily: FONT, fontWeight: 600 }}>
+          <span style={{ fontSize: 12, color: "#FF6B6B", fontFamily: FONT, fontWeight: 600 }}>
             {fixing ? (fixStatus || "Fixing…") : "⚠️ Some targets have no saved photo and won't scan"}
           </span>
           {!fixing && (
             <button onClick={handleAutoFixBroken}
-              style={{ background: "#FF8080", border: "none", borderRadius: 50, color: "#1a0000",
+              style={{ background: "#FF6B6B", border: "none", borderRadius: 50, color: "#1a0000",
                 fontSize: 11, fontWeight: 700, fontFamily: FONT, padding: "6px 14px", cursor: "pointer" }}>
               🔧 Auto-Fix Now
             </button>
@@ -307,7 +307,7 @@ export default function GalleryScreen({ onBack, onCollection }) {
                     )}
                   </div>
                   {!t._imagePreviewUrl && (
-                    <div style={{ fontSize: 10.5, fontFamily: FONT, color: "#FF8080", marginTop: 5, fontWeight: 600, maxWidth: 220 }}>
+                    <div style={{ fontSize: 10.5, fontFamily: FONT, color: "#FF6B6B", marginTop: 5, fontWeight: 600, maxWidth: 220 }}>
                       ⚠️ No photo saved — delete and re-upload this target, it won't scan
                     </div>
                   )}
@@ -380,7 +380,7 @@ export default function GalleryScreen({ onBack, onCollection }) {
         <button onClick={onCollection} title="Photo Animation" style={{
           position: "fixed", right: 18, bottom: 86, zIndex: 30,
           width: 56, height: 56, borderRadius: "50%", border: "none",
-          background: `linear-gradient(135deg,${TEAL} 0%,#006EAA 100%)`,
+          background: `linear-gradient(135deg,${TEAL} 0%,#00E5CC 100%)`,
           display: "flex", alignItems: "center", justifyContent: "center",
           boxShadow: "0 6px 20px rgba(0,201,167,0.45)", cursor: "pointer",
         }}>
@@ -413,7 +413,7 @@ const s = {
   backBtn:  { background: "transparent", border: "none", fontSize: 14, fontWeight: 600, fontFamily: FONT, cursor: "pointer", padding: "4px 0" },
   title:    { fontSize: 22, fontWeight: 700, margin: 0, flex: 1 },
   count:    { fontSize: 13, fontFamily: FONT },
-  deleteAllBtn: { background: "rgba(220,50,50,0.12)", border: "1px solid rgba(220,50,50,0.35)", borderRadius: 20, color: "#E05555", fontSize: 12, fontWeight: 600, fontFamily: FONT, padding: "6px 14px", cursor: "pointer" },
+  deleteAllBtn: { background: "rgba(220,50,50,0.12)", border: "1px solid rgba(220,50,50,0.35)", borderRadius: 20, color: "#FF6B6B", fontSize: 12, fontWeight: 600, fontFamily: FONT, padding: "6px 14px", cursor: "pointer" },
   empty:    { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontFamily: FONT, padding: 40 },
   list:     { flex: 1, overflowY: "auto", padding: "0 16px 20px", display: "flex", flexDirection: "column", gap: 12 },
 

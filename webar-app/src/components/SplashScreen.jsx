@@ -70,7 +70,7 @@ export default function SplashScreen({ onDone }) {
         { left:'18%', top:'25%', delay:'0s',    size:4, color:'#00C9A7' },
         { left:'75%', top:'20%', delay:'0.6s',  size:3, color:'#C9A84C' },
         { left:'60%', top:'70%', delay:'1.1s',  size:4, color:'#00C9A7' },
-        { left:'30%', top:'65%', delay:'0.3s',  size:3, color:'#0099CC' },
+        { left:'30%', top:'65%', delay:'0.3s',  size:3, color:'#00C9A7' },
         { left:'85%', top:'50%', delay:'0.9s',  size:2, color:'#C9A84C' },
         { left:'12%', top:'55%', delay:'1.5s',  size:3, color:'#00C9A7' },
       ].map((p, i) => (
@@ -94,7 +94,7 @@ export default function SplashScreen({ onDone }) {
             border:'1.5px solid #C9A84C',
             animation:'sp-ring2 2.8s ease-out 1.5s infinite' }} />
           <div style={{ position:'absolute', width:180, height:180, borderRadius:'50%',
-            border:'1px solid #0099CC',
+            border:'1px solid #00C9A7',
             animation:'sp-ring3 2.8s ease-out 2.1s infinite' }} />
 
           <img

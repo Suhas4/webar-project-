@@ -184,9 +184,9 @@ export default function HelloScreen({ onCreateAccount, onExisting, onGuestScan, 
         {/* Viewfinder box */}
         <div style={st.scannerBox}>
           <div style={{ ...st.corner, top: -4, left: -4,  borderTopColor: '#00C9A7', borderLeftColor: '#00C9A7',   borderTopWidth: 6, borderLeftWidth: 6,  borderTopLeftRadius: 16 }} />
-          <div style={{ ...st.corner, top: -4, right: -4, borderTopColor: '#5BBB8D', borderRightColor: '#5BBB8D',  borderTopWidth: 6, borderRightWidth: 6, borderTopRightRadius: 16 }} />
-          <div style={{ ...st.corner, bottom: -4, left: -4,  borderBottomColor: '#9BAA6C', borderLeftColor: '#9BAA6C',  borderBottomWidth: 6, borderLeftWidth: 6,  borderBottomLeftRadius: 16 }} />
-          <div style={{ ...st.corner, bottom: -4, right: -4, borderBottomColor: '#C9A84C', borderRightColor: '#C9A84C', borderBottomWidth: 6, borderRightWidth: 6, borderBottomRightRadius: 16 }} />
+          <div style={{ ...st.corner, top: -4, right: -4, borderTopColor: '#00C9A7', borderRightColor: '#00C9A7',  borderTopWidth: 6, borderRightWidth: 6, borderTopRightRadius: 16 }} />
+          <div style={{ ...st.corner, bottom: -4, left: -4,  borderBottomColor: '#00C9A7', borderLeftColor: '#00C9A7',  borderBottomWidth: 6, borderLeftWidth: 6,  borderBottomLeftRadius: 16 }} />
+          <div style={{ ...st.corner, bottom: -4, right: -4, borderBottomColor: '#00C9A7', borderRightColor: '#00C9A7', borderBottomWidth: 6, borderRightWidth: 6, borderBottomRightRadius: 16 }} />
           <div style={st.scanLine} />
         </div>
 
@@ -350,7 +350,7 @@ const st = {
 
   /* Highlighted Tap to Scan button */
   tapScanBtn: {
-    background: 'linear-gradient(135deg, #00C9A7 0%, #00B8D9 50%, #00E5CC 100%)',
+    background: 'linear-gradient(135deg, #00C9A7 0%, #00E5CC 100%)',
     border: 'none', borderRadius: 50,
     color: '#040D0B', fontSize: 15, fontWeight: 800,
     fontFamily: FONT, padding: '16px 42px', cursor: 'pointer',

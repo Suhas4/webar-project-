@@ -650,7 +650,7 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
         {state === 'error' && (
           <div style={{ background:'rgba(220,50,50,0.12)', border:'1px solid rgba(220,50,50,0.35)',
             borderRadius:12, padding:'12px 16px', marginBottom:20,
-            fontSize:12, color:'#E05555', fontFamily:FONT }}>
+            fontSize:12, color:'#FF6B6B', fontFamily:FONT }}>
             {error}
           </div>
         )}

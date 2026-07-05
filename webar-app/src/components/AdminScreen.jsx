@@ -163,7 +163,7 @@ export default function AdminScreen({ onBack, adminKey, onUploadGlobal }) {
         {/* Error */}
         {error && (
           <div style={{ background:'rgba(220,50,50,0.10)', border:'1px solid rgba(220,50,50,0.3)',
-            borderRadius:10, padding:'10px 14px', marginBottom:16, color:'#FF7070', fontSize:13 }}>
+            borderRadius:10, padding:'10px 14px', marginBottom:16, color:'#FF6B6B', fontSize:13 }}>
             ⚠ {error}
           </div>
         )}
@@ -206,9 +206,9 @@ export default function AdminScreen({ onBack, adminKey, onUploadGlobal }) {
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginTop:12 }}>
             {[
               { label:'Waiting',   value: status.waiting,   color: GOLD },
-              { label:'Active',    value: status.active,    color: '#0099CC' },
+              { label:'Active',    value: status.active,    color: '#00E5CC' },
               { label:'Completed', value: status.completed, color: TEAL },
-              { label:'Failed',    value: status.failed,    color: '#FF5555' },
+              { label:'Failed',    value: status.failed,    color: '#FF6B6B' },
             ].map(({ label, value, color }) => (
               <div key={label}
                 style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)',

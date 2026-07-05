@@ -70,7 +70,7 @@ export default function UserAnimationViewer({ title, frames, onBack, onDelete })
           </div>
         </div>
         <button onClick={handleDelete} style={{ background:'rgba(220,50,50,0.18)',
-          border:'1px solid rgba(220,50,50,0.4)', borderRadius:20, color:'#FF7070',
+          border:'1px solid rgba(220,50,50,0.4)', borderRadius:20, color:'#FF6B6B',
           fontSize:12, fontWeight:600, fontFamily:FONT, padding:'7px 14px', cursor:'pointer' }}>
           Delete
         </button>

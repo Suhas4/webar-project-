@@ -157,7 +157,7 @@ const S = {
   lineActive:{background:"linear-gradient(90deg,"+TEAL+",#00E5CC)"},
   heading:{fontSize:18,fontWeight:700,fontFamily:FONT,color:"#ffffff",letterSpacing:"2px",marginBottom:16,textAlign:"center"},
   hint:{fontSize:13,color:"rgba(255,255,255,0.45)",fontFamily:FONT,margin:"0 0 16px",lineHeight:1.6,textAlign:"center"},
-  errorBox:{background:"rgba(255,80,80,0.08)",border:"1px solid rgba(255,80,80,0.3)",borderRadius:10,padding:"10px 14px",fontSize:13,color:"#ff8080",fontFamily:FONT,marginBottom:16,textAlign:"center"},
+  errorBox:{background:"rgba(255,80,80,0.08)",border:"1px solid rgba(255,80,80,0.3)",borderRadius:10,padding:"10px 14px",fontSize:13,color:"#FF6B6B",fontFamily:FONT,marginBottom:16,textAlign:"center"},
   form:{display:"flex",flexDirection:"column",gap:14},
   input:{background:"rgba(255,255,255,0.05)",border:"none",borderBottom:"1.5px solid rgba(0,201,167,0.4)",borderRadius:"8px 8px 0 0",padding:"12px 14px",fontSize:15,fontFamily:FONT,color:"#ffffff",outline:"none",width:"100%"},
   btn:{display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,"+TEAL+",#00E5CC)",border:"none",borderRadius:50,color:"#080C18",fontSize:16,fontWeight:700,fontFamily:FONT,padding:"15px 24px",cursor:"pointer",boxShadow:"0 4px 24px rgba(0,201,167,0.35)"},

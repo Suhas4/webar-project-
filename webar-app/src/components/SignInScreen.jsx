@@ -97,7 +97,7 @@ const styles = {
   successBox: { background:"rgba(0,201,167,0.1)",border:"1px solid rgba(0,201,167,0.35)",
     borderRadius:10,padding:"10px 14px",fontSize:13,color:TEAL,fontFamily:FONT,marginBottom:16,textAlign:"center" },
   errorBox: { background:"rgba(255,80,80,0.08)",border:"1px solid rgba(255,80,80,0.3)",
-    borderRadius:10,padding:"10px 14px",fontSize:13,color:"#ff8080",fontFamily:FONT,marginBottom:16,textAlign:"center" },
+    borderRadius:10,padding:"10px 14px",fontSize:13,color:"#FF6B6B",fontFamily:FONT,marginBottom:16,textAlign:"center" },
   form: { display:"flex",flexDirection:"column",gap:16 },
   fieldWrap: { display:"flex",flexDirection:"column",gap:6 },
   label: { fontSize:11,fontWeight:600,fontFamily:FONT,color:"rgba(255,255,255,0.45)",letterSpacing:"0.08em",textTransform:"uppercase" },

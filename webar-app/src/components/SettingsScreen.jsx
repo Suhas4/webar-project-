@@ -875,7 +875,7 @@ function ContactSupportModal({ onClose, colors }) {
       </div>
 
       {error && (
-        <p style={{ fontSize: 12, color: '#ff8080', fontFamily: FONT, margin: '0 0 12px', lineHeight: 1.5 }}>
+        <p style={{ fontSize: 12, color: '#FF6B6B', fontFamily: FONT, margin: '0 0 12px', lineHeight: 1.5 }}>
           {error}
         </p>
       )}
