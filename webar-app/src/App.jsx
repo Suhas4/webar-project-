@@ -189,13 +189,13 @@ export default function App() {
     if (appView === 'home' && !localStorage.getItem('memoera_token')) setAppView('hello');
   }, [appView]);
 
-  // If a guest's first-ever scan (no cache yet) takes a moment to compile,
-  // show an interactive popup after a short delay so the wait reads as
-  // normal progress instead of the site looking frozen/slow, and gives the
-  // user a way to back out instead of just staring at a stuck screen. Home's
-  // own scan button skips this — signed-in users already have camera context.
+  // If a scan (guest or signed-in) takes a moment to compile — first-time
+  // guest scans, or a slow/re-requested camera permission on Home — show an
+  // interactive popup after a short delay so the wait reads as normal
+  // progress instead of the site looking frozen, and gives the user a way
+  // to back out instead of just staring at a stuck screen.
   useEffect(() => {
-    if (!guestScanLoading || scanOriginRef.current !== 'hello') { setScanHint(false); return; }
+    if (!guestScanLoading) { setScanHint(false); return; }
     const t = setTimeout(() => setScanHint(true), 1200);
     return () => { clearTimeout(t); setScanHint(false); };
   }, [guestScanLoading]);

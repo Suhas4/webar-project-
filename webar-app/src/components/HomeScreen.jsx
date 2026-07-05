@@ -6,6 +6,7 @@ import { useTheme } from '../context/ThemeContext.jsx';
 import { API_BASE } from '../config/api.js';
 import { showRewardedAd, showBanner, removeBanner } from '../services/AdMobService.js';
 import { useFestivalNotifications } from '../hooks/useFestivalNotifications.js';
+import { playScanFeedback } from '../utils/feedback.js';
 
 const AD_BONUS_KEY = 'memoera_ad_bonus_mb';
 const AD_COOLDOWN_KEY = 'memoera_ad_last';
@@ -478,7 +479,7 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
 
       {/* â"€â"€ Right-side nav bar â"€â"€ */}
       <div className="memoera-nav-bar" style={{ ...styles.navBar, background: colors.navBg }}>
-        {onScan && <NavBtn icon={<ScanCameraIcon color="#00C9A7" />} label={tr.scan || 'Scan'} onClick={onScan} />}
+        {onScan && <NavBtn icon={<ScanCameraIcon color="#00C9A7" />} label={tr.scan || 'Scan'} onClick={() => { playScanFeedback(); onScan(); }} />}
         <NavBtn icon={<PlusIcon    color={colors.navIcon} />} label={tr.upload}   onClick={onUpload} />
         <NavBtn icon={<GalleryIcon color={colors.navIcon} />} label={tr.gallery}  onClick={onGallery} />
         <NavBtn icon={<GearIcon    color={colors.navIcon} />} label={tr.settings} onClick={onSettings} />
