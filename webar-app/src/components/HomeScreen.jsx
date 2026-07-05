@@ -593,13 +593,19 @@ function DemoAndHowItWorksCard({ colors, isDark }) {
     setVideoIndex((i) => (i + 1) % VIDEO_PLAYLIST.length);
   };
 
-  // Advance to the next clip in the playlist automatically.
+  // Advance to the next clip in the playlist automatically. `onPause` fires
+  // the instant a clip ends (before `onEnded` advances the index), which
+  // flips `playing` back to false — without resetting it here, the "tap to
+  // play" overlay would reappear over each new clip even though it's
+  // actually already playing underneath, making continuous playback look
+  // like it stopped.
   useEffect(() => {
     if (!startedRef.current) return; // first clip waits for the user to tap play
     const v = videoRef.current;
     if (!v) return;
     v.load();
     v.play();
+    setPlaying(true);
   }, [videoIndex]);
 
   // Fallback so the steps still play even if the video is never tapped.
@@ -757,21 +763,25 @@ const CUSTOMER_REVIEWS = [
 function HappyCustomersCard({ colors, isDark, user }) {
   const [active, setActive] = useState(0);
   const [reviews, setReviews] = useState(CUSTOMER_REVIEWS);
+  const [readOpen, setReadOpen] = useState(false);
   const [writeOpen, setWriteOpen] = useState(false);
   const [myRating, setMyRating] = useState(5);
   const [myText, setMyText] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitMsg, setSubmitMsg] = useState('');
 
+  // The hardcoded CUSTOMER_REVIEWS are placeholder copy for a brand-new site
+  // with no reviews yet — once real users have left reviews, only show
+  // those, so the sample copy doesn't keep appearing next to genuine ones.
   const loadReviews = useCallback(() => {
     fetch(`${API_BASE}/api/reviews`)
       .then(res => res.ok ? res.json() : null)
       .then(data => {
         if (!data?.reviews?.length) return;
         const fetched = data.reviews.map(rv => ({
-          name: rv.name, avatar: '🙂', rating: rv.rating, text: rv.text,
+          name: rv.name, avatar: '🙂', photoUrl: rv.profilePhotoUrl || '', rating: rv.rating, text: rv.text,
         }));
-        setReviews([...fetched, ...CUSTOMER_REVIEWS]);
+        setReviews(fetched);
       })
       .catch(() => {});
   }, []);
@@ -803,7 +813,7 @@ function HappyCustomersCard({ colors, isDark, user }) {
         setSubmitMsg(e.error || 'Failed to submit review.');
         setSubmitting(false); return;
       }
-      setReviews(prev => [{ name: user?.name || user?.username || 'You', avatar: '🙂', rating: myRating, text }, ...prev]);
+      setReviews(prev => [{ name: user?.name || user?.username || 'You', avatar: '🙂', photoUrl: user?.profilePhotoUrl || '', rating: myRating, text }, ...prev]);
       setActive(0);
       setMyText('');
       setWriteOpen(false);
@@ -847,13 +857,14 @@ function HappyCustomersCard({ colors, isDark, user }) {
       </div>
 
       {/* Review card — full card width, so long reviews always wrap in full
-          instead of being squeezed by side-by-side arrow buttons */}
-      <div key={active} style={{ padding: '16px 18px 6px', animation: 'hc-fadeIn 0.35s ease' }}>
+          instead of being squeezed by side-by-side arrow buttons. Tap to
+          open the full review in a half-screen reader. */}
+      <div key={active} onClick={() => setReadOpen(true)} style={{ padding: '16px 18px 6px', animation: 'hc-fadeIn 0.35s ease', cursor: 'pointer' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-          <div style={{ width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+          <div style={{ width: 38, height: 38, borderRadius: '50%', flexShrink: 0, overflow: 'hidden',
             background: 'linear-gradient(135deg,#00C9A7,#00E5CC)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>
-            {r.avatar}
+            {r.photoUrl ? <img src={r.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : r.avatar}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: colors.text, fontFamily: FONT }}>
@@ -913,6 +924,46 @@ function HappyCustomersCard({ colors, isDark, user }) {
           ✍️ Share Your Experience
         </button>
       </div>
+
+      {/* Half-screen review reader — tap a review to open it here instead of
+          reading the compact card. Portaled to <body> for the same stacking
+          reason as the write modal below. */}
+      {readOpen && createPortal(
+        <div onClick={() => setReadOpen(false)} style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
+          zIndex: 9999, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
+        }}>
+          <div onClick={e => e.stopPropagation()} style={{
+            width: '100%', maxWidth: 420, height: '50vh', borderRadius: '24px 24px 0 0', padding: '20px 20px 28px',
+            background: colors.bgSolid, display: 'flex', flexDirection: 'column', overflowY: 'auto', boxSizing: 'border-box',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+              <div style={{ width: 48, height: 48, borderRadius: '50%', flexShrink: 0, overflow: 'hidden',
+                background: 'linear-gradient(135deg,#00C9A7,#00E5CC)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>
+                {r.photoUrl ? <img src={r.photoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : r.avatar}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: colors.text, fontFamily: FONT }}>{r.name}</div>
+                <div style={{ fontSize: 13, letterSpacing: 1 }}>
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <span key={i} style={{ color: i < r.rating ? GOLD : (isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)') }}>★</span>
+                  ))}
+                </div>
+              </div>
+              <button onClick={() => setReadOpen(false)} aria-label="Close" style={{
+                background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 20,
+                color: colors.textMuted, flexShrink: 0, padding: 4,
+              }}>✕</button>
+            </div>
+            <p style={{ margin: 0, fontSize: 14, color: colors.text, fontFamily: FONT,
+              lineHeight: 1.7, fontStyle: 'italic', whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+              “{r.text}”
+            </p>
+          </div>
+        </div>,
+        document.body
+      )}
 
       {/* Write-a-review modal — portaled to <body> so it always paints above
           sibling sections (e.g. About Us / Company Details), regardless of

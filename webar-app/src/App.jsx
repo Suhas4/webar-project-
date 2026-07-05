@@ -189,12 +189,13 @@ export default function App() {
   }, [appView]);
 
   // If a guest's first-ever scan (no cache yet) takes a moment to compile,
-  // show a small "getting ready" hint after a short delay so the wait reads
-  // as normal progress instead of the site looking frozen/slow. Home's own
-  // scan button skips this — signed-in users already have camera context.
+  // show an interactive popup after a short delay so the wait reads as
+  // normal progress instead of the site looking frozen/slow, and gives the
+  // user a way to back out instead of just staring at a stuck screen. Home's
+  // own scan button skips this — signed-in users already have camera context.
   useEffect(() => {
     if (!guestScanLoading || scanOriginRef.current !== 'hello') { setScanHint(false); return; }
-    const t = setTimeout(() => setScanHint(true), 600);
+    const t = setTimeout(() => setScanHint(true), 1200);
     return () => { clearTimeout(t); setScanHint(false); };
   }, [guestScanLoading]);
 
@@ -487,21 +488,47 @@ export default function App() {
         />
       )}
 
-      {/* "Getting ready" hint — only for the pre-login guest scan, only once
-          the wait has gone on long enough that it might read as the site
-          being slow/frozen otherwise */}
+      {/* Interactive "still getting ready" popup — only for the pre-login
+          guest scan, only once the wait has gone on long enough that it
+          might read as the site being slow/frozen otherwise. Gives the user
+          an explicit way to keep waiting or back out instead of a silent
+          spinner with no escape hatch. */}
       {scanHint && (
         <div style={{
-          position: 'fixed', left: '50%', bottom: 90, transform: 'translateX(-50%)', zIndex: 10000,
-          display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(4,13,11,0.9)',
-          border: '1px solid rgba(0,201,167,0.4)', borderRadius: 50, padding: '10px 18px',
-          color: '#fff', fontSize: 13, fontFamily: 'Outfit,sans-serif', whiteSpace: 'nowrap',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.4)', pointerEvents: 'none',
+          position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.65)',
+          backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
         }}>
           <style>{`@keyframes scanhint-spin { to { transform: rotate(360deg); } }`}</style>
-          <span style={{ width: 14, height: 14, border: '2px solid rgba(0,201,167,0.3)',
-            borderTopColor: '#00C9A7', borderRadius: '50%', animation: 'scanhint-spin 0.7s linear infinite', flexShrink: 0 }} />
-          Getting your scanner ready…
+          <div style={{
+            width: '100%', maxWidth: 340, borderRadius: 24, padding: '32px 24px 24px',
+            background: 'linear-gradient(160deg, #0A2229 0%, #061A1F 100%)',
+            border: '1px solid rgba(0,201,167,0.2)', textAlign: 'center',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.5)', fontFamily: 'Outfit,sans-serif',
+          }}>
+            <span style={{ display: 'inline-block', width: 40, height: 40, margin: '0 auto 16px',
+              border: '3px solid rgba(0,201,167,0.25)', borderTopColor: '#00C9A7', borderRadius: '50%',
+              animation: 'scanhint-spin 0.8s linear infinite' }} />
+            <h3 style={{ fontSize: 17, fontWeight: 700, color: '#fff', margin: '0 0 10px' }}>
+              Still Getting Your Scanner Ready
+            </h3>
+            <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', lineHeight: 1.6, margin: '0 0 22px' }}>
+              First-time scans take a little longer to set up. You can keep waiting for it to finish, or cancel and try again.
+            </p>
+            <button onClick={() => setScanHint(false)} style={{
+              width: '100%', background: 'linear-gradient(135deg, #00C9A7, #00E5CC)', border: 'none',
+              borderRadius: 50, color: '#040D0B', fontSize: 14, fontWeight: 700,
+              padding: '13px 20px', cursor: 'pointer', boxShadow: '0 4px 20px rgba(0,201,167,0.35)',
+            }}>
+              Allow — Keep Waiting
+            </button>
+            <button onClick={() => { setGuestScanLoading(false); setScanHint(false); }} style={{
+              width: '100%', marginTop: 10, background: 'transparent', border: 'none',
+              color: 'rgba(255,255,255,0.5)', fontSize: 13, padding: '8px', cursor: 'pointer',
+            }}>
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 

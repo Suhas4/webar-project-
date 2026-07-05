@@ -2362,7 +2362,7 @@ func getReviewsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Query(r.Context(), `
-		SELECT u.first_name, r.rating, r.review_text, r.created_at
+		SELECT u.first_name, r.rating, r.review_text, r.created_at, COALESCE(u.profile_photo_url,'')
 		FROM reviews r JOIN users u ON u.id = r.user_id
 		ORDER BY r.created_at DESC LIMIT 20`)
 	if err != nil {
@@ -2372,15 +2372,16 @@ func getReviewsHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type Review struct {
-		Name      string    `json:"name"`
-		Rating    int       `json:"rating"`
-		Text      string    `json:"text"`
-		CreatedAt time.Time `json:"createdAt"`
+		Name            string    `json:"name"`
+		Rating          int       `json:"rating"`
+		Text            string    `json:"text"`
+		CreatedAt       time.Time `json:"createdAt"`
+		ProfilePhotoURL string    `json:"profilePhotoUrl,omitempty"`
 	}
 	var reviews []Review
 	for rows.Next() {
 		var rv Review
-		if err := rows.Scan(&rv.Name, &rv.Rating, &rv.Text, &rv.CreatedAt); err != nil {
+		if err := rows.Scan(&rv.Name, &rv.Rating, &rv.Text, &rv.CreatedAt, &rv.ProfilePhotoURL); err != nil {
 			continue
 		}
 		reviews = append(reviews, rv)
