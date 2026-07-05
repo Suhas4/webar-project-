@@ -1,4 +1,4 @@
-import { API_BASE, R2_PUBLIC_URL } from "../config/api.js";
+import { API_BASE, R2_PUBLIC_URL, fetchWithRetry } from "../config/api.js";
 
 function getToken() {
   return localStorage.getItem("memoera_token") || "";
@@ -6,7 +6,7 @@ function getToken() {
 
 export async function uploadPresigned(key, blob, contentType) {
   const token = getToken();
-  const res = await fetch(`${API_BASE}/api/upload/presign`, {
+  const res = await fetchWithRetry(`${API_BASE}/api/upload/presign`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
     body: JSON.stringify({ key, contentType }),
@@ -26,7 +26,7 @@ async function uploadMultipart(key, blob, contentType, onProgress) {
   const token = getToken();
   const auth = { "Content-Type": "application/json", "Authorization": `Bearer ${token}` };
 
-  const initRes = await fetch(`${API_BASE}/api/upload/multipart/init`, {
+  const initRes = await fetchWithRetry(`${API_BASE}/api/upload/multipart/init`, {
     method: "POST", headers: auth,
     body: JSON.stringify({ key, contentType }),
   });
@@ -45,7 +45,7 @@ async function uploadMultipart(key, blob, contentType, onProgress) {
       const chunk = blob.slice(start, Math.min(start + CHUNK_SIZE, blob.size));
       const partNumber = i + 1;
 
-      const partRes = await fetch(`${API_BASE}/api/upload/multipart/part-url`, {
+      const partRes = await fetchWithRetry(`${API_BASE}/api/upload/multipart/part-url`, {
         method: "POST", headers: auth,
         body: JSON.stringify({ key, uploadId, partNumber }),
       });
@@ -60,7 +60,7 @@ async function uploadMultipart(key, blob, contentType, onProgress) {
       onProgress && onProgress(Math.round(((i + 1) / totalChunks) * 100));
     }
 
-    const completeRes = await fetch(`${API_BASE}/api/upload/multipart/complete`, {
+    const completeRes = await fetchWithRetry(`${API_BASE}/api/upload/multipart/complete`, {
       method: "POST", headers: auth,
       body: JSON.stringify({ key, uploadId, parts }),
     });
@@ -79,7 +79,7 @@ export async function saveTargets(targetsMeta, mindBuffer, videoBlobs, imageBlob
   const token = getToken();
   if (!token) throw new Error("Not authenticated");
 
-  const meRes = await fetch(`${API_BASE}/api/me`, { headers: { "Authorization": `Bearer ${token}` } });
+  const meRes = await fetchWithRetry(`${API_BASE}/api/me`, { headers: { "Authorization": `Bearer ${token}` } });
   if (!meRes.ok) throw new Error("Failed to authenticate");
   const { id: userID } = await meRes.json();
 
@@ -151,7 +151,7 @@ export async function saveTargets(targetsMeta, mindBuffer, videoBlobs, imageBlob
   await uploadPresigned(mindKey, new Blob([mindBuffer], { type: "application/octet-stream" }), "application/octet-stream");
   report(mindWeight);
 
-  const saveRes = await fetch(`${API_BASE}/api/targets/save`, {
+  const saveRes = await fetchWithRetry(`${API_BASE}/api/targets/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
     body: JSON.stringify({

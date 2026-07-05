@@ -12,3 +12,19 @@ export async function parseApiResponse(res) {
     return { error: text || `Server error (${res.status}).` };
   }
 }
+
+// The backend runs on a free instance that sleeps after ~15 minutes idle and
+// cold-starts (30-60s+) on the next request — a request landing in that window
+// fails at the network level (fetch throws, not an HTTP error status). Retrying
+// with backoff rides out the cold start instead of surfacing a hard failure.
+export async function fetchWithRetry(url, options, { retries = 3, baseDelayMs = 3000, onRetry } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fetch(url, options);
+    } catch (err) {
+      if (attempt >= retries) throw err;
+      onRetry && onRetry(attempt + 1);
+      await new Promise((r) => setTimeout(r, baseDelayMs * (attempt + 1)));
+    }
+  }
+}

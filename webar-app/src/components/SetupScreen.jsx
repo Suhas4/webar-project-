@@ -209,7 +209,10 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
       if (isPublic) rebuildPublicMindInBackground();
     } catch (err) {
       setCompileState('error');
-      setCompileError(err.message || 'Compilation failed. Please try again.');
+      const isNetworkFailure = err instanceof TypeError && /fetch/i.test(err.message || '');
+      setCompileError(isNetworkFailure
+        ? 'Could not reach the server — it may be waking up from sleep. Please wait a few seconds and tap Upload again.'
+        : (err.message || 'Compilation failed. Please try again.'));
     }
   }, [cards, canStart, onStart, isPublic, user, confirmIfFlagged]);
 
