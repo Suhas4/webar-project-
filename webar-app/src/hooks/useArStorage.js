@@ -203,7 +203,7 @@ export async function loadTargets() {
   const token = getToken();
   if (!token) return { targets: null, mindFileUrl: null, hasData: false, imagePreviewUrls: [] };
   try {
-    const res = await fetch(`${API_BASE}/api/targets`, { headers: { "Authorization": `Bearer ${token}` } });
+    const res = await fetchWithRetry(`${API_BASE}/api/targets`, { headers: { "Authorization": `Bearer ${token}` } });
     if (!res.ok) return { targets: null, mindFileUrl: null, hasData: false, imagePreviewUrls: [] };
     const data = await res.json();
     if (!data.hasData || !data.targets?.length) return { targets: null, mindFileUrl: null, hasData: false, imagePreviewUrls: [] };
@@ -218,7 +218,7 @@ export async function loadTargets() {
 
 export async function loadPublicTargets() {
   try {
-    const res = await fetch(`${API_BASE}/api/targets/public`);
+    const res = await fetchWithRetry(`${API_BASE}/api/targets/public`);
     if (!res.ok) return [];
     const data = await res.json();
     if (!data.targets?.length) return [];
