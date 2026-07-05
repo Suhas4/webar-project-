@@ -75,6 +75,7 @@ export default function App() {
   const [targets,       setTargets]       = useState(null);
   const [mindFileUrl,   setMindFileUrl]   = useState(null);
   const [guestScanLoading, setGuestScanLoading] = useState(false);
+  const [scanHint,      setScanHint]      = useState(false);
   const [pendingAR,     setPendingAR]     = useState(null);
   const [guestScanError, setGuestScanError] = useState('');
   const pendingARRef             = useRef(null);
@@ -186,6 +187,16 @@ export default function App() {
   useEffect(() => {
     if (appView === 'home' && !localStorage.getItem('memoera_token')) setAppView('hello');
   }, [appView]);
+
+  // If a guest's first-ever scan (no cache yet) takes a moment to compile,
+  // show a small "getting ready" hint after a short delay so the wait reads
+  // as normal progress instead of the site looking frozen/slow. Home's own
+  // scan button skips this — signed-in users already have camera context.
+  useEffect(() => {
+    if (!guestScanLoading || scanOriginRef.current !== 'hello') { setScanHint(false); return; }
+    const t = setTimeout(() => setScanHint(true), 600);
+    return () => { clearTimeout(t); setScanHint(false); };
+  }, [guestScanLoading]);
 
   // Push history entry so Android back button navigates within the app
   useEffect(() => {
@@ -474,6 +485,24 @@ export default function App() {
           onError={(msg) => setGuestScanError(msg || 'Could not start scanning. Please try again.')}
           prefetchedTargets={prefetchedPublicTargetsRef.current}
         />
+      )}
+
+      {/* "Getting ready" hint — only for the pre-login guest scan, only once
+          the wait has gone on long enough that it might read as the site
+          being slow/frozen otherwise */}
+      {scanHint && (
+        <div style={{
+          position: 'fixed', left: '50%', bottom: 90, transform: 'translateX(-50%)', zIndex: 10000,
+          display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(4,13,11,0.9)',
+          border: '1px solid rgba(0,201,167,0.4)', borderRadius: 50, padding: '10px 18px',
+          color: '#fff', fontSize: 13, fontFamily: 'Outfit,sans-serif', whiteSpace: 'nowrap',
+          boxShadow: '0 4px 20px rgba(0,0,0,0.4)', pointerEvents: 'none',
+        }}>
+          <style>{`@keyframes scanhint-spin { to { transform: rotate(360deg); } }`}</style>
+          <span style={{ width: 14, height: 14, border: '2px solid rgba(0,201,167,0.3)',
+            borderTopColor: '#00C9A7', borderRadius: '50%', animation: 'scanhint-spin 0.7s linear infinite', flexShrink: 0 }} />
+          Getting your scanner ready…
+        </div>
       )}
 
       {/* Global pull-to-refresh indicator — hidden on AR scanner views */}

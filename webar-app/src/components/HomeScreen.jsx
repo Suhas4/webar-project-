@@ -881,9 +881,9 @@ function HappyCustomersCard({ colors, isDark, user }) {
           navigating never affects how wide the text is allowed to wrap. */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '12px 0 14px' }}>
         <button onClick={goPrev} aria-label="Previous review" style={{
-          width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
-          border: 'none', cursor: 'pointer', background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-          color: colors.text, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+          border: '1.5px solid #00C9A7', cursor: 'pointer', background: 'rgba(0,201,167,0.1)',
+          color: '#00C9A7', fontSize: 17, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>‹</button>
 
         <div style={{ display: 'flex', justifyContent: 'center', gap: 6 }}>
@@ -897,9 +897,9 @@ function HappyCustomersCard({ colors, isDark, user }) {
         </div>
 
         <button onClick={goNext} aria-label="Next review" style={{
-          width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
-          border: 'none', cursor: 'pointer', background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-          color: colors.text, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+          border: '1.5px solid #00C9A7', cursor: 'pointer', background: 'rgba(0,201,167,0.1)',
+          color: '#00C9A7', fontSize: 17, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>›</button>
       </div>
 
@@ -923,14 +923,25 @@ function HappyCustomersCard({ colors, isDark, user }) {
           zIndex: 9999, display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
         }}>
           <div onClick={e => e.stopPropagation()} style={{
-            width: '100%', maxWidth: 420, borderRadius: '24px 24px 0 0', padding: '20px 20px 28px',
-            background: colors.bgSolid,
+            width: '100%', maxWidth: 420, height: '50vh', borderRadius: '24px 24px 0 0', padding: '20px 20px 28px',
+            background: colors.bgSolid, display: 'flex', flexDirection: 'column', overflowY: 'auto', boxSizing: 'border-box',
           }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: colors.text, fontFamily: FONT, marginBottom: 4 }}>
-              Share Your Experience
-            </div>
-            <div style={{ fontSize: 12, color: colors.textMuted, fontFamily: FONT, marginBottom: 14 }}>
-              Your review helps other users discover Memoera.
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <div style={{ width: 42, height: 42, borderRadius: '50%', flexShrink: 0, overflow: 'hidden',
+                background: 'linear-gradient(135deg,#00C9A7,#00E5CC)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>
+                {user?.profilePhotoUrl
+                  ? <img src={user.profilePhotoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : '🙂'}
+              </div>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: colors.text, fontFamily: FONT }}>
+                  Share Your Experience
+                </div>
+                <div style={{ fontSize: 12, color: colors.textMuted, fontFamily: FONT }}>
+                  Your review helps other users discover Memoera.
+                </div>
+              </div>
             </div>
 
             {/* Star picker */}

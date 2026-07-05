@@ -43,6 +43,20 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
     setProfilePhoto(user?.profilePhotoUrl || "");
   }, [user?.profilePhotoUrl]);
 
+  // Existing sessions logged in before the Memoera ID format changed won't
+  // have `createdAt` cached locally yet — refresh once from /api/me so the
+  // date-based ID below has what it needs without requiring a re-login.
+  useEffect(() => {
+    if (user?.createdAt) return;
+    const token = localStorage.getItem("memoera_token");
+    if (!token) return;
+    fetch(API_BASE + "/api/me", { headers: { Authorization: "Bearer " + token } })
+      .then(r => r.ok ? r.json() : null)
+      .then(fresh => { if (fresh) onUserUpdate(fresh); })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const dob = form.dateOfBirth;
   const dobParts = dob ? dob.split("-") : [];
   const dobDisplay = dobParts.length === 3
@@ -160,7 +174,7 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
           <div style={{ marginTop: 8, fontSize: 11, fontWeight: 700, fontFamily: FONT,
             letterSpacing: "0.06em", color: GOLD, background: "rgba(201,168,76,0.12)",
             border: "1px solid rgba(201,168,76,0.35)", borderRadius: 20, padding: "4px 12px" }}>
-            MEMOERA ID: MEM-{String(user.id).padStart(6, "0")}
+            MEMOERA ID: {formatMemoeraId(user)}
           </div>
         )}
       </div>
@@ -415,6 +429,21 @@ function WarmthRow({ label, value, onChange, min = -60, max = 60 }) {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+// Memoera ID = signup date (DDMMYYYY) + account number, e.g. 0507202601,
+// 06082026115. The date is fixed to when the account was created (not
+// today's date), so the ID stays stable across sessions.
+function formatMemoeraId(user) {
+  if (!user?.id) return "";
+  const seq = String(user.id).padStart(2, "0");
+  if (!user.createdAt) return seq;
+  const d = new Date(user.createdAt);
+  if (Number.isNaN(d.getTime())) return seq;
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${dd}${mm}${yyyy}${seq}`;
+}
 
 function blobToBase64(blob) {
   return new Promise((resolve) => {

@@ -39,16 +39,17 @@ import (
 // ─── Data Models ──────────────────────────────────────────────────────────────
 
 type User struct {
-	ID               int64  `json:"id"`
-	FirstName        string `json:"firstName"`
-	LastName         string `json:"lastName"`
-	Mobile           string `json:"mobile"`
-	Email            string `json:"email,omitempty"`
-	DateOfBirth      string `json:"dateOfBirth,omitempty"`
-	ProfilePhotoURL  string `json:"profilePhotoUrl,omitempty"`
-	PasswordHash     string `json:"-"`
-	SecurityQuestion string `json:"securityQuestion"`
-	SecurityAnswer   string `json:"-"`
+	ID               int64     `json:"id"`
+	FirstName        string    `json:"firstName"`
+	LastName         string    `json:"lastName"`
+	Mobile           string    `json:"mobile"`
+	Email            string    `json:"email,omitempty"`
+	DateOfBirth      string    `json:"dateOfBirth,omitempty"`
+	ProfilePhotoURL  string    `json:"profilePhotoUrl,omitempty"`
+	PasswordHash     string    `json:"-"`
+	SecurityQuestion string    `json:"securityQuestion"`
+	SecurityAnswer   string    `json:"-"`
+	CreatedAt        time.Time `json:"createdAt,omitempty"`
 }
 
 type SignUpRequest struct {
@@ -764,7 +765,8 @@ func signUpHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := User{ID: userID, FirstName: req.FirstName, LastName: req.LastName,
-		Mobile: req.Mobile, DateOfBirth: req.DateOfBirth, SecurityQuestion: req.SecurityQuestion}
+		Mobile: req.Mobile, DateOfBirth: req.DateOfBirth, SecurityQuestion: req.SecurityQuestion,
+		CreatedAt: time.Now()}
 	token := makeToken(req.Mobile)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -793,10 +795,10 @@ func signInHandler(w http.ResponseWriter, r *http.Request) {
 	var user User
 	err := db.QueryRow(r.Context(), `
 		SELECT id, mobile, first_name, last_name, password_hash, security_question,
-		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,''), COALESCE(email,'')
+		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,''), COALESCE(email,''), created_at
 		FROM users WHERE mobile=$1`, mobile,
 	).Scan(&user.ID, &user.Mobile, &user.FirstName, &user.LastName, &user.PasswordHash,
-		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL, &user.Email)
+		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL, &user.Email, &user.CreatedAt)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusUnauthorized, "Invalid mobile number or password")
@@ -1058,10 +1060,10 @@ func getMeHandler(w http.ResponseWriter, r *http.Request) {
 	var user User
 	err = db.QueryRow(r.Context(), `
 		SELECT id, mobile, first_name, last_name, security_question,
-		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,''), COALESCE(email,'')
+		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,''), COALESCE(email,''), created_at
 		FROM users WHERE id=$1`, userID,
 	).Scan(&user.ID, &user.Mobile, &user.FirstName, &user.LastName,
-		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL, &user.Email)
+		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL, &user.Email, &user.CreatedAt)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "User not found")
 		return
