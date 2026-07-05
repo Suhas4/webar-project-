@@ -575,6 +575,18 @@ function DemoAndHowItWorksCard({ colors, isDark, onScan }) {
     setPlaying(true);
   };
 
+  const handleFullscreen = (e) => {
+    e.stopPropagation();
+    const v = videoRef.current;
+    if (!v) return;
+    if (!playing) handlePlay();
+    // iOS Safari/WebView exposes fullscreen video via this method, not the
+    // standard Fullscreen API (requestFullscreen on <video> isn't supported there).
+    if (v.webkitEnterFullscreen) v.webkitEnterFullscreen();
+    else if (v.requestFullscreen) v.requestFullscreen();
+    else if (v.webkitRequestFullscreen) v.webkitRequestFullscreen();
+  };
+
   // Clips alternate forever once started — a continuous back-to-back loop
   // rather than stopping after one pass through the playlist.
   const handleEnded = () => {
@@ -654,6 +666,17 @@ function DemoAndHowItWorksCard({ colors, isDark, onScan }) {
             </span>
           </button>
         )}
+
+        <button onClick={handleFullscreen} aria-label="View full screen" title="View full screen" style={{
+          position: 'absolute', top: 8, right: 8, zIndex: 2,
+          width: 30, height: 30, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,255,255,0.25)', cursor: 'pointer', padding: 0,
+        }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2"
+            strokeLinecap="round" strokeLinejoin="round">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3" />
+          </svg>
+        </button>
       </div>
 
       <div style={{ padding: '10px 14px 0', textAlign: 'center' }}>
