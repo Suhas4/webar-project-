@@ -30,12 +30,27 @@
   status = 200
 
 # ── Asset Caching ─────────────────────────────────────────────────────────────
-# Videos are large — cache them aggressively.
-# If you update a video, rename the file (e.g. demo1-v2.mp4) to bust the cache.
+# Videos are large — cache them aggressively. They actually live at the site
+# root (e.g. /wings-to-memories.mp4), not under /videos/ — that path never
+# matched anything, so every visitor was re-fetching multi-MB videos with no
+# real caching. If you update a video, rename the file (e.g. demo1-v2.mp4) to
+# bust the cache.
 [[headers]]
-  for = "/videos/*"
+  for = "/*.mp4"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
+
+# Logo/static images — filenames aren't content-hashed, so a moderate cache
+# (not "immutable") avoids serving a stale image forever if one is ever swapped.
+[[headers]]
+  for = "/*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+[[headers]]
+  for = "/*.jpg"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
 
 # The .mind file changes rarely — cache for 1 day.
 [[headers]]
