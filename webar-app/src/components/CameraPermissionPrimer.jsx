@@ -6,19 +6,33 @@ const TEAL = "#00C9A7";
 // Priming the request like this measurably improves grant rates versus a surprise
 // prompt with no context — and gives us a natural place to explain what happens if
 // they say no. onAllow is expected to trigger the actual getUserMedia() call.
-export default function CameraPermissionPrimer({ onAllow, onDismiss }) {
+//
+// Also reused (with different icon/title/body/labels) anywhere else that needs the
+// same look — e.g. a camera-failed retry prompt, or a "still preparing" notice —
+// so every camera-related popup in the app shares one consistent color/texture.
+export default function CameraPermissionPrimer({
+  onAllow, onDismiss,
+  icon = '📷',
+  title = 'Camera Access Needed',
+  body = "Memoera uses your camera to scan AR targets and bring your memories to life. We never record, store, or share your camera feed — it's only used live, on your device.",
+  allowLabel = 'Allow Camera Access',
+  dismissLabel = 'Not Now',
+  spinning = false,
+}) {
   return (
     <div style={s.overlay} onClick={onDismiss}>
+      <style>{`@keyframes primer-spin { to { transform: rotate(360deg); } }`}</style>
       <div onClick={(e) => e.stopPropagation()} style={s.sheet}>
-        <div style={s.iconWrap}>📷</div>
-        <h3 style={s.title}>Camera Access Needed</h3>
-        <p style={s.body}>
-          Memoera uses your camera to scan AR targets and bring your memories to life.
-          We never record, store, or share your camera feed — it's only used live, on your device.
-        </p>
-        <button onClick={onAllow} style={s.allowBtn}>Allow Camera Access</button>
+        <div style={s.iconWrap}>
+          {spinning
+            ? <span style={{ display: 'inline-block', width: 26, height: 26, border: '3px solid rgba(4,13,11,0.25)', borderTopColor: '#040D0B', borderRadius: '50%', animation: 'primer-spin 0.8s linear infinite' }} />
+            : icon}
+        </div>
+        <h3 style={s.title}>{title}</h3>
+        <p style={s.body}>{body}</p>
+        {onAllow && <button onClick={onAllow} style={s.allowBtn}>{allowLabel}</button>}
         {onDismiss && (
-          <button onClick={onDismiss} style={s.notNowBtn}>Not Now</button>
+          <button onClick={onDismiss} style={s.notNowBtn}>{dismissLabel}</button>
         )}
       </div>
     </div>

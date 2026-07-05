@@ -3,6 +3,7 @@ import { useLanguage } from '../context/LanguageContext.jsx';
 import { LANGUAGES, T } from '../config/translations.js';
 import { takeWarmStream, getCameraPermissionState, markCameraConfirmed, hasConfirmedCameraThisSession } from '../hooks/cameraWarmup.js';
 import CameraPermissionPrimer from './CameraPermissionPrimer.jsx';
+import { buildCameraErrorMessage } from '../utils/inAppBrowser.js';
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -13,6 +14,7 @@ export default function HelloScreen({ onCreateAccount, onExisting, onGuestScan, 
   const [sheetOpen, setSheetOpen]     = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [showPermissionPrimer, setShowPermissionPrimer] = useState(false);
+  const [cameraError, setCameraError] = useState('');
   const videoRef      = useRef(null);
   const streamRef      = useRef(null);
   const touchStartY   = useRef(0);
@@ -41,11 +43,15 @@ export default function HelloScreen({ onCreateAccount, onExisting, onGuestScan, 
     }
 
     function requestCameraNow() {
-      if (!navigator.mediaDevices?.getUserMedia) return;
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError('Camera not supported on this device or browser.');
+        return;
+      }
+      setCameraError('');
       navigator.mediaDevices
         .getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280, max: 1920 }, height: { ideal: 720, max: 1080 } }, audio: false })
         .then(attachStream)
-        .catch(() => {});
+        .catch((err) => { if (!cancelled) setCameraError(buildCameraErrorMessage(err)); });
     }
 
     // 1. Try the pre-warmed stream first (zero wait, instant)
@@ -64,12 +70,14 @@ export default function HelloScreen({ onCreateAccount, onExisting, onGuestScan, 
         // just open the camera the way this screen always has.
         const state = await getCameraPermissionState();
         if (cancelled) return;
+        // Always keep this current so the camera-failed retry popup below can
+        // call it too, not just the first-time permission primer.
+        pendingOpenRef.current = requestCameraNow;
         if (state === 'granted' || hasConfirmedCameraThisSession()) {
           requestCameraNow();
         } else {
           // First time (or previously denied) — show the friendly primer first
           // instead of surprising the visitor with a native prompt out of nowhere.
-          pendingOpenRef.current = requestCameraNow;
           setShowPermissionPrimer(true);
         }
       }, 200);
@@ -214,6 +222,21 @@ export default function HelloScreen({ onCreateAccount, onExisting, onGuestScan, 
         <CameraPermissionPrimer
           onAllow={handleAllowCamera}
           onDismiss={() => setShowPermissionPrimer(false)}
+        />
+      )}
+
+      {/* Camera failed to start (denied, busy, unavailable, etc.) — previously
+          this failed completely silently, making "Allow" look broken since
+          nothing visibly happened afterward. Same look as the primer above. */}
+      {cameraError && (
+        <CameraPermissionPrimer
+          icon="⚠️"
+          title="Camera Didn't Start"
+          body={cameraError}
+          allowLabel="Try Again"
+          dismissLabel="Not Now"
+          onAllow={() => pendingOpenRef.current?.()}
+          onDismiss={() => setCameraError('')}
         />
       )}
 

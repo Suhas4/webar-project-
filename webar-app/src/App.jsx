@@ -28,6 +28,7 @@ import HomeScreen     from './components/HomeScreen.jsx';
 import VideoOverlay      from './components/VideoOverlay.jsx';
 import GuestScanScreen, { invalidateGuestCache } from './components/GuestScanScreen.jsx';
 import PublicArView       from './components/PublicArView.jsx';
+import CameraPermissionPrimer from './components/CameraPermissionPrimer.jsx';
 
 // Everything below is only needed after navigation — lazy-load so the
 // initial bundle (and time-to-interactive) stays small.
@@ -492,44 +493,18 @@ export default function App() {
           guest scan, only once the wait has gone on long enough that it
           might read as the site being slow/frozen otherwise. Gives the user
           an explicit way to keep waiting or back out instead of a silent
-          spinner with no escape hatch. */}
+          spinner with no escape hatch. Shares the same look as the camera
+          permission primer for a consistent visual language app-wide. */}
       {scanHint && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 10000, background: 'rgba(0,0,0,0.65)',
-          backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
-        }}>
-          <style>{`@keyframes scanhint-spin { to { transform: rotate(360deg); } }`}</style>
-          <div style={{
-            width: '100%', maxWidth: 340, borderRadius: 24, padding: '32px 24px 24px',
-            background: 'linear-gradient(160deg, #0A2229 0%, #061A1F 100%)',
-            border: '1px solid rgba(0,201,167,0.2)', textAlign: 'center',
-            boxShadow: '0 20px 60px rgba(0,0,0,0.5)', fontFamily: 'Outfit,sans-serif',
-          }}>
-            <span style={{ display: 'inline-block', width: 40, height: 40, margin: '0 auto 16px',
-              border: '3px solid rgba(0,201,167,0.25)', borderTopColor: '#00C9A7', borderRadius: '50%',
-              animation: 'scanhint-spin 0.8s linear infinite' }} />
-            <h3 style={{ fontSize: 17, fontWeight: 700, color: '#fff', margin: '0 0 10px' }}>
-              Still Getting Your Scanner Ready
-            </h3>
-            <p style={{ fontSize: 13, color: 'rgba(255,255,255,0.7)', lineHeight: 1.6, margin: '0 0 22px' }}>
-              First-time scans take a little longer to set up. You can keep waiting for it to finish, or cancel and try again.
-            </p>
-            <button onClick={() => setScanHint(false)} style={{
-              width: '100%', background: 'linear-gradient(135deg, #00C9A7, #00E5CC)', border: 'none',
-              borderRadius: 50, color: '#040D0B', fontSize: 14, fontWeight: 700,
-              padding: '13px 20px', cursor: 'pointer', boxShadow: '0 4px 20px rgba(0,201,167,0.35)',
-            }}>
-              Allow — Keep Waiting
-            </button>
-            <button onClick={() => { setGuestScanLoading(false); setScanHint(false); }} style={{
-              width: '100%', marginTop: 10, background: 'transparent', border: 'none',
-              color: 'rgba(255,255,255,0.5)', fontSize: 13, padding: '8px', cursor: 'pointer',
-            }}>
-              Cancel
-            </button>
-          </div>
-        </div>
+        <CameraPermissionPrimer
+          spinning
+          title="Still Getting Your Scanner Ready"
+          body="First-time scans take a little longer to set up. You can keep waiting for it to finish, or cancel and try again."
+          allowLabel="Allow — Keep Waiting"
+          dismissLabel="Cancel"
+          onAllow={() => setScanHint(false)}
+          onDismiss={() => { setGuestScanLoading(false); setScanHint(false); }}
+        />
       )}
 
       {/* Global pull-to-refresh indicator — hidden on AR scanner views */}
