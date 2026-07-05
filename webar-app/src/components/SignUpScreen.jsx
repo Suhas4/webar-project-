@@ -143,7 +143,7 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
                     <select style={{ ...S.input, cursor:'pointer', paddingRight: 32, appearance: 'none', WebkitAppearance: 'none', color: colors.text, background: colors.surface }} value={form.securityQuestion} onChange={set('securityQuestion')}>
                       {SECURITY_QUESTIONS.map(q => <option key={q} value={q} style={{ background:'#0d1220', color:'#fff' }}>{q}</option>)}
                     </select>
-                    <span style={{ position:'absolute', right:12, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', color:'rgba(255,255,255,0.5)', fontSize:12 }}>â–¼</span>
+                    <span style={{ position:'absolute', right:12, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', color:'rgba(255,255,255,0.5)', fontSize:12 }}>▼</span>
                   </div>
                 </Field>
                 <Field label={tr.securityAnswer}>

@@ -259,7 +259,7 @@ function UrlTargetCard({ index, card, showValidation, onImageFile, onUrlChange, 
           </div>
         ) : (
           <div style={card_s.zoneContent}>
-            <span style={card_s.zoneIcon}>&#128444;</span>
+            <span style={card_s.zoneIcon}>🖼️</span>
             <span style={card_s.zoneText}>{imageMissing ? 'Image required' : 'Tap to select image'}</span>
           </div>
         )}

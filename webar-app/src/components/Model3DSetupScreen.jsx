@@ -303,7 +303,7 @@ function ModelTargetCard({ index, card, showValidation, onImageFile, onGlbFile, 
           </div>
         ) : (
           <div style={card_s.zoneContent}>
-            <span style={card_s.zoneIcon}>&#128444;</span>
+            <span style={card_s.zoneIcon}>🖼️</span>
             <span style={card_s.zoneText}>{imageMissing ? 'Image required' : 'Tap to select image'}</span>
           </div>
         )}
@@ -334,7 +334,7 @@ function ModelTargetCard({ index, card, showValidation, onImageFile, onGlbFile, 
             <div style={picker_s.handle} />
             <p style={picker_s.title}>Select 3D Model</p>
             <button style={picker_s.optionBtn} onClick={() => glbInputRef.current?.click()}>
-              <span style={picker_s.icon}>ðŸ“</span>
+              <span style={picker_s.icon}>📁</span>
               <div>
                 <p style={picker_s.label}>Phone Storage / Internal Storage</p>
                 <p style={picker_s.hint}>Browse your device storage for a .glb, .gltf, .obj, or .fbx file</p>
@@ -351,7 +351,7 @@ function ModelTargetCard({ index, card, showValidation, onImageFile, onGlbFile, 
         onKeyDown={(e) => e.key === 'Enter' && setShowModelPicker(true)}>
         {card.glbName ? (
           <div style={card_s.previewRow}>
-            <div style={card_s.modelIconBox}>&#129518;</div>
+            <div style={card_s.modelIconBox}>🧊</div>
             <div>
               <span style={card_s.fileName}>{card.glbName}</span>
               <br /><span style={card_s.changeLink}>Tap to change</span>
@@ -359,7 +359,7 @@ function ModelTargetCard({ index, card, showValidation, onImageFile, onGlbFile, 
           </div>
         ) : (
           <div style={card_s.zoneContent}>
-            <span style={card_s.zoneIcon}>&#129518;</span>
+            <span style={card_s.zoneIcon}>🧊</span>
             <span style={card_s.zoneText}>{glbMissing ? '3D model required' : 'Tap to select .glb / .gltf / .obj / .fbx'}</span>
           </div>
         )}
