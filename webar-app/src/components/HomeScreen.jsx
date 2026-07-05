@@ -475,15 +475,9 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
 
       </div>
 
-      {/* Tap to Scan — same button as the starting (Hello) screen */}
-      {onScan && (
-        <button onClick={onScan} style={styles.tapScanBtn}>
-          <ScanCameraIcon /> TAP TO SCAN
-        </button>
-      )}
-
       {/* â"€â"€ Right-side nav bar â"€â"€ */}
       <div className="memoera-nav-bar" style={{ ...styles.navBar, background: colors.navBg }}>
+        {onScan && <NavBtn icon={<ScanCameraIcon color="#00C9A7" />} label={tr.scan || 'Scan'} onClick={onScan} />}
         <NavBtn icon={<PlusIcon    color={colors.navIcon} />} label={tr.upload}   onClick={onUpload} />
         <NavBtn icon={<GalleryIcon color={colors.navIcon} />} label={tr.gallery}  onClick={onGallery} />
         <NavBtn icon={<GearIcon    color={colors.navIcon} />} label={tr.settings} onClick={onSettings} />
@@ -852,57 +846,61 @@ function HappyCustomersCard({ colors, isDark, user }) {
         </button>
       </div>
 
-      {/* Review card */}
-      <div style={{ display: 'flex', alignItems: 'stretch', gap: 4, padding: '0 4px' }}>
-        <button onClick={goPrev} aria-label="Previous review" style={{
-          flexShrink: 0, alignSelf: 'center', width: 28, height: 28, borderRadius: '50%',
-          border: 'none', cursor: 'pointer', background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-          color: colors.text, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>‹</button>
-
-        <div key={active} style={{ flex: 1, minWidth: 0, padding: '16px 6px 6px', animation: 'hc-fadeIn 0.35s ease' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-            <div style={{ width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
-              background: 'linear-gradient(135deg,#00C9A7,#00E5CC)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>
-              {r.avatar}
+      {/* Review card — full card width, so long reviews always wrap in full
+          instead of being squeezed by side-by-side arrow buttons */}
+      <div key={active} style={{ padding: '16px 18px 6px', animation: 'hc-fadeIn 0.35s ease' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+          <div style={{ width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+            background: 'linear-gradient(135deg,#00C9A7,#00E5CC)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>
+            {r.avatar}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: colors.text, fontFamily: FONT }}>
+              {r.name}
             </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: colors.text, fontFamily: FONT }}>
-                {r.name}
-              </div>
-              <div style={{ fontSize: 12, letterSpacing: 1 }}>
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <span key={i} style={{
-                    color: i < r.rating ? GOLD : (isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)'),
-                    animation: `hc-starPop 0.3s ease ${i * 0.06}s both`,
-                  }}>★</span>
-                ))}
-              </div>
+            <div style={{ fontSize: 12, letterSpacing: 1 }}>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <span key={i} style={{
+                  color: i < r.rating ? GOLD : (isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)'),
+                  animation: `hc-starPop 0.3s ease ${i * 0.06}s both`,
+                }}>★</span>
+              ))}
             </div>
           </div>
-          <p style={{ margin: 0, fontSize: 12.5, color: colors.textMuted, fontFamily: FONT,
-            lineHeight: 1.6, fontStyle: 'italic', whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-            “{r.text}”
-          </p>
+        </div>
+        <p style={{ margin: 0, fontSize: 12.5, color: colors.textMuted, fontFamily: FONT,
+          lineHeight: 1.6, fontStyle: 'italic', whiteSpace: 'normal', wordBreak: 'break-word',
+          overflowWrap: 'anywhere', display: 'block', maxWidth: '100%', WebkitLineClamp: 'unset',
+          WebkitBoxOrient: 'unset' }}>
+          “{r.text}”
+        </p>
+      </div>
+
+      {/* Prev/Next arrows + dot indicators, all in one row below the text —
+          navigating never affects how wide the text is allowed to wrap. */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '12px 0 14px' }}>
+        <button onClick={goPrev} aria-label="Previous review" style={{
+          width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
+          border: 'none', cursor: 'pointer', background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+          color: colors.text, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>‹</button>
+
+        <div style={{ display: 'flex', justifyContent: 'center', gap: 6 }}>
+          {reviews.map((_, i) => (
+            <button key={i} onClick={() => setActive(i)} aria-label={`Review ${i + 1}`}
+              style={{ width: i === active ? 18 : 6, height: 6, borderRadius: 4, border: 'none',
+                cursor: 'pointer', padding: 0,
+                background: i === active ? '#00C9A7' : (isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)'),
+                transition: 'width 0.3s, background 0.3s' }} />
+          ))}
         </div>
 
         <button onClick={goNext} aria-label="Next review" style={{
-          flexShrink: 0, alignSelf: 'center', width: 28, height: 28, borderRadius: '50%',
+          width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
           border: 'none', cursor: 'pointer', background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
-          color: colors.text, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: colors.text, fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>›</button>
-      </div>
-
-      {/* Dot indicators */}
-      <div style={{ display: 'flex', justifyContent: 'center', gap: 6, padding: '12px 0 4px' }}>
-        {reviews.map((_, i) => (
-          <button key={i} onClick={() => setActive(i)} aria-label={`Review ${i + 1}`}
-            style={{ width: i === active ? 18 : 6, height: 6, borderRadius: 4, border: 'none',
-              cursor: 'pointer', padding: 0,
-              background: i === active ? '#00C9A7' : (isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)'),
-              transition: 'width 0.3s, background 0.3s' }} />
-        ))}
       </div>
 
       {/* Write a review CTA */}
@@ -1012,11 +1010,10 @@ function SunIcon({ size = 18, color = '#555' }) {
     </svg>
   );
 }
-function ScanCameraIcon() {
+function ScanCameraIcon({ color = '#555' }) {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
-      style={{ display:'inline-block', verticalAlign:'middle', marginRight:8 }}>
+      stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
       <circle cx="12" cy="13" r="4"/>
     </svg>
@@ -1158,17 +1155,6 @@ const styles = {
   bottomBar: { padding:'10px 16px 20px',flexShrink:0,
     borderTop:'1px solid',position:'relative',zIndex:1,
     backdropFilter:'blur(10px)',WebkitBackdropFilter:'blur(10px)' },
-  tapScanBtn: {
-    position:'fixed', left:'50%', bottom:96, transform:'translateX(-50%)', zIndex:8,
-    background: 'linear-gradient(135deg, #00C9A7 0%, #00E5CC 100%)',
-    border: 'none', borderRadius: 50,
-    color: '#040D0B', fontSize: 14, fontWeight: 800,
-    fontFamily: FONT, padding: '14px 34px', cursor: 'pointer',
-    letterSpacing: '0.08em',
-    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-    boxShadow: '0 4px 20px rgba(0,201,167,0.4)',
-    animation: 'scanNavPulse 2s ease-in-out infinite, homeFloat 3s ease-in-out infinite',
-  },
   socialRow: { display:'flex',alignItems:'center',gap:10,flexWrap:'wrap' },
   socialIcon: { width:38,height:38,borderRadius:10,display:'flex',alignItems:'center',
     justifyContent:'center',overflow:'hidden',transition:'filter 0.2s,transform 0.2s' },
