@@ -459,6 +459,7 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
                 { label: 'MD & Founder', value: 'Lohith B.' },
                 { label: 'Website',      value: 'www.memoera.in', link: 'https://www.memoera.in' },
                 { label: 'GSTIN',        value: '29AAUCM9420H1ZU' },
+                { label: 'Privacy Policy', value: 'View Policy', link: '/privacy-policy.html' },
               ].map(({ label, value, link }) => (
                 <div key={label} style={styles.detailRow}>
                   <span style={{ ...styles.detailLabel, color: colors.textMuted }}>{label}</span>
