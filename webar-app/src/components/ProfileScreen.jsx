@@ -430,18 +430,20 @@ function WarmthRow({ label, value, onChange, min = -60, max = 60 }) {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// Memoera ID = signup date (DDMMYYYY) + account number, e.g. 0507202601,
-// 06082026115. The date is fixed to when the account was created (not
-// today's date), so the ID stays stable across sessions.
+// Memoera ID = the actual account-creation date (DDMMYYYY) + account number,
+// e.g. 0507202601, 06082026115 — never today's date, always the day the
+// account was created. Uses UTC date parts (the server stores/sends UTC
+// timestamps) so the date doesn't shift by a day depending on the viewer's
+// local timezone.
 function formatMemoeraId(user) {
   if (!user?.id) return "";
   const seq = String(user.id).padStart(2, "0");
   if (!user.createdAt) return seq;
   const d = new Date(user.createdAt);
   if (Number.isNaN(d.getTime())) return seq;
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const yyyy = d.getUTCFullYear();
   return `${dd}${mm}${yyyy}${seq}`;
 }
 
