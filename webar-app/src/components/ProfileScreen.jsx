@@ -30,6 +30,7 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
     firstName: user?.firstName || "",
     lastName: user?.lastName || "",
     dateOfBirth: user?.dateOfBirth || "",
+    email: user?.email || "",
   });
   const [profilePhoto, setProfilePhoto] = useState(user?.profilePhotoUrl || "");
   const [showPhotoPicker, setShowPhotoPicker] = useState(false);
@@ -178,6 +179,10 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
             <input style={{ ...styles.editInput, color: colors.text, background: colors.surface }}
               type="date" value={form.dateOfBirth}
               onChange={(e) => setForm(f => ({ ...f, dateOfBirth: e.target.value }))} />
+            <div style={{ ...styles.divider, background: colors.border }} />
+            <input style={{ ...styles.editInput, color: colors.text, background: colors.surface }}
+              type="email" placeholder="Email (optional)" value={form.email}
+              onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))} />
           </>
         ) : (
           <>
@@ -188,6 +193,8 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
             <div style={{ ...styles.field, color: colors.text }}>{dobDisplay}</div>
             <div style={{ ...styles.divider, background: colors.border }} />
             <div style={{ ...styles.field, color: colors.text }}>{user?.mobile || ""}</div>
+            <div style={{ ...styles.divider, background: colors.border }} />
+            <div style={{ ...styles.field, color: colors.text }}>{form.email || "No email set"}</div>
             <div style={{ ...styles.divider, background: colors.border }} />
             <div style={{ ...styles.field, fontSize: 11, color: colors.textMuted }}>
               {user?.securityQuestion || "Security Question"}

@@ -793,10 +793,10 @@ func signInHandler(w http.ResponseWriter, r *http.Request) {
 	var user User
 	err := db.QueryRow(r.Context(), `
 		SELECT id, mobile, first_name, last_name, password_hash, security_question,
-		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,'')
+		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,''), COALESCE(email,'')
 		FROM users WHERE mobile=$1`, mobile,
 	).Scan(&user.ID, &user.Mobile, &user.FirstName, &user.LastName, &user.PasswordHash,
-		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL)
+		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL, &user.Email)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusUnauthorized, "Invalid mobile number or password")
@@ -1058,10 +1058,10 @@ func getMeHandler(w http.ResponseWriter, r *http.Request) {
 	var user User
 	err = db.QueryRow(r.Context(), `
 		SELECT id, mobile, first_name, last_name, security_question,
-		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,'')
+		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,''), COALESCE(email,'')
 		FROM users WHERE id=$1`, userID,
 	).Scan(&user.ID, &user.Mobile, &user.FirstName, &user.LastName,
-		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL)
+		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL, &user.Email)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "User not found")
 		return
@@ -1070,7 +1070,7 @@ func getMeHandler(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(user)
 }
 
-// PUT /api/auth/profile — update profile fields (firstName, lastName, dateOfBirth)
+// PUT /api/auth/profile — update profile fields (firstName, lastName, dateOfBirth, email)
 func updateProfileHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1085,25 +1085,38 @@ func updateProfileHandler(w http.ResponseWriter, r *http.Request) {
 		FirstName   string `json:"firstName"`
 		LastName    string `json:"lastName"`
 		DateOfBirth string `json:"dateOfBirth"`
+		Email       string `json:"email"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	email := strings.TrimSpace(req.Email)
+	var emailArg interface{}
+	if email == "" {
+		emailArg = nil
+	} else {
+		emailArg = email
+	}
 	_, err = db.Exec(r.Context(),
-		`UPDATE users SET first_name=$1, last_name=$2, date_of_birth=$3 WHERE id=$4`,
-		req.FirstName, req.LastName, req.DateOfBirth, userID)
+		`UPDATE users SET first_name=$1, last_name=$2, date_of_birth=$3, email=$4 WHERE id=$5`,
+		req.FirstName, req.LastName, req.DateOfBirth, emailArg, userID)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			writeError(w, http.StatusConflict, "That email is already in use by another account")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "Failed to update profile")
 		return
 	}
 	var user User
 	_ = db.QueryRow(r.Context(), `
 		SELECT id, mobile, first_name, last_name, security_question,
-		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,'')
+		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,''), COALESCE(email,'')
 		FROM users WHERE id=$1`, userID,
 	).Scan(&user.ID, &user.Mobile, &user.FirstName, &user.LastName,
-		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL)
+		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL, &user.Email)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(user)
 }
