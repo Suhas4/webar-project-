@@ -1,21 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { useTheme } from '../context/ThemeContext.jsx';
+import { API_BASE, parseApiResponse } from '../config/api.js';
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const TEAL = "#00C9A7";
-const AD_BONUS_KEY    = 'memoera_ad_bonus_mb';
-const REFER_BONUS_KEY  = 'memoera_refer_bonus_mb';
-const CODE_USED_KEY    = 'memoera_code_used';
-const AD_COOLDOWN_KEY = 'memoera_ad_last';
-const AD_COOLDOWN_MS  = 30 * 60 * 1000;
-const MAX_BONUS_MB    = 100;
 const AD_MAX_SECONDS  = 30;
 const AD_MIN_SECONDS  = 10;
 
-function buildCode(user) {
-  const base = (user?.mobile || user?.id || 'MEMO').toString().slice(-4).toUpperCase();
-  const prefix = ((user?.firstName || 'M') + (user?.lastName || 'E')).slice(0, 3).toUpperCase();
-  return `${prefix}${base}`;
+function getToken() {
+  return localStorage.getItem('memoera_token') || '';
 }
 
 export default function ReferFriendScreen({ onBack, user }) {
@@ -24,26 +17,45 @@ export default function ReferFriendScreen({ onBack, user }) {
   const [codeInput,    setCodeInput]    = useState('');
   const [codeMsg,      setCodeMsg]      = useState('');
   const [codeSuccess,  setCodeSuccess]  = useState(false);
-  const codeAlreadyUsed = !!localStorage.getItem(CODE_USED_KEY);
+  const [code,          setCode]          = useState('');
+  const [bonusBytes,    setBonusBytes]    = useState(0);
+  const [maxBonusBytes, setMaxBonusBytes] = useState(100 * 1024 * 1024);
+  const [codeAlreadyUsed, setCodeAlreadyUsed] = useState(false);
+  const [adCooldownSeconds, setAdCooldownSeconds] = useState(0);
   const [adWatching, setAdWatching] = useState(false);
   const [adSeconds, setAdSeconds] = useState(0);
   const [adMsg, setAdMsg] = useState('');
-  const [adBonusMB, setAdBonusMB]   = useState(() => parseInt(localStorage.getItem(AD_BONUS_KEY)    || '0', 10));
-  const [refBonusMB, setRefBonusMB] = useState(() => parseInt(localStorage.getItem(REFER_BONUS_KEY) || '0', 10));
 
   const timerRef       = useRef(null);
   const autoCollected  = useRef(false);
-  const adBonusMBRef   = useRef(adBonusMB);
-  const refBonusMBRef  = useRef(refBonusMB);
-  adBonusMBRef.current  = adBonusMB;
-  refBonusMBRef.current = refBonusMB;
+  const bonusBytesRef  = useRef(bonusBytes);
+  bonusBytesRef.current = bonusBytes;
 
-  const totalBonusMB   = adBonusMB + refBonusMB;
-  const remainingBonus = Math.max(0, MAX_BONUS_MB - totalBonusMB);
+  const totalBonusMB   = Math.round(bonusBytes / (1024 * 1024));
+  const maxBonusMB      = Math.round(maxBonusBytes / (1024 * 1024));
+  const remainingBonus = Math.max(0, maxBonusMB - totalBonusMB);
   const maxWatchSecs   = Math.min(AD_MAX_SECONDS, remainingBonus);
   const liveEarnMB     = Math.min(adSeconds, maxWatchSecs);
   const canCollect     = adSeconds >= AD_MIN_SECONDS;
-  const code           = buildCode(user);
+
+  // Load real, server-authoritative referral status on mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = getToken();
+        const res = await fetch(`${API_BASE}/api/referral/status`, { headers: { Authorization: `Bearer ${token}` } });
+        const data = await parseApiResponse(res);
+        if (cancelled || !res.ok) return;
+        setCode(data.code || '');
+        setBonusBytes(data.bonusBytes || 0);
+        setMaxBonusBytes(data.maxBonusBytes || 100 * 1024 * 1024);
+        setCodeAlreadyUsed(!!data.redeemed);
+        setAdCooldownSeconds(data.adCooldownSeconds || 0);
+      } catch { /* leave defaults on network failure */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // 1-second tick while watching
   useEffect(() => {
@@ -61,28 +73,32 @@ export default function ReferFriendScreen({ onBack, user }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adSeconds, adWatching]);
 
-  function doCollect(seconds) {
+  async function doCollect(seconds) {
     clearInterval(timerRef.current);
     timerRef.current = null;
     setAdWatching(false);
     setAdSeconds(0);
-    const earn = Math.min(seconds, MAX_BONUS_MB - adBonusMBRef.current);
-    if (earn < 1) {
-      setAdMsg('No bonus remaining.');
-      return;
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/api/referral/watch-ad`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ seconds }),
+      });
+      const data = await parseApiResponse(res);
+      if (!res.ok) { setAdMsg(data.error || 'Could not add bonus.'); return; }
+      setBonusBytes(data.totalBonusBytes);
+      setAdCooldownSeconds(30 * 60);
+      const earnMB = Math.round((data.earnedBytes || 0) / (1024 * 1024));
+      setAdMsg(`+${earnMB} MB added! Total bonus: ${Math.round(data.totalBonusBytes / (1024 * 1024))} MB`);
+    } catch {
+      setAdMsg('Network error — could not add bonus.');
     }
-    const newBonus = adBonusMBRef.current + earn;
-    localStorage.setItem(AD_BONUS_KEY, String(newBonus));
-    localStorage.setItem(AD_COOLDOWN_KEY, String(Date.now()));
-    setAdBonusMB(newBonus);
-    setAdMsg(`+${earn} MB added! Total bonus: ${newBonus + refBonusMBRef.current} MB`);
   }
 
   function handleWatchAd() {
-    const last = parseInt(localStorage.getItem(AD_COOLDOWN_KEY) || '0', 10);
-    if (Date.now() - last < AD_COOLDOWN_MS) {
-      const mins = Math.ceil((AD_COOLDOWN_MS - (Date.now() - last)) / 60000);
-      setAdMsg(`Come back in ${mins} min for next ad.`);
+    if (adCooldownSeconds > 0) {
+      setAdMsg(`Come back in ${Math.ceil(adCooldownSeconds / 60)} min for next ad.`);
       return;
     }
     if (remainingBonus <= 0) return;
@@ -92,22 +108,29 @@ export default function ReferFriendScreen({ onBack, user }) {
     setAdMsg('');
   }
 
-  function handleRedeemCode() {
+  async function handleRedeemCode() {
     const val = codeInput.trim().toUpperCase();
     if (!val) { setCodeMsg('Please enter a code.'); return; }
     if (val.length < 5) { setCodeMsg('Code must be at least 5 characters.'); return; }
     if (val === code)   { setCodeMsg('You cannot use your own referral code.'); return; }
-    if (localStorage.getItem(CODE_USED_KEY)) { setCodeMsg('You already redeemed a code.'); return; }
-    const remaining = Math.max(0, MAX_BONUS_MB - refBonusMBRef.current);
-    if (remaining <= 0) { setCodeMsg('You have already reached the maximum referral bonus.'); return; }
-    const earn = Math.min(50, remaining);
-    const newRef = refBonusMBRef.current + earn;
-    localStorage.setItem(REFER_BONUS_KEY, String(newRef));
-    localStorage.setItem(CODE_USED_KEY, val);
-    setRefBonusMB(newRef);
-    setCodeInput('');
-    setCodeSuccess(true);
-    setCodeMsg(`+${earn} MB bonus added! Welcome to Memoera.`);
+    if (codeAlreadyUsed) { setCodeMsg('You already redeemed a code.'); return; }
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/api/referral/redeem`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ code: val }),
+      });
+      const data = await parseApiResponse(res);
+      if (!res.ok) { setCodeMsg(data.error || 'Could not redeem code.'); return; }
+      setBonusBytes(data.totalBonusBytes);
+      setCodeAlreadyUsed(true);
+      setCodeInput('');
+      setCodeSuccess(true);
+      setCodeMsg(`+${Math.round((data.earnedBytes || 0) / (1024 * 1024))} MB bonus added! Welcome to Memoera.`);
+    } catch {
+      setCodeMsg('Network error — could not redeem code.');
+    }
   }
 
   const shareText = `Join Memoera — restore your memories in AR! Use my referral code ${code} when signing up.\nhttps://www.memoera.in`;
@@ -245,7 +268,7 @@ export default function ReferFriendScreen({ onBack, user }) {
               <div style={{ fontSize:28, marginBottom:4 }}>✅</div>
               <div style={{ fontSize:13, fontWeight:700, color:TEAL, fontFamily:FONT }}>Code already redeemed!</div>
               <div style={{ fontSize:11, color: colors.textMuted, fontFamily:FONT, marginTop:4 }}>
-                Referral bonus: <strong style={{ color:TEAL }}>{refBonusMB} MB</strong> added to your account.
+                Total bonus: <strong style={{ color:TEAL }}>{totalBonusMB} MB</strong> added to your account.
               </div>
             </div>
           ) : (

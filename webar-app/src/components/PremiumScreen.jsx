@@ -1,10 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useTheme } from '../context/ThemeContext.jsx';
-import { API_BASE } from '../config/api.js';
-
-const AD_BONUS_KEY    = 'memoera_ad_bonus_mb';
-const AD_COOLDOWN_KEY = 'memoera_ad_last';
-const AD_COOLDOWN_MS  = 30 * 60 * 1000;
+import { API_BASE, parseApiResponse } from '../config/api.js';
 
 const FONT  = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const GOLD  = "#C9A84C";
@@ -55,7 +51,8 @@ export default function PremiumScreen({ onBack, user }) {
   const [selectedPlan,  setSelectedPlan]  = useState('pro');
   const [adWatching,    setAdWatching]    = useState(false);
   const [adMsg,         setAdMsg]         = useState('');
-  const [bonusMB,       setBonusMB]       = useState(() => parseInt(localStorage.getItem(AD_BONUS_KEY) || '0', 10));
+  const [bonusMB,       setBonusMB]       = useState(0);
+  const [adCooldownSeconds, setAdCooldownSeconds] = useState(0);
   const [adProgress,    setAdProgress]    = useState(0);
   const [paying,        setPaying]        = useState(false);
   const [payMsg,        setPayMsg]        = useState('');
@@ -68,28 +65,49 @@ export default function PremiumScreen({ onBack, user }) {
     clearTimeout(adTimerRef.current);
   }, []);
 
+  // Load the real, server-authoritative bonus balance (shared with ReferFriendScreen).
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = localStorage.getItem('memoera_token') || '';
+        const res = await fetch(`${API_BASE}/api/referral/status`, { headers: { Authorization: `Bearer ${token}` } });
+        const data = await parseApiResponse(res);
+        if (!res.ok) return;
+        setBonusMB(Math.round((data.bonusBytes || 0) / (1024 * 1024)));
+        setAdCooldownSeconds(data.adCooldownSeconds || 0);
+      } catch { /* leave defaults on network failure */ }
+    })();
+  }, []);
+
   const plan = PLANS.find(p => p.id === selectedPlan);
 
   const handleWatchAd = useCallback(() => {
-    const last = parseInt(localStorage.getItem(AD_COOLDOWN_KEY) || '0', 10);
-    const now = Date.now();
-    if (now - last < AD_COOLDOWN_MS) {
-      const mins = Math.ceil((AD_COOLDOWN_MS - (now - last)) / 60000);
-      setAdMsg(`⏳ Wait ${mins} min before next ad`);
+    if (adCooldownSeconds > 0) {
+      setAdMsg(`⏳ Wait ${Math.ceil(adCooldownSeconds / 60)} min before next ad`);
       return;
     }
     setAdWatching(true); setAdMsg(''); setAdProgress(0);
     adTickRef.current  = setInterval(() => setAdProgress(p => Math.min(p + 20, 100)), 1000);
-    adTimerRef.current = setTimeout(() => {
+    adTimerRef.current = setTimeout(async () => {
       clearInterval(adTickRef.current);
-      const newBonus = bonusMB + 50;
-      setBonusMB(newBonus);
-      localStorage.setItem(AD_BONUS_KEY, String(newBonus));
-      localStorage.setItem(AD_COOLDOWN_KEY, String(Date.now()));
       setAdWatching(false); setAdProgress(100);
-      setAdMsg('+50 MB added to your account!');
+      try {
+        const token = localStorage.getItem('memoera_token') || '';
+        const res = await fetch(`${API_BASE}/api/referral/watch-ad`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ seconds: 30 }),
+        });
+        const data = await parseApiResponse(res);
+        if (!res.ok) { setAdMsg(data.error || 'Could not add bonus.'); return; }
+        setBonusMB(Math.round(data.totalBonusBytes / (1024 * 1024)));
+        setAdCooldownSeconds(30 * 60);
+        setAdMsg(`+${Math.round((data.earnedBytes || 0) / (1024 * 1024))} MB added to your account!`);
+      } catch {
+        setAdMsg('Network error — could not add bonus.');
+      }
     }, 5000);
-  }, [bonusMB]);
+  }, [adCooldownSeconds]);
 
   // Load the Razorpay Standard Checkout script once, on demand.
   const loadRazorpayScript = useCallback(() => new Promise((resolve) => {

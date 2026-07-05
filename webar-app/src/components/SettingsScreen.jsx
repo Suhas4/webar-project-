@@ -100,8 +100,9 @@ export default function SettingsScreen({ onBack, onProfile }) {
     if (next === 'posters' && !posterHistory) fetchPosterHistory();
   };
 
-  const privatePct = storage ? Math.min(100, (storage.privateBytes / LIMIT) * 100) : 0;
-  const publicPct  = storage ? Math.min(100, (storage.publicBytes  / LIMIT) * 100) : 0;
+  const storageLimitBytes = storage?.limitBytes || LIMIT;
+  const privatePct = storage ? (storage.unlimited ? 0 : Math.min(100, (storage.privateBytes / storageLimitBytes) * 100)) : 0;
+  const publicPct  = storage ? (storage.unlimited ? 0 : Math.min(100, (storage.publicBytes  / storageLimitBytes) * 100)) : 0;
 
   return (
     <div style={{ ...s.screen, background: colors.bg }}>
@@ -136,7 +137,13 @@ export default function SettingsScreen({ onBack, onProfile }) {
                 <>
                   <StorageBar label={tr.privateLabel || 'Private'} used={storage.privateBytes} pct={privatePct} colors={colors} color={GOLD} />
                   <StorageBar label={tr.publicLabel || 'Public'}  used={storage.publicBytes}  pct={publicPct}  colors={colors} color={TEAL} />
-                  <p style={{ ...s.hint, color: colors.textMuted }}>Limit: 250 MB per type</p>
+                  <p style={{ ...s.hint, color: colors.textMuted }}>
+                    Plan: {(storage.plan || 'free')[0].toUpperCase() + (storage.plan || 'free').slice(1)}
+                    {' · '}
+                    {storage.unlimited
+                      ? 'Unlimited storage'
+                      : `Limit: ${(storageLimitBytes / 1024 / 1024).toFixed(0)} MB per type${storage.bonusBytes ? ` (incl. +${Math.round(storage.bonusBytes / 1024 / 1024)} MB bonus)` : ''}`}
+                  </p>
                 </>
               )}
             </div>

@@ -14,7 +14,7 @@ const STYLE_PRESETS = [
   'traditional Indian art, colorful, detailed',
 ];
 
-export default function AdminScreen({ onBack, adminKey }) {
+export default function AdminScreen({ onBack, adminKey, onUploadGlobal }) {
   const [festivalName, setFestivalName] = useState('');
   const [stylePrompt,  setStylePrompt]  = useState(STYLE_PRESETS[0]);
   const [overlayText,  setOverlayText]  = useState('');
@@ -86,6 +86,19 @@ export default function AdminScreen({ onBack, adminKey }) {
 
       {/* ── Form ── */}
       <div style={{ flex:1, overflowY:'auto', padding:'20px 20px 40px' }}>
+
+        {/* Upload Global Content — creates public AR content visible to every
+            user's scanner (reuses the same is_public mechanism regular users
+            get from the "Public" upload flow, with quota bypassed for admin). */}
+        {onUploadGlobal && (
+          <button onClick={onUploadGlobal}
+            style={{ width:'100%', padding:'15px', borderRadius:13, border:`1px solid ${TEAL}55`,
+              background:'rgba(0,201,167,0.10)', color:TEAL, fontSize:14, fontWeight:700,
+              fontFamily:FONT, cursor:'pointer', marginBottom:24, display:'flex',
+              alignItems:'center', justifyContent:'center', gap:8 }}>
+            📤 Upload Global Content — visible to all users
+          </button>
+        )}
 
         {/* Festival Name */}
         <div style={{ marginBottom:18 }}>

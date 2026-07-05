@@ -93,14 +93,14 @@ type ARTarget struct {
 // ─── Globals ──────────────────────────────────────────────────────────────────
 
 var (
-	db           *pgxpool.Pool
-	s3Client     *s3.Client
+	db            *pgxpool.Pool
+	s3Client      *s3.Client
 	presignClient *s3.PresignClient
-	r2Bucket     string
-	r2PublicURL  string
+	r2Bucket      string
+	r2PublicURL   string
 
-	otpStore = map[string]OTPEntry{}
-	otpMu    sync.Mutex
+	otpStore  = map[string]OTPEntry{}
+	otpMu     sync.Mutex
 	jwtSecret []byte
 )
 
@@ -198,6 +198,24 @@ func initDB(ctx context.Context) error {
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS preview_key TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(ctx, `ALTER TABLE poster_history ADD COLUMN IF NOT EXISTS image_key TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS animation_effect TEXT NOT NULL DEFAULT 'popIn'`)
+
+	// Real storage quota / plan / referral bonus tracking (server-authoritative —
+	// previously these were only simulated client-side in localStorage).
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS own_referral_code TEXT`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS bonus_storage_bytes BIGINT NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_redeemed BOOLEAN NOT NULL DEFAULT false`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS ad_bonus_last_at TIMESTAMPTZ`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'free'`)
+	_, _ = db.Exec(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_own_referral_code ON users(own_referral_code) WHERE own_referral_code IS NOT NULL`)
+
+	_, _ = db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS payment_orders (
+			order_id   TEXT PRIMARY KEY,
+			user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			plan       TEXT NOT NULL,
+			used       BOOLEAN NOT NULL DEFAULT false,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`)
 	// Secondary indexes — ar_targets is filtered by user_id and is_public on nearly
 	// every request; Postgres does not auto-index FK/non-PK columns.
 	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_ar_targets_user_id ON ar_targets(user_id)`)
@@ -264,6 +282,83 @@ func fileURL(key string) string {
 		return ""
 	}
 	return r2PublicURL + "/" + key
+}
+
+// ─── Storage plans & referral bonus ──────────────────────────────────────────
+
+// planLimitBytes maps a plan id to its per-type (private or public) storage
+// cap in bytes. -1 means unlimited. Mirrors the plan copy shown in
+// PremiumScreen.jsx (500MB/5GB/Unlimited); "free" matches the long-standing
+// 250MB free-tier hint in SettingsScreen.jsx.
+var planLimitBytes = map[string]int64{
+	"free":       250 * 1024 * 1024,
+	"basic":      500 * 1024 * 1024,
+	"pro":        5 * 1024 * 1024 * 1024,
+	"enterprise": -1,
+}
+
+// maxBonusStorageBytes is the combined cap across ad-watch + referral bonus,
+// matching MAX_BONUS_MB=100 in ReferFriendScreen.jsx / PremiumScreen.jsx.
+const maxBonusStorageBytes = int64(100 * 1024 * 1024)
+const adWatchCooldown = 30 * time.Minute
+const adMaxSeconds = 30
+const adMinSeconds = 10
+const referralEarnBytes = int64(50 * 1024 * 1024)
+
+func planLimit(plan string) int64 {
+	if l, ok := planLimitBytes[plan]; ok {
+		return l
+	}
+	return planLimitBytes["free"]
+}
+
+func isAdminEmail(email string) bool {
+	adminEmail := os.Getenv("ADMIN_EMAIL")
+	return adminEmail != "" && email != "" && strings.EqualFold(email, adminEmail)
+}
+
+// buildReferralCode mirrors buildCode() in ReferFriendScreen.jsx exactly so
+// the code a user sees on their own screen is the same one this function
+// derives and persists server-side.
+func buildReferralCode(firstName, lastName, mobile string, id int64) string {
+	fn, ln := firstName, lastName
+	if fn == "" {
+		fn = "M"
+	}
+	if ln == "" {
+		ln = "E"
+	}
+	combined := strings.ToUpper(fn + ln)
+	if len(combined) > 3 {
+		combined = combined[:3]
+	}
+	base := mobile
+	if base == "" {
+		base = fmt.Sprintf("%d", id)
+	}
+	base = strings.ToUpper(base)
+	if len(base) > 4 {
+		base = base[len(base)-4:]
+	}
+	return combined + base
+}
+
+// ensureOwnReferralCode returns the user's persisted shareable referral code,
+// generating and storing it on first use. Falls back to a guaranteed-unique
+// code derived from the user's id if the natural code collides.
+func ensureOwnReferralCode(ctx context.Context, userID int64, firstName, lastName, mobile string) string {
+	candidate := buildReferralCode(firstName, lastName, mobile, userID)
+	_, err := db.Exec(ctx, `UPDATE users SET own_referral_code=$1 WHERE id=$2 AND own_referral_code IS NULL`, candidate, userID)
+	if err != nil {
+		candidate = fmt.Sprintf("MEMO%06d", userID)
+		_, _ = db.Exec(ctx, `UPDATE users SET own_referral_code=$1 WHERE id=$2 AND own_referral_code IS NULL`, candidate, userID)
+	}
+	var code string
+	_ = db.QueryRow(ctx, `SELECT own_referral_code FROM users WHERE id=$1`, userID).Scan(&code)
+	if code == "" {
+		code = candidate
+	}
+	return code
 }
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
@@ -650,6 +745,22 @@ func signUpHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[signUp] db error: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to create account")
 		return
+	}
+
+	ensureOwnReferralCode(r.Context(), userID, req.FirstName, req.LastName, req.Mobile)
+
+	// If they entered a friend's/employee's code at signup, credit both sides
+	// immediately (best-effort — a failure here must never block account creation).
+	if code := strings.ToUpper(strings.TrimSpace(req.ReferralCode)); code != "" {
+		var ownerID int64
+		if err := db.QueryRow(r.Context(), `SELECT id FROM users WHERE own_referral_code=$1`, code).Scan(&ownerID); err == nil && ownerID != userID {
+			_, _ = db.Exec(r.Context(),
+				`UPDATE users SET bonus_storage_bytes=LEAST(bonus_storage_bytes+$1,$2), referral_redeemed=true WHERE id=$3`,
+				referralEarnBytes, maxBonusStorageBytes, userID)
+			_, _ = db.Exec(r.Context(),
+				`UPDATE users SET bonus_storage_bytes=LEAST(bonus_storage_bytes+$1,$2) WHERE id=$3`,
+				referralEarnBytes, maxBonusStorageBytes, ownerID)
+		}
 	}
 
 	user := User{ID: userID, FirstName: req.FirstName, LastName: req.LastName,
@@ -1363,13 +1474,13 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Targets []struct {
-			TargetIndex   int     `json:"targetIndex"`
-			Label         string  `json:"label"`
-			PlaneWidth    float64 `json:"planeWidth"`
-			PlaneHeight   float64 `json:"planeHeight"`
-			PlaneOffsetY  float64 `json:"planeOffsetY"`
-			ImageKey      string  `json:"imageKey"`
-			VideoKey      string  `json:"videoKey"`
+			TargetIndex     int     `json:"targetIndex"`
+			Label           string  `json:"label"`
+			PlaneWidth      float64 `json:"planeWidth"`
+			PlaneHeight     float64 `json:"planeHeight"`
+			PlaneOffsetY    float64 `json:"planeOffsetY"`
+			ImageKey        string  `json:"imageKey"`
+			VideoKey        string  `json:"videoKey"`
 			TargetType      string  `json:"targetType"`
 			URLLink         string  `json:"urlLink"`
 			AnimationEffect string  `json:"animationEffect"`
@@ -1386,6 +1497,37 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	if len(req.Targets) == 0 {
 		writeError(w, http.StatusBadRequest, "targets array is required")
 		return
+	}
+
+	// Enforce real storage quota (plan limit + earned bonus), skipped for the
+	// admin account so official/global content isn't capped by a personal quota.
+	var email, plan string
+	var bonusBytes int64
+	_ = db.QueryRow(r.Context(), `SELECT COALESCE(email,''), plan, bonus_storage_bytes FROM users WHERE id=$1`, userID).
+		Scan(&email, &plan, &bonusBytes)
+	if !isAdminEmail(email) {
+		if limit := planLimit(plan); limit >= 0 {
+			effectiveLimit := limit + bonusBytes
+			var existingUsage int64
+			_ = db.QueryRow(r.Context(),
+				`SELECT COALESCE(SUM(file_size_bytes),0) FROM ar_targets WHERE user_id=$1 AND is_public=$2`,
+				userID, req.IsPublic,
+			).Scan(&existingUsage)
+			var newUsage int64
+			for _, t := range req.Targets {
+				newUsage += t.FileSizeBytes
+			}
+			if existingUsage+newUsage > effectiveLimit {
+				freeMB := float64(effectiveLimit-existingUsage) / 1024 / 1024
+				if freeMB < 0 {
+					freeMB = 0
+				}
+				writeError(w, http.StatusRequestEntityTooLarge,
+					fmt.Sprintf("Storage limit exceeded — only %.1f MB free of your %.1f MB limit. Upgrade your plan or earn bonus storage to continue.",
+						freeMB, float64(effectiveLimit)/1024/1024))
+				return
+			}
+		}
 	}
 
 	// Append new targets instead of replacing — find the next available index
@@ -1631,15 +1773,247 @@ func getStorageHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var isPublic bool
 		var total int64
-		if err := rows.Scan(&isPublic, &total); err != nil { continue }
-		if isPublic { publicBytes = total } else { privateBytes = total }
+		if err := rows.Scan(&isPublic, &total); err != nil {
+			continue
+		}
+		if isPublic {
+			publicBytes = total
+		} else {
+			privateBytes = total
+		}
+	}
+	rows.Close()
+
+	var email, plan string
+	var bonusBytes int64
+	_ = db.QueryRow(r.Context(), `SELECT COALESCE(email,''), plan, bonus_storage_bytes FROM users WHERE id=$1`, userID).
+		Scan(&email, &plan, &bonusBytes)
+
+	limitBytes := planLimit(plan)
+	unlimited := limitBytes < 0
+	effectiveLimit := limitBytes
+	if !unlimited {
+		effectiveLimit += bonusBytes
+	}
+	if isAdminEmail(email) {
+		unlimited = true
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"privateBytes": privateBytes,
 		"publicBytes":  publicBytes,
-		"limitBytes":   int64(250 * 1024 * 1024),
+		"limitBytes":   effectiveLimit,
+		"unlimited":    unlimited,
+		"plan":         plan,
+		"bonusBytes":   bonusBytes,
+	})
+}
+
+// GET /api/referral/status
+func referralStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	var firstName, lastName, mobile, ownCode string
+	var bonusBytes int64
+	var redeemed bool
+	var adLastAt *time.Time
+	err = db.QueryRow(r.Context(), `
+		SELECT first_name, last_name, mobile, COALESCE(own_referral_code,''), bonus_storage_bytes, referral_redeemed, ad_bonus_last_at
+		FROM users WHERE id=$1`, userID,
+	).Scan(&firstName, &lastName, &mobile, &ownCode, &bonusBytes, &redeemed, &adLastAt)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to load referral status")
+		return
+	}
+	if ownCode == "" {
+		ownCode = ensureOwnReferralCode(r.Context(), userID, firstName, lastName, mobile)
+	}
+
+	adCooldownSeconds := 0
+	if adLastAt != nil {
+		if remaining := adWatchCooldown - time.Since(*adLastAt); remaining > 0 {
+			adCooldownSeconds = int(remaining.Seconds())
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"code":              ownCode,
+		"bonusBytes":        bonusBytes,
+		"maxBonusBytes":     maxBonusStorageBytes,
+		"redeemed":          redeemed,
+		"adCooldownSeconds": adCooldownSeconds,
+	})
+}
+
+// POST /api/referral/redeem  Body: {"code": "ABC1234"}
+func referralRedeemHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	code := strings.ToUpper(strings.TrimSpace(req.Code))
+	if len(code) < 5 {
+		writeError(w, http.StatusBadRequest, "Code must be at least 5 characters.")
+		return
+	}
+
+	var redeemed bool
+	var myCode string
+	_ = db.QueryRow(r.Context(), `SELECT referral_redeemed, COALESCE(own_referral_code,'') FROM users WHERE id=$1`, userID).
+		Scan(&redeemed, &myCode)
+	if redeemed {
+		writeError(w, http.StatusConflict, "You already redeemed a code.")
+		return
+	}
+	if myCode != "" && myCode == code {
+		writeError(w, http.StatusBadRequest, "You cannot use your own referral code.")
+		return
+	}
+
+	var ownerID int64
+	if err := db.QueryRow(r.Context(), `SELECT id FROM users WHERE own_referral_code=$1`, code).Scan(&ownerID); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid referral code.")
+		return
+	}
+	if ownerID == userID {
+		writeError(w, http.StatusBadRequest, "You cannot use your own referral code.")
+		return
+	}
+
+	tx, err := db.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	var myBonus int64
+	_ = tx.QueryRow(r.Context(), `SELECT bonus_storage_bytes FROM users WHERE id=$1 FOR UPDATE`, userID).Scan(&myBonus)
+	myEarn := referralEarnBytes
+	if room := maxBonusStorageBytes - myBonus; myEarn > room {
+		myEarn = room
+	}
+	if myEarn < 0 {
+		myEarn = 0
+	}
+	if _, err := tx.Exec(r.Context(),
+		`UPDATE users SET bonus_storage_bytes=bonus_storage_bytes+$1, referral_redeemed=true WHERE id=$2`, myEarn, userID,
+	); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to credit bonus")
+		return
+	}
+
+	var ownerBonus int64
+	_ = tx.QueryRow(r.Context(), `SELECT bonus_storage_bytes FROM users WHERE id=$1 FOR UPDATE`, ownerID).Scan(&ownerBonus)
+	ownerEarn := referralEarnBytes
+	if room := maxBonusStorageBytes - ownerBonus; ownerEarn > room {
+		ownerEarn = room
+	}
+	if ownerEarn < 0 {
+		ownerEarn = 0
+	}
+	if _, err := tx.Exec(r.Context(),
+		`UPDATE users SET bonus_storage_bytes=bonus_storage_bytes+$1 WHERE id=$2`, ownerEarn, ownerID,
+	); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to credit referrer")
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to commit redemption")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"earnedBytes":     myEarn,
+		"totalBonusBytes": myBonus + myEarn,
+	})
+}
+
+// POST /api/referral/watch-ad  Body: {"seconds": 30}
+func referralWatchAdHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	var req struct {
+		Seconds int `json:"seconds"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	var bonusBytes int64
+	var adLastAt *time.Time
+	_ = db.QueryRow(r.Context(), `SELECT bonus_storage_bytes, ad_bonus_last_at FROM users WHERE id=$1`, userID).
+		Scan(&bonusBytes, &adLastAt)
+
+	now := time.Now()
+	if adLastAt != nil {
+		if remaining := adWatchCooldown - now.Sub(*adLastAt); remaining > 0 {
+			writeError(w, http.StatusTooManyRequests, fmt.Sprintf("Come back in %d min for the next ad.", int(remaining.Minutes())+1))
+			return
+		}
+	}
+
+	seconds := req.Seconds
+	if seconds > adMaxSeconds {
+		seconds = adMaxSeconds
+	}
+	if seconds < adMinSeconds {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Watch at least %d seconds.", adMinSeconds))
+		return
+	}
+	room := maxBonusStorageBytes - bonusBytes
+	if room <= 0 {
+		writeError(w, http.StatusBadRequest, "Max bonus already reached.")
+		return
+	}
+	earnBytes := int64(seconds) * 1024 * 1024
+	if earnBytes > room {
+		earnBytes = room
+	}
+
+	if _, err := db.Exec(r.Context(),
+		`UPDATE users SET bonus_storage_bytes=bonus_storage_bytes+$1, ad_bonus_last_at=$2 WHERE id=$3`, earnBytes, now, userID,
+	); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to credit ad bonus")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"earnedBytes":     earnBytes,
+		"totalBonusBytes": bonusBytes + earnBytes,
 	})
 }
 
@@ -1809,7 +2183,9 @@ Return ONLY valid JSON with this exact structure (no markdown, no extra text):
 		Content []struct {
 			Text string `json:"text"`
 		} `json:"content"`
-		Error *struct{ Message string `json:"message"` } `json:"error"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&ar); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to parse AI response")
@@ -2064,7 +2440,7 @@ func createPaymentLinkHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Plan   string `json:"plan"`   // "basic" | "pro" | "enterprise"
+		Plan   string `json:"plan"` // "basic" | "pro" | "enterprise"
 		Name   string `json:"name"`
 		Email  string `json:"email"`
 		Mobile string `json:"mobile"`
@@ -2262,6 +2638,13 @@ func createOrderHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Record which user/plan this order belongs to so verifyPaymentHandler can
+	// upgrade the right account without trusting any client-supplied plan value.
+	if req.Plan != "" {
+		_, _ = db.Exec(r.Context(),
+			`INSERT INTO payment_orders (order_id, user_id, plan) VALUES ($1,$2,$3)`, orderID, userID, req.Plan)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"order_id": orderID,
@@ -2310,10 +2693,25 @@ func verifyPaymentHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Upgrade the user's plan using the order→user/plan mapping recorded at
+	// order-creation time — never trust a client-supplied plan at verify time.
+	var newPlan string
+	var orderUserID int64
+	var used bool
+	err := db.QueryRow(r.Context(),
+		`SELECT user_id, plan, used FROM payment_orders WHERE order_id=$1`, req.OrderID,
+	).Scan(&orderUserID, &newPlan, &used)
+	if err == nil && !used {
+		if _, err := db.Exec(r.Context(), `UPDATE users SET plan=$1 WHERE id=$2`, newPlan, orderUserID); err == nil {
+			_, _ = db.Exec(r.Context(), `UPDATE payment_orders SET used=true WHERE order_id=$1`, req.OrderID)
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"verified": true,
 		"status":   "success",
+		"plan":     newPlan,
 	})
 }
 
@@ -2372,6 +2770,9 @@ func main() {
 	mux.HandleFunc("/api/targets", getTargetsHandler)
 	mux.HandleFunc("/api/targets/delete", deleteTargetsHandler)
 	mux.HandleFunc("/api/storage", getStorageHandler)
+	mux.HandleFunc("/api/referral/status", referralStatusHandler)
+	mux.HandleFunc("/api/referral/redeem", referralRedeemHandler)
+	mux.HandleFunc("/api/referral/watch-ad", referralWatchAdHandler)
 
 	// AI Poster
 	mux.HandleFunc("/api/poster/generate", generatePosterHandler)

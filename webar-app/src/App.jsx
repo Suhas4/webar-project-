@@ -450,6 +450,7 @@ export default function App() {
       <AdminScreen
         onBack={() => setAppView('home')}
         adminKey={import.meta.env.VITE_ADMIN_KEY || ''}
+        onUploadGlobal={handleGoalPublic}
       />
     );
   } else if (appView === 'home') {
