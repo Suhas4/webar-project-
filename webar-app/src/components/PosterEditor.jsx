@@ -12,6 +12,27 @@ const LOGO_CORNERS = [
 ];
 const LOGO_SIZES = { small: 0.14, medium: 0.22, large: 0.32 };
 
+// Stylized fonts for the title/name overlay — loaded via Google Fonts link in
+// index.html. `weight` matches the boldest cut available so the poster text
+// reads as a real display face, not a thin fallback.
+const FONT_OPTIONS = [
+  { id: 'Outfit',           label: 'Clean',    family: '"Outfit", sans-serif',           weight: 800 },
+  { id: 'Playfair Display', label: 'Elegant',  family: '"Playfair Display", serif',      weight: 900 },
+  { id: 'Bebas Neue',       label: 'Impact',   family: '"Bebas Neue", sans-serif',        weight: 400 },
+  { id: 'Pacifico',         label: 'Script',   family: '"Pacifico", cursive',             weight: 400 },
+  { id: 'Anton',            label: 'Heavy',    family: '"Anton", sans-serif',             weight: 400 },
+  { id: 'Cinzel',           label: 'Engraved', family: '"Cinzel", serif',                 weight: 900 },
+];
+
+const FRAME_OPTIONS = [
+  { id: 'none',     label: 'None' },
+  { id: 'classic',  label: 'Classic' },
+  { id: 'gold',     label: 'Gold' },
+  { id: 'polaroid', label: 'Polaroid' },
+];
+
+function fontById(id) { return FONT_OPTIONS.find(f => f.id === id) || FONT_OPTIONS[0]; }
+
 // Samples the generated artwork itself to pick a sensible default text color (white
 // on a dark poster, near-black on a light one) and a matching accent swatch pulled
 // from the image's own most vivid color — so the overlay reads well and feels like
@@ -49,29 +70,186 @@ function extractThemeColors(img) {
   }
 }
 
-// Full-screen viewer + light editor shown immediately after a poster image is
-// generated: lets the user tweak the overlaid title/name text and color, drop in
-// a logo or photo, then download the flattened PNG or save it to their history.
-export default function PosterEditor({ poster, onClose, onSaved }) {
+function shadeColor(hex, percent) {
+  let h = (hex || '#ffffff').replace('#', '');
+  if (h.length === 3) h = h.split('').map(c => c + c).join('');
+  const num = parseInt(h, 16) || 0xffffff;
+  let r = (num >> 16) & 0xff, g = (num >> 8) & 0xff, b = num & 0xff;
+  const target = percent < 0 ? 0 : 255;
+  const p = Math.abs(percent);
+  r = Math.round((target - r) * p + r);
+  g = Math.round((target - g) * p + g);
+  b = Math.round((target - b) * p + b);
+  return `rgb(${r},${g},${b})`;
+}
+
+function computeLines(ctx, text, maxWidth) {
+  const words = text.split(' ');
+  let line = '';
+  const lines = [];
+  for (const word of words) {
+    const test = line ? `${line} ${word}` : word;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+// Draws wrapped text either flat (with a soft drop shadow) or as an embossed
+// pseudo-3D block — several darkening copies stepped diagonally behind the
+// final bright fill, the classic canvas "extruded text" trick.
+function renderTextBlock(ctx, { text, cx, y, maxWidth, lineHeight, color, is3d }) {
+  const lines = computeLines(ctx, text, maxWidth);
+  const startY = y - ((lines.length - 1) * lineHeight) / 2;
+  lines.forEach((l, i) => {
+    const ly = startY + i * lineHeight;
+    if (is3d) {
+      const depth = 7;
+      for (let d = depth; d >= 1; d--) {
+        ctx.fillStyle = shadeColor(color, -0.55 * (d / depth));
+        ctx.fillText(l, cx + d * 0.7, ly + d * 0.7);
+      }
+      ctx.fillStyle = color;
+      ctx.fillText(l, cx, ly);
+    } else {
+      ctx.fillStyle = color;
+      ctx.fillText(l, cx, ly);
+    }
+  });
+  return lines.length;
+}
+
+function drawFrame(ctx, w, h, frame) {
+  if (frame === 'none') return;
+  const pad = w * 0.03;
+  if (frame === 'classic') {
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.lineWidth = w * 0.006;
+    ctx.strokeRect(pad, pad, w - pad * 2, h - pad * 2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = w * 0.002;
+    ctx.strokeRect(pad * 1.8, pad * 1.8, w - pad * 3.6, h - pad * 3.6);
+  } else if (frame === 'gold') {
+    ctx.strokeStyle = GOLD;
+    ctx.lineWidth = w * 0.012;
+    ctx.strokeRect(pad * 0.6, pad * 0.6, w - pad * 1.2, h - pad * 1.2);
+    const cs = w * 0.055;
+    ctx.lineWidth = w * 0.018;
+    [
+      [pad * 0.6, pad * 0.6, 1, 1], [w - pad * 0.6, pad * 0.6, -1, 1],
+      [pad * 0.6, h - pad * 0.6, 1, -1], [w - pad * 0.6, h - pad * 0.6, -1, -1],
+    ].forEach(([x, y, sx, sy]) => {
+      ctx.beginPath();
+      ctx.moveTo(x, y + cs * sy);
+      ctx.lineTo(x, y);
+      ctx.lineTo(x + cs * sx, y);
+      ctx.stroke();
+    });
+  } else if (frame === 'polaroid') {
+    const border = w * 0.045;
+    const bottomExtra = h * 0.09;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, w, border);
+    ctx.fillRect(0, 0, border, h);
+    ctx.fillRect(w - border, 0, border, h);
+    ctx.fillRect(0, h - border - bottomExtra, w, border + bottomExtra);
+  }
+}
+
+const initialEdit = (poster) => ({
+  title: poster.title || '',
+  name: poster.name || '',
+  textColor: '#ffffff',
+  textPos: 'bottom',
+  font: 'Outfit',
+  text3d: false,
+  frame: 'none',
+});
+
+// Full-screen viewer + editor shown immediately after a poster image is generated:
+// lets the user tweak the overlaid title/name text (font, color, 3D style, position),
+// pick a frame, drop in a logo or photo, undo/redo any of it, regenerate a fresh
+// AI variation, then download the flattened PNG or save it to their history.
+export default function PosterEditor({ poster, onClose, onSaved, onRegenerate, regenerating }) {
   const canvasRef  = useRef(null);
   const baseImgRef = useRef(null);
   const logoImgRef = useRef(null);
+  const debounceRef = useRef(null);
+  const historyRef = useRef([initialEdit(poster)]);
+  const histIndexRef = useRef(0);
 
   const [ready, setReady]         = useState(false);
-  const [title, setTitle]         = useState(poster.title || '');
-  const [name, setName]           = useState(poster.name || '');
-  const [textColor, setTextColor] = useState('#ffffff');
+  const [fontsReady, setFontsReady] = useState(false);
+  const [edit, setEdit]           = useState(() => initialEdit(poster));
+  const [histTick, setHistTick]   = useState(0);
   const [themeAccent, setThemeAccent] = useState(null); // color pulled from the artwork itself
-  const [textPos, setTextPos]     = useState('bottom'); // 'top' | 'center' | 'bottom'
+  const [isLight, setIsLight]     = useState(false);
   const [logoCorner, setLogoCorner] = useState('br');
   const [logoSize, setLogoSize]     = useState('medium');
   const [editingText, setEditingText] = useState(false);
   const [saving, setSaving]   = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
 
-  // Load the base poster image once, then sample it to pick a text color that
-  // actually suits this specific poster (light background vs dark) instead of
-  // always defaulting to white.
+  const canUndo = histIndexRef.current > 0;
+  const canRedo = histIndexRef.current < historyRef.current.length - 1;
+
+  const pushHistory = (next) => {
+    const hist = historyRef.current;
+    const idx = histIndexRef.current;
+    if (JSON.stringify(hist[idx]) === JSON.stringify(next)) return;
+    const truncated = hist.slice(0, idx + 1);
+    truncated.push(next);
+    historyRef.current = truncated;
+    histIndexRef.current = truncated.length - 1;
+    setHistTick(t => t + 1);
+  };
+
+  // Discrete controls (color swatch, position, font, frame, 3D toggle, ...) commit
+  // to history immediately. Text inputs pass `debounce` so undo has one step per
+  // pause-in-typing instead of one step per keystroke.
+  const update = (patch, debounceMs) => {
+    setEdit(prev => {
+      const next = { ...prev, ...patch };
+      if (debounceMs) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = setTimeout(() => pushHistory(next), debounceMs);
+      } else {
+        pushHistory(next);
+      }
+      return next;
+    });
+  };
+
+  const undo = () => {
+    if (!canUndo) return;
+    histIndexRef.current -= 1;
+    setEdit(historyRef.current[histIndexRef.current]);
+    setHistTick(t => t + 1);
+  };
+  const redo = () => {
+    if (!canRedo) return;
+    histIndexRef.current += 1;
+    setEdit(historyRef.current[histIndexRef.current]);
+    setHistTick(t => t + 1);
+  };
+
+  // Preload every stylized font once so the first canvas draw doesn't render a
+  // fallback face for a frame before the webfont finishes downloading (canvas
+  // text doesn't repaint itself on font-load the way DOM text does).
+  useEffect(() => {
+    const specs = FONT_OPTIONS.map(f => `${f.weight} 60px "${f.id}"`);
+    Promise.all(specs.map(spec => document.fonts.load(spec).catch(() => {})))
+      .then(() => setFontsReady(true));
+  }, []);
+
+  // Load the base poster image once, then sample it to pick a text color/band
+  // treatment that actually suits this specific poster (light vs dark background)
+  // instead of always defaulting to white text on a black gradient.
   useEffect(() => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -80,8 +258,12 @@ export default function PosterEditor({ poster, onClose, onSaved }) {
       setReady(true);
       const theme = extractThemeColors(img);
       if (theme) {
-        setTextColor(theme.isLight ? '#111111' : '#ffffff');
+        setIsLight(theme.isLight);
         setThemeAccent(theme.accent);
+        const patched = { ...historyRef.current[0], textColor: theme.isLight ? '#111111' : '#ffffff' };
+        historyRef.current = [patched];
+        histIndexRef.current = 0;
+        setEdit(patched);
       }
     };
     img.src = poster.imageBase64 || poster.imageUrl;
@@ -96,52 +278,56 @@ export default function PosterEditor({ poster, onClose, onSaved }) {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(base, 0, 0);
 
-    const hasText = title.trim() || name.trim();
+    const w = canvas.width, h = canvas.height;
+    drawFrame(ctx, w, h, edit.frame);
+
+    const hasText = edit.title.trim() || edit.name.trim();
     if (hasText) {
-      const w = canvas.width, h = canvas.height;
       const bandH = h * 0.34;
-      const bandY = textPos === 'top' ? 0 : textPos === 'center' ? (h - bandH) / 2 : h - bandH;
+      const bandY = edit.textPos === 'top' ? 0 : edit.textPos === 'center' ? (h - bandH) / 2 : h - bandH;
       const grad = ctx.createLinearGradient(0, bandY, 0, bandY + bandH);
-      if (textPos === 'center') {
-        grad.addColorStop(0, 'rgba(0,0,0,0)');
-        grad.addColorStop(0.5, 'rgba(0,0,0,0.55)');
-        grad.addColorStop(1, 'rgba(0,0,0,0)');
-      } else if (textPos === 'top') {
-        grad.addColorStop(0, 'rgba(0,0,0,0.65)');
-        grad.addColorStop(1, 'rgba(0,0,0,0)');
+      const shade = isLight ? '255,255,255' : '0,0,0';
+      if (edit.textPos === 'center') {
+        grad.addColorStop(0, `rgba(${shade},0)`);
+        grad.addColorStop(0.5, `rgba(${shade},0.55)`);
+        grad.addColorStop(1, `rgba(${shade},0)`);
+      } else if (edit.textPos === 'top') {
+        grad.addColorStop(0, `rgba(${shade},0.65)`);
+        grad.addColorStop(1, `rgba(${shade},0)`);
       } else {
-        grad.addColorStop(0, 'rgba(0,0,0,0)');
-        grad.addColorStop(1, 'rgba(0,0,0,0.7)');
+        grad.addColorStop(0, `rgba(${shade},0)`);
+        grad.addColorStop(1, `rgba(${shade},0.7)`);
       }
       ctx.fillStyle = grad;
       ctx.fillRect(0, bandY, w, bandH);
 
       ctx.textAlign = 'center';
-      ctx.fillStyle = textColor;
-      ctx.shadowColor = 'rgba(0,0,0,0.6)';
-      ctx.shadowBlur = w * 0.01;
+      if (!edit.text3d) {
+        ctx.shadowColor = 'rgba(0,0,0,0.6)';
+        ctx.shadowBlur = w * 0.01;
+      }
 
+      const fontRec = fontById(edit.font);
       const cx = w / 2;
       const titleSize = Math.round(w * 0.075);
       const nameSize  = Math.round(w * 0.045);
-      let ty = textPos === 'top' ? bandY + titleSize * 1.3 : bandY + bandH / 2 - nameSize;
+      let ty = edit.textPos === 'top' ? bandY + titleSize * 1.3 : bandY + bandH / 2 - nameSize;
 
-      if (title.trim()) {
-        ctx.font = `800 ${titleSize}px ${FONT}`;
-        wrapText(ctx, title.trim(), cx, ty, w * 0.86, titleSize * 1.15);
+      if (edit.title.trim()) {
+        ctx.font = `${fontRec.weight} ${titleSize}px ${fontRec.family}`;
+        renderTextBlock(ctx, { text: edit.title.trim(), cx, y: ty, maxWidth: w * 0.86, lineHeight: titleSize * 1.15, color: edit.textColor, is3d: edit.text3d });
         ty += titleSize * 1.4;
       }
-      if (name.trim()) {
-        ctx.font = `700 ${nameSize}px ${FONT}`;
-        ctx.fillStyle = textColor === '#ffffff' ? GOLD : textColor;
-        wrapText(ctx, name.trim(), cx, ty, w * 0.8, nameSize * 1.2);
+      if (edit.name.trim()) {
+        ctx.font = `700 ${nameSize}px ${fontRec.family}`;
+        const nameColor = edit.textColor === '#ffffff' ? GOLD : edit.textColor;
+        renderTextBlock(ctx, { text: edit.name.trim(), cx, y: ty, maxWidth: w * 0.8, lineHeight: nameSize * 1.2, color: nameColor, is3d: edit.text3d });
       }
       ctx.shadowBlur = 0;
     }
 
     const logo = logoImgRef.current;
     if (logo) {
-      const w = canvas.width, h = canvas.height;
       const pad = w * 0.04;
       const logoW = w * LOGO_SIZES[logoSize];
       const logoH = logoW * (logo.naturalHeight / logo.naturalWidth);
@@ -153,9 +339,9 @@ export default function PosterEditor({ poster, onClose, onSaved }) {
       ctx.drawImage(logo, x, y, logoW, logoH);
       ctx.restore();
     }
-  }, [title, name, textColor, textPos, logoCorner, logoSize]);
+  }, [edit, isLight, logoCorner, logoSize]);
 
-  useEffect(() => { if (ready) draw(); }, [ready, draw]);
+  useEffect(() => { if (ready && fontsReady) draw(); }, [ready, fontsReady, draw]);
 
   const handleLogoUpload = (e) => {
     const file = e.target.files?.[0];
@@ -199,9 +385,9 @@ export default function PosterEditor({ poster, onClose, onSaved }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({
-          title: title.trim() || poster.title || 'Poster',
-          name: name.trim(),
-          colors: { primary: textColor },
+          title: edit.title.trim() || poster.title || 'Poster',
+          name: edit.name.trim(),
+          colors: { primary: edit.textColor },
           imageBase64,
         }),
       });
@@ -224,12 +410,19 @@ export default function PosterEditor({ poster, onClose, onSaved }) {
 
       <button onClick={onClose} style={st.closeBtn}>✕</button>
 
+      <div style={st.historyBtns}>
+        <button onClick={undo} disabled={!canUndo} title="Undo"
+          style={{ ...st.roundBtn, opacity: canUndo ? 1 : 0.35, cursor: canUndo ? 'pointer' : 'default' }}>⟲</button>
+        <button onClick={redo} disabled={!canRedo} title="Redo"
+          style={{ ...st.roundBtn, opacity: canRedo ? 1 : 0.35, cursor: canRedo ? 'pointer' : 'default' }}>⟳</button>
+      </div>
+
       <div style={st.panel}>
         {editingText ? (
           <div style={st.editRow}>
-            <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Title"
+            <input value={edit.title} onChange={e => update({ title: e.target.value }, 500)} placeholder="Title"
               style={st.textInput} maxLength={40} />
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="Name"
+            <input value={edit.name} onChange={e => update({ name: e.target.value }, 500)} placeholder="Name"
               style={st.textInput} maxLength={30} />
           </div>
         ) : null}
@@ -244,14 +437,38 @@ export default function PosterEditor({ poster, onClose, onSaved }) {
           {logoImgRef.current && (
             <button onClick={removeLogo} style={{ ...st.chipBtn, color: '#FF6B6B' }}>✕ Logo</button>
           )}
+          {onRegenerate && (
+            <button onClick={onRegenerate} disabled={regenerating}
+              style={{ ...st.chipBtn, color: GOLD, opacity: regenerating ? 0.5 : 1, cursor: regenerating ? 'not-allowed' : 'pointer' }}>
+              🔄 {regenerating ? 'Regenerating…' : 'Regenerate'}
+            </button>
+          )}
         </div>
 
         {editingText && (
           <div style={st.controlsRow}>
-            <span style={st.miniLabel}>Position:</span>
+            <span style={st.miniLabel}>Font:</span>
+            {FONT_OPTIONS.map(f => (
+              <button key={f.id} onClick={() => update({ font: f.id })}
+                style={{ ...st.miniBtn, fontFamily: f.family, ...(edit.font === f.id ? st.miniBtnActive : {}) }}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {editingText && (
+          <div style={st.controlsRow}>
+            <span style={st.miniLabel}>Style:</span>
+            <button onClick={() => update({ text3d: false })}
+              style={{ ...st.miniBtn, ...(!edit.text3d ? st.miniBtnActive : {}) }}>Flat</button>
+            <button onClick={() => update({ text3d: true })}
+              style={{ ...st.miniBtn, ...(edit.text3d ? st.miniBtnActive : {}) }}>3D</button>
+
+            <span style={{ ...st.miniLabel, marginLeft: 10 }}>Position:</span>
             {['top', 'center', 'bottom'].map(p => (
-              <button key={p} onClick={() => setTextPos(p)}
-                style={{ ...st.miniBtn, ...(textPos === p ? st.miniBtnActive : {}) }}>{p}</button>
+              <button key={p} onClick={() => update({ textPos: p })}
+                style={{ ...st.miniBtn, ...(edit.textPos === p ? st.miniBtnActive : {}) }}>{p}</button>
             ))}
           </div>
         )}
@@ -260,21 +477,28 @@ export default function PosterEditor({ poster, onClose, onSaved }) {
           <div style={st.controlsRow}>
             <span style={st.miniLabel}>Color:</span>
             {themeAccent && (
-              <button onClick={() => setTextColor(themeAccent)} title="Matched from your poster's own colors" style={{
+              <button onClick={() => update({ textColor: themeAccent })} title="Matched from your poster's own colors" style={{
                 width: 24, height: 24, borderRadius: '50%', background: themeAccent, cursor: 'pointer',
-                border: textColor === themeAccent ? `2px solid ${TEAL}` : '2px solid #fff',
+                border: edit.textColor === themeAccent ? `2px solid ${TEAL}` : '2px solid #fff',
                 boxShadow: '0 0 0 1px rgba(0,0,0,0.3)',
               }} />
             )}
             {TEXT_COLORS.map(c => (
-              <button key={c} onClick={() => setTextColor(c)} style={{
+              <button key={c} onClick={() => update({ textColor: c })} style={{
                 width: 24, height: 24, borderRadius: '50%', background: c, cursor: 'pointer',
-                border: textColor === c ? `2px solid ${TEAL}` : '1px solid rgba(255,255,255,0.3)',
+                border: edit.textColor === c ? `2px solid ${TEAL}` : '1px solid rgba(255,255,255,0.3)',
               }} />
             ))}
-            {themeAccent && <span style={{ ...st.miniLabel, fontSize: 10 }}>← from your poster</span>}
           </div>
         )}
+
+        <div style={st.controlsRow}>
+          <span style={st.miniLabel}>Frame:</span>
+          {FRAME_OPTIONS.map(f => (
+            <button key={f.id} onClick={() => update({ frame: f.id })}
+              style={{ ...st.miniBtn, ...(edit.frame === f.id ? st.miniBtnActive : {}) }}>{f.label}</button>
+          ))}
+        </div>
 
         {logoImgRef.current && (
           <div style={st.controlsRow}>
@@ -304,24 +528,6 @@ export default function PosterEditor({ poster, onClose, onSaved }) {
   );
 }
 
-function wrapText(ctx, text, cx, y, maxWidth, lineHeight) {
-  const words = text.split(' ');
-  let line = '';
-  const lines = [];
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word;
-    if (ctx.measureText(test).width > maxWidth && line) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = test;
-    }
-  }
-  if (line) lines.push(line);
-  const startY = y - ((lines.length - 1) * lineHeight) / 2;
-  lines.forEach((l, i) => ctx.fillText(l, cx, startY + i * lineHeight));
-}
-
 const st = {
   overlay: {
     position: 'fixed', inset: 0, zIndex: 9999, background: '#000',
@@ -337,6 +543,13 @@ const st = {
     position: 'absolute', top: 16, right: 16, zIndex: 2,
     width: 36, height: 36, borderRadius: '50%', border: 'none',
     background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 16, cursor: 'pointer',
+  },
+  historyBtns: {
+    position: 'absolute', top: 16, left: 16, zIndex: 2, display: 'flex', gap: 8,
+  },
+  roundBtn: {
+    width: 36, height: 36, borderRadius: '50%', border: 'none',
+    background: 'rgba(0,0,0,0.5)', color: '#fff', fontSize: 18, lineHeight: '36px', padding: 0,
   },
   panel: {
     flexShrink: 0, background: 'rgba(10,10,14,0.96)', borderTop: `1px solid ${TEAL}33`,

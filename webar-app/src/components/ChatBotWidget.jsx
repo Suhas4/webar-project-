@@ -119,14 +119,32 @@ const ORIENTATIONS = [
   { id: 'square',    label: '▢ Square' },
 ];
 
+// Mirrors STYLE_VARIANTS in the festival backend's routes/poster.js — index sent
+// as styleIndex so the same art direction can be picked explicitly instead of
+// the backend choosing at random every time (the "everything looks the same
+// dark theme" complaint was really "no visible way to pick a lighter style").
+const STYLE_CHOICES = [
+  { label: '🎲 Surprise Me' }, // styleIndex omitted → backend picks at random
+  { label: '✨ Neon Futuristic' },
+  { label: '🎨 Traditional' },
+  { label: '💎 Luxury Editorial' },
+  { label: '🌸 Watercolor' },
+  { label: '🕰️ Vintage Retro' },
+  { label: '🔮 Fantasy' },
+  { label: '🟢 Bold Graphic' },
+  { label: '🎬 Cinematic' },
+];
+
 function PosterMode({ colors, isDark }) {
   const [input, setInput]             = useState('');
   const [name, setName]               = useState('');
   const [orientation, setOrientation] = useState('portrait');
+  const [styleIndex, setStyleIndex]   = useState(null); // null = let backend pick at random
   const [items, setItems]             = useState([]);
   const [generating, setGenerating]   = useState(false);
   const [editingPoster, setEditingPoster] = useState(null);
   const [attachedLogo, setAttachedLogo]   = useState(null); // dataURL, composited server-side before generation
+  const lastOccasionRef = useRef(''); // remembers the last prompt so Regenerate doesn't need retyping
   const endRef = useRef(null);
   const logoInputRef = useRef(null);
 
@@ -143,24 +161,40 @@ function PosterMode({ colors, isDark }) {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [items]);
 
-  const generate = async (occasionHint) => {
+  const generate = async (occasionHint, opts = {}) => {
     const occasion = (occasionHint || input).trim();
     if (!occasion || generating) return;
+    lastOccasionRef.current = occasion;
     setInput('');
     setGenerating(true);
 
     const id = Date.now();
-    setItems(prev => [
-      ...prev,
-      { id, type: 'user', text: occasion + (name ? ` for ${name}` : '') },
-      { id: id + 1, type: 'poster', loading: true, error: null, poster: null },
-    ]);
+    if (!opts.silent) {
+      setItems(prev => [
+        ...prev,
+        { id, type: 'user', text: occasion + (name ? ` for ${name}` : '') },
+        { id: id + 1, type: 'poster', loading: true, error: null, poster: null },
+      ]);
+    } else {
+      // Regenerate: replace the most recent poster bubble instead of adding a new "you said" line
+      setItems(prev => {
+        const next = [...prev];
+        for (let i = next.length - 1; i >= 0; i--) {
+          if (next[i].type === 'poster') { next[i] = { ...next[i], loading: true, error: null }; break; }
+        }
+        return next;
+      });
+    }
 
     try {
       const res = await fetch(`${POSTER_API_BASE}/api/poster/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ occasion, name: name.trim(), details: '', orientation, logoBase64: attachedLogo || undefined }),
+        body: JSON.stringify({
+          occasion, name: name.trim(), details: '', orientation,
+          logoBase64: attachedLogo || undefined,
+          styleIndex: styleIndex != null ? styleIndex - 1 : undefined, // -1 to skip "Surprise Me" at index 0
+        }),
       });
       if (!res.ok) {
         let msg = "Couldn't generate your poster. Please try again.";
@@ -171,9 +205,13 @@ function PosterMode({ colors, isDark }) {
         throw new Error(msg);
       }
       const poster = await res.json();
-      setItems(prev => prev.map(it =>
-        it.id === id + 1 ? { ...it, loading: false, poster } : it
-      ));
+      setItems(prev => {
+        const next = [...prev];
+        for (let i = next.length - 1; i >= 0; i--) {
+          if (next[i].type === 'poster') { next[i] = { ...next[i], loading: false, error: null, poster }; break; }
+        }
+        return next;
+      });
 
       // Persist the raw generation to the user's poster history (Settings → My Posters)
       // right away — best-effort, so nothing is lost even if they close the editor
@@ -191,9 +229,14 @@ function PosterMode({ colors, isDark }) {
       // user tap into the mini chat-bubble preview first.
       setEditingPoster(poster);
     } catch (err) {
-      setItems(prev => prev.map(it =>
-        it.id === id + 1 ? { ...it, loading: false, error: err.message || 'Something went wrong. Please try again.' } : it
-      ));
+      const message = err.message || 'Something went wrong. Please try again.';
+      setItems(prev => {
+        const next = [...prev];
+        for (let i = next.length - 1; i >= 0; i--) {
+          if (next[i].type === 'poster') { next[i] = { ...next[i], loading: false, error: message }; break; }
+        }
+        return next;
+      });
     } finally {
       setGenerating(false);
     }
@@ -208,7 +251,17 @@ function PosterMode({ colors, isDark }) {
       `}</style>
 
       {/* Full-screen poster view + editor */}
-      {editingPoster && <PosterEditor poster={editingPoster} onClose={() => setEditingPoster(null)} />}
+      {editingPoster && (
+        <PosterEditor
+          poster={editingPoster}
+          onClose={() => setEditingPoster(null)}
+          onRegenerate={async () => {
+            setEditingPoster(null);
+            await generate(lastOccasionRef.current, { silent: true });
+          }}
+          regenerating={generating}
+        />
+      )}
 
       {/* Scroll area */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '10px 12px 6px', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -255,6 +308,22 @@ function PosterMode({ colors, isDark }) {
                 fontSize: 11, fontWeight: 600, fontFamily: FONT, padding: '7px 4px', cursor: 'pointer',
               }}>
                 {o.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Art style picker */}
+        {items.length === 0 && (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', padding: '2px 4px 0' }}>
+            {STYLE_CHOICES.map((sc, i) => (
+              <button key={sc.label} onClick={() => setStyleIndex(i)} style={{
+                background: (styleIndex ?? 0) === i ? `${GOLD}22` : 'transparent',
+                border: `1px solid ${(styleIndex ?? 0) === i ? GOLD : colors.border}`, borderRadius: 16,
+                color: (styleIndex ?? 0) === i ? GOLD : colors.textMuted,
+                fontSize: 10.5, fontFamily: FONT, padding: '5px 9px', cursor: 'pointer',
+              }}>
+                {sc.label}
               </button>
             ))}
           </div>
@@ -355,6 +424,15 @@ function PosterMode({ colors, isDark }) {
                     padding: '7px 14px', cursor: 'pointer',
                   }}>
                     ✏️ Edit / Download
+                  </button>
+                  <button onClick={() => generate(lastOccasionRef.current, { silent: true })} disabled={generating} style={{
+                    background: 'transparent', border: `1px solid ${GOLD}77`,
+                    borderRadius: 20, color: GOLD,
+                    fontSize: 11, fontFamily: FONT,
+                    padding: '7px 12px', cursor: generating ? 'not-allowed' : 'pointer',
+                    opacity: generating ? 0.5 : 1,
+                  }}>
+                    🔄 Regenerate
                   </button>
                   <button onClick={() => { setItems([]); }} style={{
                     background: 'transparent', border: `1px solid ${TEAL}55`,
