@@ -329,7 +329,7 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
       <div style={styles.bottomBar}>
         {compileState === 'error' && (
           <div style={styles.errorBox}>
-            <span>âš ï¸ {compileError}</span>
+            <span>⚠️ {compileError}</span>
             <button onClick={() => setCompileState('idle')} style={styles.errorDismiss}>Dismiss</button>
           </div>
         )}
