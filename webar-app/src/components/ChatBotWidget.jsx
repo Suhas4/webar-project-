@@ -162,7 +162,14 @@ function PosterMode({ colors, isDark }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ occasion, name: name.trim(), details: '', orientation, logoBase64: attachedLogo || undefined }),
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        let msg = "Couldn't generate your poster. Please try again.";
+        try {
+          const errData = await res.json();
+          if (errData?.error) msg = errData.error;
+        } catch {}
+        throw new Error(msg);
+      }
       const poster = await res.json();
       setItems(prev => prev.map(it =>
         it.id === id + 1 ? { ...it, loading: false, poster } : it
@@ -185,7 +192,7 @@ function PosterMode({ colors, isDark }) {
       setEditingPoster(poster);
     } catch (err) {
       setItems(prev => prev.map(it =>
-        it.id === id + 1 ? { ...it, loading: false, error: String(err) } : it
+        it.id === id + 1 ? { ...it, loading: false, error: err.message || 'Something went wrong. Please try again.' } : it
       ));
     } finally {
       setGenerating(false);
