@@ -74,13 +74,3 @@
   for = "/ar-scanner.html"
   [headers.values]
     Cache-Control = "no-cache, no-store, must-revalidate"
-
-[[headers]]
-  for = "/ar-scanner-jsfeat.html"
-  [headers.values]
-    Cache-Control = "no-cache, no-store, must-revalidate"
-
-[[headers]]
-  for = "/ar-scanner-capture.html"
-  [headers.values]
-    Cache-Control = "no-cache, no-store, must-revalidate"

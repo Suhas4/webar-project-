@@ -52,20 +52,17 @@ export default function SettingsScreen({ onBack, onProfile }) {
   const [soundScan,   setSoundScan]   = useState(() => readPref('memoera_sound_scan', true));
   const [autoFlash,   setAutoFlash]   = useState(() => readPref('memoera_auto_flash'));
   const [darkFlash,   setDarkFlash]   = useState(() => readPref('memoera_dark_flash'));
-  const [arEngine,    setArEngine]    = useState(() => {
-    // 'jsfeat' (Live Scan) was removed from the picker — anyone who had it
-    // selected gets migrated back to the default rather than being stuck on
-    // a no-longer-selectable engine.
+  // 'jsfeat' (Live Scan) and 'capture' (Capture & Scan) were both removed —
+  // the manual capture-then-match pipeline never reliably matched targets, so
+  // it's retired in favor of the one working engine (MindAR). Anyone who had
+  // either saved gets migrated back to the default so ARScannerScreen doesn't
+  // keep loading a no-longer-supported scanner file.
+  useEffect(() => {
     try {
-      var saved = localStorage.getItem('memoera_ar_engine') || 'mindar';
-      if (saved === 'jsfeat') { localStorage.setItem('memoera_ar_engine', 'mindar'); saved = 'mindar'; }
-      return saved;
-    } catch { return 'mindar'; }
-  });
-  const selectArEngine = (engine) => {
-    try { localStorage.setItem('memoera_ar_engine', engine); } catch {}
-    setArEngine(engine);
-  };
+      const saved = localStorage.getItem('memoera_ar_engine');
+      if (saved === 'jsfeat' || saved === 'capture') localStorage.setItem('memoera_ar_engine', 'mindar');
+    } catch {}
+  }, []);
   const [cacheCleared, setCacheCleared] = useState(false);
 
   // Support prefs
@@ -186,23 +183,7 @@ export default function SettingsScreen({ onBack, onProfile }) {
           <div style={{ padding: '10px 0 2px' }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 2 }}>AR Scan Engine</div>
             <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 10 }}>
-              Choose which engine detects your target images. MindAR is the default, well-tested engine.
-              Capture & Scan is an experimental alternative you can try and compare.
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {[
-                { id: 'mindar',  label: 'MindAR (Default)' },
-                { id: 'capture', label: '📸 Experimental — Capture & Scan' },
-              ].map((opt) => (
-                <button key={opt.id} onClick={() => selectArEngine(opt.id)}
-                  style={{ width: '100%', padding: '9px 0', borderRadius: 20, cursor: 'pointer',
-                    fontSize: 12, fontWeight: 700, fontFamily: 'inherit',
-                    border: arEngine === opt.id ? '1.5px solid #00C9A7' : `1px solid ${colors.border}`,
-                    background: arEngine === opt.id ? 'rgba(0,201,167,0.15)' : 'transparent',
-                    color: arEngine === opt.id ? '#00C9A7' : colors.textMuted }}>
-                  {opt.label}
-                </button>
-              ))}
+              MindAR — the same reliable engine used for every scan.
             </div>
             <button onClick={() => {
                 invalidateUserCache();

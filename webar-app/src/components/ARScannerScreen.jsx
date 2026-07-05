@@ -122,14 +122,10 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
     );
   }
 
-  let arEngine = 'mindar';
-  try { arEngine = localStorage.getItem('memoera_ar_engine') || 'mindar'; } catch {}
-  // 'jsfeat' (Live Scan) was removed from Settings — anyone still holding
-  // that saved value falls back to the default rather than reaching a
-  // no-longer-supported engine.
-  const scannerSrc =
-    arEngine === 'capture' ? '/ar-scanner-capture.html' :
-    '/ar-scanner.html';
+  // MindAR is the only scan engine now — the experimental capture-then-match
+  // ('capture') and legacy ('jsfeat') engines were retired since they never
+  // reliably matched targets. See the migration in SettingsScreen.jsx.
+  const scannerSrc = '/ar-scanner.html';
 
   return (
     <div style={{ position:'fixed', inset:0, background:'#000', zIndex:200 }}>
