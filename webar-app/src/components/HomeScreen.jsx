@@ -409,9 +409,6 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
         {/* Animated "Happy Customers" reviews */}
         <HappyCustomersCard colors={colors} isDark={isDark} user={user} />
 
-        {/* Banner ad space (Google AdSense) */}
-        <AdBannerSlot colors={colors} isDark={isDark} />
-
       </div>
 
       {/* â"€â"€ About Us (top) + Company Details (bottom) — portrait stacked â"€â"€ */}
@@ -763,47 +760,6 @@ const CUSTOMER_REVIEWS = [
   { name: 'Arjun M.',    avatar: '🧑',  rating: 4, text: 'Super smooth scanning and the 3D model viewer is incredible. Great app for keeping memories alive.' },
   { name: 'Sneha P.',    avatar: '👩‍🦰', rating: 5, text: 'I uploaded old family photos with voice messages attached as video. My grandmother was moved to tears scanning them.' },
 ];
-
-// Reserves the ad space now so the layout is visible before AdSense
-// approval. Once VITE_ADSENSE_CLIENT + VITE_ADSENSE_SLOT are set (after
-// creating a real ad unit), this automatically switches to a live ad.
-function AdBannerSlot({ colors, isDark }) {
-  const client = import.meta.env.VITE_ADSENSE_CLIENT || '';
-  const slot = import.meta.env.VITE_ADSENSE_SLOT || '';
-  const hasRealAd = !!(client && slot);
-
-  useEffect(() => {
-    if (!hasRealAd) return;
-    try { (window.adsbygoogle = window.adsbygoogle || []).push({}); } catch {}
-  }, [hasRealAd]);
-
-  if (hasRealAd) {
-    return (
-      <div style={{ marginTop: 10, borderRadius: 16, overflow: 'hidden', textAlign: 'center' }}>
-        <ins className="adsbygoogle" style={{ display: 'block' }}
-          data-ad-client={client} data-ad-slot={slot}
-          data-ad-format="auto" data-full-width-responsive="true" />
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ marginTop: 10, borderRadius: 16, overflow: 'hidden',
-      background: colors.surface, border: `1px solid ${colors.border}`, padding: '10px 14px' }}>
-      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', color: colors.textMuted,
-        marginBottom: 8, textTransform: 'uppercase', fontFamily: FONT }}>
-        Advertisement
-      </div>
-      <div style={{ height: 90, borderRadius: 10, background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
-        border: `1px dashed ${colors.border}`, display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-        <span style={{ fontSize: 20 }}>📢</span>
-        <span style={{ fontSize: 12, fontWeight: 600, color: colors.textMuted, fontFamily: FONT }}>Your Ad Here</span>
-        <span style={{ fontSize: 10, color: colors.textMuted, fontFamily: FONT, opacity: 0.7 }}>Google AdSense — pending approval</span>
-      </div>
-    </div>
-  );
-}
 
 function HappyCustomersCard({ colors, isDark, user }) {
   const [active, setActive] = useState(0);
