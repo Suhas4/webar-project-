@@ -2,11 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 
-export default function ARGlbScreen({ glbUrl, onBack }) {
+export default function ARGlbScreen({ glbUrl, effect, onBack }) {
   const iframeRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [shared, setShared] = useState(false);
-  const src = `/ar-glb.html?glb=${encodeURIComponent(glbUrl)}`;
+  const src = `/ar-glb.html?glb=${encodeURIComponent(glbUrl)}&effect=${encodeURIComponent(effect || 'popIn')}`;
 
   useEffect(() => {
     const handler = (e) => {

@@ -4,7 +4,7 @@ function getToken() {
   return localStorage.getItem("memoera_token") || "";
 }
 
-async function uploadPresigned(key, blob, contentType) {
+export async function uploadPresigned(key, blob, contentType) {
   const token = getToken();
   const res = await fetch(`${API_BASE}/api/upload/presign`, {
     method: "POST",
@@ -165,6 +165,7 @@ export async function saveTargets(targetsMeta, mindBuffer, videoBlobs, imageBlob
         videoKey: videoKeys[i],
         targetType: meta.targetType || "video",
         urlLink: glbUrls[i] || meta.urlLink || "",
+        animationEffect: meta.animationEffect || "",
         fileSizeBytes: (imageBlobs[i]?.size || 0) + (hasVideos ? (videoBlobs[i]?.size || 0) : 0) + (hasGlbs ? (glbBlobs[i]?.size || 0) : 0) + Math.round(mindBuffer.byteLength / n),
         fileName: meta.fileName || "",
       })),
@@ -207,7 +208,7 @@ export async function loadTargets() {
     const data = await res.json();
     if (!data.hasData || !data.targets?.length) return { targets: null, mindFileUrl: null, hasData: false, imagePreviewUrls: [] };
     return {
-      targets: data.targets.map((t) => ({ id:t.id||null, label:t.label, targetIndex:t.targetIndex, planeWidth:t.planeWidth, planeHeight:t.planeHeight, planeOffsetY:t.planeOffsetY, videoUrl:t.videoUrl, targetType:t.targetType||"video", urlLink:t.urlLink||"", isPublic:t.isPublic??false, createdAt:resolveCreatedAt(t.createdAt, t.imageUrl), _imagePreviewUrl:t.imageUrl, _videoBlob:null, _imageBlob:null, fileName:t.fileName||"", previewUrl:t.previewUrl||"" })),
+      targets: data.targets.map((t) => ({ id:t.id||null, label:t.label, targetIndex:t.targetIndex, planeWidth:t.planeWidth, planeHeight:t.planeHeight, planeOffsetY:t.planeOffsetY, videoUrl:t.videoUrl, targetType:t.targetType||"video", urlLink:t.urlLink||"", animationEffect:t.animationEffect||"popIn", isPublic:t.isPublic??false, createdAt:resolveCreatedAt(t.createdAt, t.imageUrl), _imagePreviewUrl:t.imageUrl, _videoBlob:null, _imageBlob:null, fileName:t.fileName||"", previewUrl:t.previewUrl||"" })),
       mindFileUrl: data.mindUrl,
       hasData: true,
       imagePreviewUrls: data.targets.map((t) => t.imageUrl).filter(Boolean),
@@ -221,7 +222,7 @@ export async function loadPublicTargets() {
     if (!res.ok) return [];
     const data = await res.json();
     if (!data.targets?.length) return [];
-    return data.targets.map((t) => ({ label:t.label, planeWidth:t.planeWidth, planeHeight:t.planeHeight, planeOffsetY:t.planeOffsetY, imageUrl:t.imageUrl, videoUrl:t.videoUrl, targetType:t.targetType||"video", urlLink:t.urlLink||"", fileName:t.fileName||"", previewUrl:t.previewUrl||"" }));
+    return data.targets.map((t) => ({ label:t.label, planeWidth:t.planeWidth, planeHeight:t.planeHeight, planeOffsetY:t.planeOffsetY, imageUrl:t.imageUrl, videoUrl:t.videoUrl, targetType:t.targetType||"video", urlLink:t.urlLink||"", animationEffect:t.animationEffect||"popIn", fileName:t.fileName||"", previewUrl:t.previewUrl||"" }));
   } catch { return []; }
 }
 

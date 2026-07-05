@@ -5,7 +5,7 @@ import { R2_PUBLIC_URL } from "../config/api.js";
 import { useLanguage } from "../context/LanguageContext.jsx";
 import { T } from "../config/translations.js";
 import { useTheme } from "../context/ThemeContext.jsx";
-import { takeWarmStream } from "../hooks/cameraWarmup.js";
+import { takeWarmStream, markCameraConfirmed } from "../hooks/cameraWarmup.js";
 import { loadMindARCompiler } from "../hooks/loadMindARCompiler.js";
 import { fetchImageForAR } from "../hooks/fetchImageForAR.js";
 import {
@@ -92,6 +92,7 @@ export default function GuestScanScreen({ onReady, onBack, onCreateAccount, onEr
 
     const warm = takeWarmStream();
     if (warm) {
+      markCameraConfirmed();
       streamRef.current = warm;
       setCameraReady(true);
       return () => {
@@ -111,6 +112,7 @@ export default function GuestScanScreen({ onReady, onBack, onCreateAccount, onEr
     navigator.mediaDevices
       .getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280, max: 1920 }, height: { ideal: 720, max: 1080 } }, audio: false })
       .then((stream) => {
+        markCameraConfirmed();
         streamRef.current = stream;
         setCameraReady(true);
       })
@@ -218,6 +220,7 @@ export default function GuestScanScreen({ onReady, onBack, onCreateAccount, onEr
             videoUrl: t.videoUrl,
             targetType: t.targetType || "video",
             urlLink: t.urlLink || "",
+            animationEffect: t.animationEffect || "popIn",
             imageUrl: t.imageUrl || "", // needed by the experimental jsfeat engine
           }));
 

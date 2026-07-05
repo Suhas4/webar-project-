@@ -5,7 +5,7 @@ import { invalidateBackgroundCompile } from '../hooks/backgroundCompile.js';
 import { useLanguage } from '../context/LanguageContext.jsx';
 import { T } from '../config/translations.js';
 import { useTheme } from '../context/ThemeContext.jsx';
-import { takeWarmStream } from '../hooks/cameraWarmup.js';
+import { takeWarmStream, getCameraPermissionState, markCameraConfirmed, hasConfirmedCameraThisSession } from '../hooks/cameraWarmup.js';
 import {
   waitForBackgroundResult,
   consumeBackgroundResult,
@@ -14,6 +14,7 @@ import {
 import { loadMindARCompiler } from '../hooks/loadMindARCompiler.js';
 import { fetchImageForAR } from '../hooks/fetchImageForAR.js';
 import { buildCameraErrorMessage } from '../utils/inAppBrowser.js';
+import CameraPermissionPrimer from './CameraPermissionPrimer.jsx';
 
 // Session-level cache — stores raw buffer so every scan creates a fresh blob URL
 // (reusing a blob URL across launchAR calls causes it to be revoked mid-flight)
@@ -40,11 +41,13 @@ export default function UserScanScreen({ onReady, onBack }) {
   const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState('');
   const [torchOn, setTorchOn]     = useState(false);
+  const [showPermissionPrimer, setShowPermissionPrimer] = useState(false);
   const cancelledRef  = useRef(false);
   const videoRef      = useRef(null);
   const streamRef     = useRef(null);
   const torchRef      = useRef(false);
   const handedOffRef  = useRef(false);
+  const pendingOpenRef = useRef(null);
   const { lang }     = useLanguage();
   const tr           = { ...T.en, ...(T[lang] || {}) };
   const { colors, theme } = useTheme();
@@ -71,24 +74,45 @@ export default function UserScanScreen({ onReady, onBack }) {
 
   // Use pre-warmed stream or open camera
   useEffect(() => {
-    const warm = takeWarmStream();
-    if (warm) {
-      streamRef.current = warm;
-      setCameraReady(true);
-    } else if (navigator.mediaDevices?.getUserMedia) {
+    let cancelled = false;
+
+    function requestCameraNow() {
       navigator.mediaDevices
         .getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280, max: 1920 }, height: { ideal: 720, max: 1080 } }, audio: false })
         .then((stream) => {
+          if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+          markCameraConfirmed();
           streamRef.current = stream;
           setCameraReady(true);
         })
         .catch((err) => {
-          setCameraError(buildCameraErrorMessage(err));
+          if (!cancelled) setCameraError(buildCameraErrorMessage(err));
         });
+    }
+
+    const warm = takeWarmStream();
+    if (warm) {
+      markCameraConfirmed();
+      streamRef.current = warm;
+      setCameraReady(true);
+    } else if (navigator.mediaDevices?.getUserMedia) {
+      // Permission already granted before — open straight away, no need to explain again.
+      getCameraPermissionState().then((state) => {
+        if (cancelled) return;
+        if (state === 'granted' || hasConfirmedCameraThisSession()) {
+          requestCameraNow();
+        } else {
+          // First time (or previously denied) — show the friendly primer before the
+          // native prompt, instead of hitting the visitor with it with zero context.
+          pendingOpenRef.current = requestCameraNow;
+          setShowPermissionPrimer(true);
+        }
+      });
     } else {
       setCameraError('Camera not supported on this device or browser.');
     }
     return () => {
+      cancelled = true;
       if (!handedOffRef.current && streamRef.current) {
         // Turn torch off before stopping the track so it doesn't stay lit
         streamRef.current.getVideoTracks().forEach((track) => {
@@ -99,6 +123,11 @@ export default function UserScanScreen({ onReady, onBack }) {
       }
     };
   }, []);
+
+  const handleAllowCamera = () => {
+    setShowPermissionPrimer(false);
+    pendingOpenRef.current?.();
+  };
 
   // Attach stream to video element once it mounts
   useEffect(() => {
@@ -214,6 +243,7 @@ export default function UserScanScreen({ onReady, onBack }) {
               merged.push({
                 imageUrl: imgUrl, videoUrl: t.videoUrl || '',
                 targetType: t.targetType || 'video', urlLink: t.urlLink || '',
+                animationEffect: t.animationEffect || 'popIn',
                 label: t.label, planeWidth: t.planeWidth,
                 planeHeight: t.planeHeight, planeOffsetY: t.planeOffsetY,
               });
@@ -291,6 +321,7 @@ export default function UserScanScreen({ onReady, onBack }) {
           planeWidth: t.planeWidth, planeHeight: t.planeHeight,
           planeOffsetY: t.planeOffsetY, videoUrl: t.videoUrl || '',
           targetType: t.targetType || 'video', urlLink: t.urlLink || '',
+          animationEffect: t.animationEffect || 'popIn',
           imageUrl: t.imageUrl || '', // needed by the experimental jsfeat engine
         }));
 
@@ -362,6 +393,12 @@ export default function UserScanScreen({ onReady, onBack }) {
           </div>
         )}
       </div>
+      {showPermissionPrimer && (
+        <CameraPermissionPrimer
+          onAllow={handleAllowCamera}
+          onDismiss={() => setShowPermissionPrimer(false)}
+        />
+      )}
     </div>
   );
 }

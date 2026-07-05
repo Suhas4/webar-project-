@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect, useCallback } from 'react';
-import { API_BASE } from '../config/api.js';
+import { API_BASE, R2_PUBLIC_URL } from '../config/api.js';
 import { useTheme, THEME_LIST, themes as ALL_THEMES } from '../context/ThemeContext.jsx';
 import { useLanguage } from '../context/LanguageContext.jsx';
 import { T } from '../config/translations.js';
@@ -8,6 +8,7 @@ import { invalidateGuestCache } from './GuestScanScreen.jsx';
 import { invalidateBackgroundCompile } from '../hooks/backgroundCompile.js';
 import { invalidateBackgroundPublicCompile } from '../hooks/backgroundCompilePublic.js';
 import { clearCachedUserMind, clearCachedPublicMind } from '../hooks/useMindCache.js';
+import { uploadPresigned } from '../hooks/useArStorage.js';
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const GOLD  = "#C9A84C";
@@ -32,6 +33,7 @@ export default function SettingsScreen({ onBack, onProfile }) {
   const [storageLoading, setStorageLoading] = useState(false);
   const [showChangePw, setShowChangePw]     = useState(false);
   const [showHelpCenter, setShowHelpCenter] = useState(false);
+  const [showContactSupport, setShowContactSupport] = useState(false);
   const [showAbout, setShowAbout]           = useState(false);
   const [showSubscribe, setShowSubscribe]   = useState(false);
   const [showPrivacy, setShowPrivacy]       = useState(false);
@@ -219,7 +221,7 @@ export default function SettingsScreen({ onBack, onProfile }) {
 
         {/* ── My Posters (history) ── */}
         <AccordionCard
-          label="My Posters" icon="🎨"
+          label="My Posters" icon="🖼️"
           open={openSection === 'posters'}
           onToggle={() => toggleSection('posters')}
           colors={colors}
@@ -239,20 +241,20 @@ export default function SettingsScreen({ onBack, onProfile }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, paddingBottom: 6 }}>
                 {posterHistory.map(p => (
                   <button key={p.id} onClick={() => setViewPoster(p)} style={{
-                    borderRadius: 14, overflow: 'hidden', cursor: 'pointer', border: 'none',
-                    padding: '16px 10px', textAlign: 'center',
-                    background: p.colors?.bg || '#0a1628',
+                    position: 'relative', borderRadius: 14, overflow: 'hidden', cursor: 'pointer', border: 'none',
+                    aspectRatio: '3 / 4', background: p.colors?.bg || '#0a1628',
                     boxShadow: `0 3px 14px ${p.colors?.primary || TEAL}33`,
                   }}>
-                    <div style={{ fontSize: 22, marginBottom: 6 }}>{p.emojis}</div>
-                    <div style={{ fontSize: 12, fontWeight: 800, fontFamily: FONT, lineHeight: 1.3,
-                      color: p.colors?.primary || TEAL, marginBottom: 3 }}>
-                      {p.title}
-                    </div>
-                    <div style={{ fontSize: 10, fontFamily: FONT, color: p.colors?.secondary || GOLD }}>
-                      {p.name}
-                    </div>
-                    <div style={{ fontSize: 9, fontFamily: FONT, color: 'rgba(255,255,255,0.4)', marginTop: 6 }}>
+                    {p.imageUrl && (
+                      <img src={p.imageUrl} alt="" style={{
+                        position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
+                      }} />
+                    )}
+                    <div style={{
+                      position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 1,
+                      background: 'linear-gradient(0deg, rgba(0,0,0,0.75), transparent)',
+                      padding: '16px 8px 6px', fontSize: 9, fontFamily: FONT, color: 'rgba(255,255,255,0.7)',
+                    }}>
                       {new Date(p.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
                     </div>
                   </button>
@@ -333,8 +335,7 @@ export default function SettingsScreen({ onBack, onProfile }) {
             onPress={() => setShowHelpCenter(true)} colors={colors} />
           <Divider colors={colors} />
           <RowButton label={tr.contactSupport || 'Contact Support'} icon="🛎️" hint="memoerabangalore@gmail.com"
-            onPress={() => window.open('mailto:memoerabangalore@gmail.com?subject=Memoera%20Support%20Request', '_blank')}
-            colors={colors} />
+            onPress={() => setShowContactSupport(true)} colors={colors} />
           <Divider colors={colors} />
           <RowButton label={tr.aboutApp || 'About Memoera'} icon="ℹ️" hint="App info & version"
             onPress={() => setShowAbout(true)} colors={colors} />
@@ -383,6 +384,7 @@ export default function SettingsScreen({ onBack, onProfile }) {
       {/* ── Modals ── */}
       {showChangePw   && <ChangePasswordModal   onClose={() => setShowChangePw(false)}   colors={colors} />}
       {showHelpCenter && <HelpCenterModal        onClose={() => setShowHelpCenter(false)} colors={colors} />}
+      {showContactSupport && <ContactSupportModal onClose={() => setShowContactSupport(false)} colors={colors} />}
       {showAbout      && <AboutModal             onClose={() => setShowAbout(false)}      colors={colors} />}
       {showSubscribe  && <SubscribeModal         onClose={() => setShowSubscribe(false)}  colors={colors} />}
       {showPrivacy    && <PrivacyPolicyModal     onClose={() => setShowPrivacy(false)}    colors={colors} />}
@@ -395,6 +397,24 @@ export default function SettingsScreen({ onBack, onProfile }) {
 // ── Poster history full view ──────────────────────────────────────────────────
 
 function PosterViewModal({ poster, onClose }) {
+  const handleDownload = async () => {
+    try {
+      const resp = await fetch(poster.imageUrl);
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `memoera-poster-${poster.id || Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      // Fall back to opening it directly so the user can save it manually.
+      window.open(poster.imageUrl, '_blank');
+    }
+  };
+
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 9999,
@@ -402,42 +422,23 @@ function PosterViewModal({ poster, onClose }) {
       background: 'rgba(0,0,0,0.85)', padding: 16,
     }} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{
-        width: '100%', maxWidth: 340, borderRadius: 24, overflow: 'hidden',
+        position: 'relative', width: '100%', maxWidth: 340, borderRadius: 24, overflow: 'hidden',
         background: poster.colors?.bg || '#0a1628',
         boxShadow: `0 0 60px ${poster.colors?.primary || TEAL}55`,
       }}>
-        <div style={{ height: 6, background: `linear-gradient(90deg, ${poster.colors?.primary || TEAL}, ${poster.colors?.secondary || GOLD}, ${poster.colors?.primary || TEAL})` }} />
-        <div style={{ padding: '28px 24px 24px', textAlign: 'center' }}>
-          <div style={{ fontSize: 40, marginBottom: 12, lineHeight: 1 }}>{poster.emojis}</div>
-          <div style={{ fontSize: 26, fontWeight: 800, fontFamily: FONT, color: poster.colors?.primary || TEAL,
-            letterSpacing: 1, marginBottom: 8, lineHeight: 1.2, textShadow: `0 0 20px ${poster.colors?.primary || TEAL}66` }}>
-            {poster.title}
-          </div>
-          <div style={{ fontSize: 20, fontWeight: 700, fontFamily: FONT, color: poster.colors?.secondary || GOLD,
-            marginBottom: 16, letterSpacing: 2 }}>
-            {poster.name}
-          </div>
-          <div style={{ height: 1, margin: '0 auto 16px', width: '60%',
-            background: `linear-gradient(90deg, transparent, ${poster.colors?.primary || TEAL}88, transparent)` }} />
-          <p style={{ fontSize: 13, fontFamily: FONT, lineHeight: 1.7, color: poster.colors?.text || '#fff',
-            opacity: 0.9, margin: '0 0 16px' }}>
-            {poster.message}
-          </p>
-          <div style={{ fontSize: 11, fontFamily: FONT, letterSpacing: '0.15em', color: poster.colors?.secondary || GOLD,
-            textTransform: 'uppercase', opacity: 0.8 }}>
-            {poster.subtitle}
-          </div>
-          <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, opacity: 0.35 }}>
-            <img src="/logo1.png" alt="" style={{ width: 16, height: 16, objectFit: 'contain' }} />
-            <span style={{ fontSize: 9, fontFamily: FONT, color: '#fff', letterSpacing: '0.1em' }}>MADE WITH MEMOERA</span>
-          </div>
-        </div>
-        <div style={{ background: 'rgba(0,0,0,0.4)', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)', fontFamily: FONT }}>📸 Screenshot to save</span>
+        {poster.imageUrl && (
+          <img src={poster.imageUrl} alt="" style={{ width: '100%', display: 'block' }} />
+        )}
+        <div style={{ background: 'rgba(0,0,0,0.4)', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <button onClick={handleDownload} style={{
+            background: `linear-gradient(135deg,${TEAL},#00E5CC)`, border: 'none',
+            borderRadius: 20, color: '#040D0B', fontSize: 11, fontWeight: 700, fontFamily: FONT,
+            padding: '6px 14px', cursor: 'pointer',
+          }}>⬇ Download</button>
           <button onClick={onClose} style={{
             background: 'transparent', border: '1px solid rgba(255,255,255,0.2)',
             borderRadius: 20, color: '#fff', fontSize: 11, fontFamily: FONT,
-            padding: '4px 12px', cursor: 'pointer',
+            padding: '6px 14px', cursor: 'pointer',
           }}>✕ Close</button>
         </div>
       </div>
@@ -792,6 +793,138 @@ function HelpCenterModal({ onClose, colors }) {
         </p>
       </div>
     </BottomModal>
+  );
+}
+
+// ── Contact Support Modal ─────────────────────────────────────────────────────
+// Lets the user describe their problem in their own words and attach a photo
+// and/or a short screen recording — much easier to explain a scanning/camera
+// problem that way than typing it out. Attachments upload straight to R2 (the
+// same presigned-URL flow used for AR targets), then we hand off to the
+// user's own email app with everything filled in and linked — no new backend
+// or email server needed to make this work today.
+function ContactSupportModal({ onClose, colors }) {
+  const [message, setMessage]   = useState('');
+  const [photo, setPhoto]       = useState(null);
+  const [video, setVideo]       = useState(null);
+  const [sending, setSending]   = useState(false);
+  const [progress, setProgress] = useState('');
+  const [error, setError]       = useState('');
+
+  const handleSend = useCallback(async () => {
+    if (!message.trim()) { setError('Please describe the problem you\'re facing.'); return; }
+    setError(''); setSending(true);
+    try {
+      const token = localStorage.getItem('memoera_token') || '';
+      if (!token) throw new Error('Please sign in to attach files to a support request.');
+
+      let userID = null;
+      if (photo || video) {
+        setProgress('Preparing…');
+        const meRes = await fetch(`${API_BASE}/api/me`, { headers: { Authorization: 'Bearer ' + token } });
+        if (!meRes.ok) throw new Error('Could not verify your account. Try again.');
+        ({ id: userID } = await meRes.json());
+      }
+
+      const ts = Date.now();
+      const links = [];
+
+      if (photo) {
+        setProgress('Uploading photo…');
+        const ext = (photo.name.split('.').pop() || 'jpg').toLowerCase();
+        const key = `users/${userID}/support/${ts}-photo.${ext}`;
+        await uploadPresigned(key, photo, photo.type || 'image/jpeg');
+        links.push(`Photo: ${R2_PUBLIC_URL}/${key}`);
+      }
+      if (video) {
+        setProgress('Uploading video…');
+        const ext = (video.name.split('.').pop() || 'mp4').toLowerCase();
+        const key = `users/${userID}/support/${ts}-video.${ext}`;
+        await uploadPresigned(key, video, video.type || 'video/mp4');
+        links.push(`Video: ${R2_PUBLIC_URL}/${key}`);
+      }
+
+      setProgress('Opening email…');
+      const bodyParts = [message.trim(), '', ...links];
+      const mailto = `mailto:memoerabangalore@gmail.com`
+        + `?subject=${encodeURIComponent('Memoera Support Request')}`
+        + `&body=${encodeURIComponent(bodyParts.join('\n'))}`;
+      window.open(mailto, '_blank');
+      onClose();
+    } catch (err) {
+      setError(err.message || 'Something went wrong. Please try again.');
+    } finally {
+      setSending(false);
+      setProgress('');
+    }
+  }, [message, photo, video, onClose]);
+
+  return (
+    <BottomModal title="Contact Support" onClose={onClose} colors={colors}>
+      <p style={{ fontSize: 12, color: colors.textMuted, fontFamily: FONT, margin: '0 0 14px', lineHeight: 1.6 }}>
+        Describe the problem — if it's about scanning or the camera, attaching a photo or a short screen
+        recording helps us see exactly what you're seeing.
+      </p>
+
+      <label style={{ display: 'block', fontSize: 11, color: colors.textMuted, fontFamily: FONT,
+        margin: '0 0 4px', letterSpacing: '0.06em' }}>
+        MESSAGE
+      </label>
+      <textarea
+        value={message} onChange={(e) => setMessage(e.target.value)}
+        placeholder="What went wrong? What were you trying to do?"
+        rows={4}
+        style={{
+          width: '100%', resize: 'vertical', borderRadius: 12, padding: '10px 12px',
+          border: `1px solid ${colors.border}`, background: colors.bg, color: colors.text,
+          fontFamily: FONT, fontSize: 13, lineHeight: 1.5, marginBottom: 14,
+        }}
+      />
+
+      <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+        <AttachPicker
+          label={photo ? photo.name : 'Add Photo'} icon="📷" accept="image/*"
+          onPick={setPhoto} active={!!photo} colors={colors}
+        />
+        <AttachPicker
+          label={video ? video.name : 'Add Video'} icon="🎥" accept="video/*"
+          onPick={setVideo} active={!!video} colors={colors}
+        />
+      </div>
+
+      {error && (
+        <p style={{ fontSize: 12, color: '#ff8080', fontFamily: FONT, margin: '0 0 12px', lineHeight: 1.5 }}>
+          {error}
+        </p>
+      )}
+
+      <button onClick={handleSend} disabled={sending} style={{
+        width: '100%', border: 'none', cursor: sending ? 'default' : 'pointer',
+        background: `linear-gradient(135deg, ${TEAL}, #00E5CC)`, color: '#040D0B',
+        fontSize: 14, fontWeight: 700, fontFamily: FONT, padding: '13px 0', borderRadius: 50,
+        opacity: sending ? 0.7 : 1,
+      }}>
+        {sending ? (progress || 'Sending…') : 'Send to Support →'}
+      </button>
+    </BottomModal>
+  );
+}
+
+function AttachPicker({ label, icon, accept, onPick, active, colors }) {
+  return (
+    <label style={{
+      flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+      border: `1px dashed ${active ? TEAL : colors.border}`, borderRadius: 12,
+      background: active ? `${TEAL}12` : 'transparent',
+      padding: '11px 8px', cursor: 'pointer', fontFamily: FONT,
+      fontSize: 11.5, fontWeight: 600, color: active ? TEAL : colors.textMuted,
+      textAlign: 'center', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis',
+    }}>
+      <span>{icon}</span>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+      <input type="file" accept={accept} style={{ display: 'none' }}
+        onChange={(e) => onPick(e.target.files?.[0] || null)} />
+    </label>
   );
 }
 

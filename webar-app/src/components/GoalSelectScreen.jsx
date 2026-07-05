@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useTheme } from "../context/ThemeContext.jsx";
+import { useLanguage } from "../context/LanguageContext.jsx";
+import { T } from "../config/translations.js";
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const GOLD = "#C9A84C";
@@ -8,6 +10,8 @@ const TEAL = "#00C9A7";
 export default function GoalSelectScreen({ onPrivate, onPublic, onBack }) {
   const [showGuide, setShowGuide] = useState(false);
   const { colors } = useTheme();
+  const { lang } = useLanguage();
+  const tr = { ...T.en, ...(T[lang] || {}) };
   return (
     <div style={{ ...s.screen, background: colors.bg }}>
       <style>{`
@@ -28,10 +32,10 @@ export default function GoalSelectScreen({ onPrivate, onPublic, onBack }) {
       {showGuide && (
         <div style={s.modalOverlay} onClick={() => setShowGuide(false)}>
           <div style={{ ...s.modal, background: colors.bgSolid }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ ...s.modalTitle, color: colors.text }}>Guide — Select Your Goal</h3>
-            <p style={{ ...s.modalText, color: colors.textMuted }}><strong style={{color:GOLD}}>PRIVATE</strong> — Your AR targets are only visible to you when you scan.</p>
-            <p style={{ ...s.modalText, color: colors.textMuted }}><strong style={{color:TEAL}}>PUBLIC</strong> — Your AR targets are visible to all users and guests when they scan.</p>
-            <button style={s.modalClose} onClick={() => setShowGuide(false)}>Close</button>
+            <h3 style={{ ...s.modalTitle, color: colors.text }}>{tr.guideGoalTitle}</h3>
+            <p style={{ ...s.modalText, color: colors.textMuted }}><strong style={{color:GOLD}}>{tr.privateLabel.toUpperCase()}</strong> — {tr.guidePrivateDesc}</p>
+            <p style={{ ...s.modalText, color: colors.textMuted }}><strong style={{color:TEAL}}>{tr.publicLabel.toUpperCase()}</strong> — {tr.guidePublicDesc}</p>
+            <button style={s.modalClose} onClick={() => setShowGuide(false)}>{tr.close}</button>
           </div>
         </div>
       )}
@@ -43,12 +47,12 @@ export default function GoalSelectScreen({ onPrivate, onPublic, onBack }) {
       <div style={s.watermark}>
         <img src="/logo.png" alt="" style={s.watermarkImg} />
       </div>
-      {onBack && <button onClick={onBack} style={{ ...s.backBtn, color: colors.textMuted }}>← Back</button>}
+      {onBack && <button onClick={onBack} style={{ ...s.backBtn, color: colors.textMuted }}>← {tr.back}</button>}
 
       <div style={s.top}>
-        <span style={s.eyebrow}>STEP 1 OF 2</span>
-        <h1 style={{ ...s.title, color: colors.text }}>Select Your Goal</h1>
-        <p style={{ ...s.subtitle, color: colors.textMuted }}>Choose who gets to see your AR memories</p>
+        <span style={s.eyebrow}>{tr.stepOneOfTwo}</span>
+        <h1 style={{ ...s.title, color: colors.text }}>{tr.selectGoalTitle}</h1>
+        <p style={{ ...s.subtitle, color: colors.textMuted }}>{tr.selectGoalSubtitle}</p>
       </div>
 
       <div style={s.btnArea}>
@@ -64,8 +68,8 @@ export default function GoalSelectScreen({ onPrivate, onPublic, onBack }) {
             <img src="/private-lock-logo.png" alt="Private" style={s.iconImg} />
           </span>
           <span style={s.textCol}>
-            <span style={{ ...s.btnLabel, color: colors.text }}>PRIVATE</span>
-            <span style={{ ...s.btnSub, color: colors.textMuted }}>Only visible to you when scanning</span>
+            <span style={{ ...s.btnLabel, color: colors.text }}>{tr.privateLabel.toUpperCase()}</span>
+            <span style={{ ...s.btnSub, color: colors.textMuted }}>{tr.privateDesc}</span>
           </span>
           <span className="gs-arrow" style={{ ...s.arrow, color: GOLD }}>→</span>
         </button>
@@ -82,8 +86,8 @@ export default function GoalSelectScreen({ onPrivate, onPublic, onBack }) {
             <img src="/public-logo.png" alt="Public" style={s.iconImg} />
           </span>
           <span style={s.textCol}>
-            <span style={{ ...s.btnLabel, color: colors.text }}>PUBLIC</span>
-            <span style={{ ...s.btnSub, color: colors.textMuted }}>Visible to everyone who scans</span>
+            <span style={{ ...s.btnLabel, color: colors.text }}>{tr.publicLabel.toUpperCase()}</span>
+            <span style={{ ...s.btnSub, color: colors.textMuted }}>{tr.publicDesc}</span>
           </span>
           <span className="gs-arrow" style={{ ...s.arrow, color: TEAL }}>→</span>
         </button>
@@ -92,7 +96,7 @@ export default function GoalSelectScreen({ onPrivate, onPublic, onBack }) {
       <div style={s.guideArea}>
         <button onClick={() => setShowGuide(true)} className="gs-guide-btn" style={s.guideBtn}>
           <img src="/help-guide-logo.png" alt="Guide" style={s.guideImg} />
-          <span style={{ ...s.guideLabel, color: colors.textMuted }}>GUIDE</span>
+          <span style={{ ...s.guideLabel, color: colors.textMuted }}>{tr.guide}</span>
         </button>
       </div>
     </div>

@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useTheme } from "../context/ThemeContext.jsx";
+import { useLanguage } from "../context/LanguageContext.jsx";
+import { T } from "../config/translations.js";
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const GOLD = "#C9A84C";
@@ -7,17 +9,19 @@ const GOLD = "#C9A84C";
 export default function UploadTypeScreen({ onPhotoVideo, onPhotoUrl, onPhoto3D, onPhotoAnimation, onPhotoDocument, onBack, visibility }) {
   const [showGuide, setShowGuide] = useState(false);
   const { colors } = useTheme();
+  const { lang } = useLanguage();
+  const tr = { ...T.en, ...(T[lang] || {}) };
   return (
     <div style={{ ...s.screen, background: colors.bg }}>
       {showGuide && (
         <div style={s.modalOverlay} onClick={() => setShowGuide(false)}>
           <div style={{ ...s.modal, background: colors.surface }} onClick={e => e.stopPropagation()}>
-            <h3 style={{ ...s.modalTitle, color: colors.text }}>Guide — Upload Type</h3>
-            <p style={{ ...s.modalText, color: colors.textMuted }}><strong style={{color:GOLD}}>PHOTO WITH VIDEO</strong> — Upload a marker image and a video. When someone scans the marker image, the video plays fullscreen.</p>
-            <p style={{ ...s.modalText, color: colors.textMuted }}><strong style={{color:GOLD}}>PHOTO WITH URL / LINK</strong> — Upload a marker image and attach a URL. When someone scans the image, a button appears to open the link.</p>
-            <p style={{ ...s.modalText, color: colors.textMuted }}><strong style={{color:GOLD}}>PHOTO WITH 3D MODEL</strong> — Upload a marker image and a 3D model (.glb, .gltf, .obj, or .fbx). When someone scans the image, the 3D model opens in a full-screen viewer.</p>
-            <p style={{ ...s.modalText, color: colors.textMuted }}><strong style={{color:GOLD}}>PHOTO WITH DOCUMENT</strong> — Upload a marker image and a document (.pdf, .psd, .cdr, .ai, .doc, .docx). When someone scans the image, a PDF opens right in the browser — other formats download.</p>
-            <button style={s.modalClose} onClick={() => setShowGuide(false)}>Close</button>
+            <h3 style={{ ...s.modalTitle, color: colors.text }}>{tr.guideUploadTypeTitle}</h3>
+            <p style={{ ...s.modalText, color: colors.textMuted }}><strong style={{color:GOLD}}>{tr.guidePhotoVideoLabel}</strong> — {tr.guidePhotoVideoDesc}</p>
+            <p style={{ ...s.modalText, color: colors.textMuted }}><strong style={{color:GOLD}}>{tr.guidePhotoUrlLabel}</strong> — {tr.guidePhotoUrlDesc}</p>
+            <p style={{ ...s.modalText, color: colors.textMuted }}><strong style={{color:GOLD}}>{tr.guidePhoto3DLabel}</strong> — {tr.guidePhoto3DDesc}</p>
+            <p style={{ ...s.modalText, color: colors.textMuted }}><strong style={{color:GOLD}}>{tr.guidePhotoDocLabel}</strong> — {tr.guidePhotoDocDesc}</p>
+            <button style={s.modalClose} onClick={() => setShowGuide(false)}>{tr.close}</button>
           </div>
         </div>
       )}
@@ -25,10 +29,10 @@ export default function UploadTypeScreen({ onPhotoVideo, onPhotoUrl, onPhoto3D, 
         <img src="/logo.png" alt="" style={s.watermarkImg} />
       </div>
       <div style={s.navBar}>
-        {onBack && <button onClick={onBack} style={{ ...s.backBtn, color: colors.textMuted }}>← Back</button>}
+        {onBack && <button onClick={onBack} style={{ ...s.backBtn, color: colors.textMuted }}>← {tr.back}</button>}
       </div>
       <div style={s.titleArea}>
-        <h1 style={{ ...s.title, color: colors.text }}>Select Your Goal</h1>
+        <h1 style={{ ...s.title, color: colors.text }}>{tr.selectUploadTypeTitle}</h1>
         {visibility && (
           <div style={{ ...s.visibilityBadge, background: visibility === 'public' ? 'rgba(0,201,167,0.15)' : 'rgba(201,168,76,0.15)', border: `1px solid ${visibility === 'public' ? '#00C9A7' : GOLD}` }}>
             <span style={{ color: visibility === 'public' ? '#00C9A7' : GOLD, fontSize: 12, fontWeight: 700, fontFamily: FONT, letterSpacing: '0.1em' }}>
@@ -40,29 +44,29 @@ export default function UploadTypeScreen({ onPhotoVideo, onPhotoUrl, onPhoto3D, 
       <div style={s.btnArea}>
         <button onClick={onPhotoVideo} style={{ ...s.goalBtn, border: `1.5px solid ${colors.border}`, background: colors.surface }}>
           <span style={s.btnIcon}>🎬</span>
-          <span style={{ ...s.btnLabel, color: colors.text }}>UPLOAD PHOTO<br />WITH VIDEO</span>
+          <span style={{ ...s.btnLabel, color: colors.text }}>{tr.uploadPhotoLabel}<br />{tr.withVideoLabel}</span>
         </button>
         <button onClick={onPhotoUrl} style={{ ...s.goalBtn, border: `1.5px solid ${colors.border}`, background: colors.surface }}>
           <span style={s.btnIcon}>🔗</span>
-          <span style={{ ...s.btnLabel, color: colors.text }}>UPLOAD PHOTO<br />WITH URL / LINK</span>
+          <span style={{ ...s.btnLabel, color: colors.text }}>{tr.uploadPhotoLabel}<br />{tr.withUrlLabel}</span>
         </button>
         <button onClick={onPhoto3D} style={{ ...s.goalBtn, border: `1.5px solid ${colors.border}`, background: colors.surface }}>
           <span style={s.btnIcon}>🧊</span>
-          <span style={{ ...s.btnLabel, color: colors.text }}>UPLOAD PHOTO<br />WITH 3D MODEL</span>
+          <span style={{ ...s.btnLabel, color: colors.text }}>{tr.uploadPhotoLabel}<br />{tr.with3DLabel}</span>
         </button>
         <button onClick={onPhotoAnimation} style={{ ...s.goalBtn, border: `1.5px solid ${colors.border}`, background: colors.surface }}>
           <span style={s.btnIcon}>🎞️</span>
-          <span style={{ ...s.btnLabel, color: colors.text }}>UPLOAD PHOTO<br />WITH ANIMATION</span>
+          <span style={{ ...s.btnLabel, color: colors.text }}>{tr.uploadPhotoLabel}<br />{tr.withAnimationLabel}</span>
         </button>
         <button onClick={onPhotoDocument} style={{ ...s.goalBtn, border: `1.5px solid ${colors.border}`, background: colors.surface }}>
           <span style={s.btnIcon}>📄</span>
-          <span style={{ ...s.btnLabel, color: colors.text }}>UPLOAD PHOTO<br />WITH DOCUMENT</span>
+          <span style={{ ...s.btnLabel, color: colors.text }}>{tr.uploadPhotoLabel}<br />{tr.withDocumentLabel}</span>
         </button>
       </div>
       <div style={s.guideArea}>
         <button onClick={() => setShowGuide(true)} style={s.guideBtn}>
           <img src="/help-guide-logo.png" alt="Guide" style={s.guideImg} />
-          <span style={{ ...s.guideLabel, color: colors.textMuted }}>GUIDE</span>
+          <span style={{ ...s.guideLabel, color: colors.textMuted }}>{tr.guide}</span>
         </button>
       </div>
     </div>

@@ -403,8 +403,8 @@ export default function HomeScreen({ onScan, onUpload, onGallery, onSettings, on
         {/* Greeting hero card */}
         <GreetingHero user={user} onScan={onScan} colors={colors} isDark={isDark} />
 
-        {/* Animated "How It Works" demo */}
-        <HowToUseCard colors={colors} isDark={isDark} onScan={onScan} />
+        {/* Demo video → then "How It Works" steps, in one combined card */}
+        <DemoAndHowItWorksCard colors={colors} isDark={isDark} onScan={onScan} />
 
         {/* Animated "Happy Customers" reviews */}
         <HappyCustomersCard colors={colors} isDark={isDark} user={user} />
@@ -549,13 +549,58 @@ const HOW_STEPS = [
   { icon: '✨', title: 'Relive',  desc: 'Watch your memory come alive right on top of it!' },
 ];
 
-function HowToUseCard({ colors, isDark, onScan }) {
+// Two clips play back-to-back like a mini playlist (intro, then the
+// upload-and-relive payoff), and once the last one ends — or after a
+// timeout, for anyone who scrolls past without tapping play — the
+// "How It Works" steps start cycling. One act follows the other, all in
+// a single card instead of separate ones.
+const VIDEO_PLAYLIST = ['/wings-to-memories.mp4', '/review-our-album.mp4'];
+
+function DemoAndHowItWorksCard({ colors, isDark, onScan }) {
+  const videoRef = useRef(null);
+  const fallbackRef = useRef(null);
+  const startedRef = useRef(false);
+  const [videoIndex, setVideoIndex] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [showSteps, setShowSteps] = useState(false);
   const [active, setActive] = useState(0);
 
+  const handlePlay = () => {
+    if (fallbackRef.current) { clearTimeout(fallbackRef.current); fallbackRef.current = null; }
+    startedRef.current = true;
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = 0;
+    v.play();
+    setPlaying(true);
+  };
+
+  // Clips alternate forever once started — a continuous back-to-back loop
+  // rather than stopping after one pass through the playlist.
+  const handleEnded = () => {
+    setVideoIndex((i) => (i + 1) % VIDEO_PLAYLIST.length);
+  };
+
+  // Advance to the next clip in the playlist automatically.
   useEffect(() => {
+    if (!startedRef.current) return; // first clip waits for the user to tap play
+    const v = videoRef.current;
+    if (!v) return;
+    v.load();
+    v.play();
+  }, [videoIndex]);
+
+  // Fallback so the steps still play even if the video is never tapped.
+  useEffect(() => {
+    fallbackRef.current = setTimeout(() => setShowSteps(true), 6000);
+    return () => { if (fallbackRef.current) clearTimeout(fallbackRef.current); };
+  }, []);
+
+  useEffect(() => {
+    if (!showSteps) return;
     const id = setInterval(() => setActive((a) => (a + 1) % HOW_STEPS.length), 2400);
     return () => clearInterval(id);
-  }, []);
+  }, [showSteps]);
 
   return (
     <div style={{ borderRadius: 16, overflow: 'hidden', marginTop: 10,
@@ -565,18 +610,65 @@ function HowToUseCard({ colors, isDark, onScan }) {
         @keyframes htu-pulseBadge { 0%,100%{opacity:0.6} 50%{opacity:1} }
         @keyframes htu-pop        { 0%{transform:scale(0.85);opacity:0.5} 100%{transform:scale(1);opacity:1} }
         @keyframes htu-ringGrow   { 0%{transform:scale(1);opacity:0.55} 100%{transform:scale(1.7);opacity:0} }
+        @keyframes dv-playHover   { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
       `}</style>
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px 0' }}>
         <span style={{ fontSize: 13, fontWeight: 700, color: colors.text, fontFamily: FONT }}>
-          🎬 How It Works
+          🎥 See Memoera in Action
         </span>
         <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
           color: '#00C9A7', background: 'rgba(0,201,167,0.12)', border: '1px solid rgba(0,201,167,0.35)',
           borderRadius: 20, padding: '3px 9px', animation: 'htu-pulseBadge 1.8s ease-in-out infinite' }}>
           DEMO
         </span>
+      </div>
+
+      {/* Video */}
+      <div style={{ position: 'relative', marginTop: 12, background: '#000',
+        maxWidth: 220, marginLeft: 'auto', marginRight: 'auto', borderRadius: 12, overflow: 'hidden' }}>
+        <video
+          ref={videoRef}
+          src={VIDEO_PLAYLIST[videoIndex]}
+          playsInline
+          controls={playing}
+          preload="metadata"
+          onPause={() => setPlaying(false)}
+          onEnded={handleEnded}
+          style={{ width: '100%', display: 'block', aspectRatio: '9 / 16', objectFit: 'cover', background: '#000' }}
+        />
+        {!playing && (
+          <button onClick={handlePlay} aria-label="Play demo video" style={{
+            position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.28)', border: 'none', cursor: 'pointer', padding: 0,
+          }}>
+            <span style={{
+              width: 52, height: 52, borderRadius: '50%',
+              background: 'rgba(0,201,167,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 4px 20px rgba(0,201,167,0.5)', animation: 'dv-playHover 2.2s ease-in-out infinite',
+            }}>
+              <span style={{ marginLeft: 4, width: 0, height: 0,
+                borderStyle: 'solid', borderWidth: '9px 0 9px 15px',
+                borderColor: 'transparent transparent transparent #04140f' }} />
+            </span>
+          </button>
+        )}
+      </div>
+
+      <div style={{ padding: '10px 14px 0', textAlign: 'center' }}>
+        <p style={{ margin: 0, fontSize: 12, color: colors.textMuted, fontFamily: FONT, lineHeight: 1.5 }}>
+          Watch a photo come alive — this is what your guests will see.
+        </p>
+      </div>
+
+      {/* Divider into "How It Works" */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '16px 18px 0' }}>
+        <div style={{ flex: 1, height: 1, background: colors.border }} />
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: colors.textMuted, fontFamily: FONT }}>
+          HOW IT WORKS
+        </span>
+        <div style={{ flex: 1, height: 1, background: colors.border }} />
       </div>
 
       {/* Steps row */}
@@ -728,6 +820,15 @@ function HappyCustomersCard({ colors, isDark, user }) {
           borderRadius: 20, padding: '3px 9px', animation: 'hc-pulseBadge 1.8s ease-in-out infinite' }}>
           ⭐ REVIEWS
         </span>
+        <button onClick={() => { setWriteOpen(true); setSubmitMsg(''); }}
+          aria-label="Write your own review"
+          title="Write your own review"
+          style={{
+            background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 0 2px 2px',
+            fontSize: 13, lineHeight: 1, color: colors.textMuted, flexShrink: 0,
+          }}>
+          ✏️
+        </button>
       </div>
 
       {/* Review card */}
@@ -964,7 +1065,6 @@ const styles = {
 
   /* Accordion cards */
   card: { borderRadius:12,overflow:'hidden',marginTop:4,
-    backdropFilter:'blur(12px)',WebkitBackdropFilter:'blur(12px)',
     boxShadow:'0 2px 10px rgba(0,0,0,0.15)' },
   accordionBtn: { width:'100%',background:'transparent',border:'none',
     display:'flex',justifyContent:'space-between',alignItems:'center',

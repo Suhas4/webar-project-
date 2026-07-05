@@ -28,6 +28,7 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
   const [error, setError]         = useState('');
   const [iframeKey, setIframeKey] = useState(0); // increment to force iframe reload
   const [spaceGlbUrl, setSpaceGlbUrl] = useState(null);
+  const [spaceGlbEffect, setSpaceGlbEffect] = useState('popIn');
   const [animOverlay, setAnimOverlay] = useState(null); // { title, frames }
   const [docPreview, setDocPreview]   = useState(null); // { previewUrl, fileName, openUrl }
   const iframeRef      = useRef(null);
@@ -84,6 +85,7 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
       }
       if (e.data?.type === 'ar-view-in-space' && e.data?.glbUrl) {
         setSpaceGlbUrl(e.data.glbUrl);
+        setSpaceGlbEffect(e.data.animationEffect || 'popIn');
       }
       if (e.data?.type === 'ar-open-link' && e.data?.url) {
         openExternalLink(e.data.url);
@@ -140,7 +142,7 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
         style={{ position:'absolute', inset:0, width:'100%', height:'100%', border:'none', display:'block' }}
       />
       {spaceGlbUrl && (
-        <ARGlbScreen glbUrl={spaceGlbUrl} onBack={onBack} />
+        <ARGlbScreen glbUrl={spaceGlbUrl} effect={spaceGlbEffect} onBack={onBack} />
       )}
       {animOverlay && (
         <AnimationArOverlay

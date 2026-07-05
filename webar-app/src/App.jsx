@@ -104,13 +104,22 @@ export default function App() {
   // Initialise AdMob SDK as early as possible
   useEffect(() => { initAdMob(); }, []);
 
-  // Preload video overlay assets
+  // Preload video overlay assets — deferred until the browser is idle so this
+  // ~17MB of video doesn't compete with the initial app load/interactivity.
   useEffect(() => {
-    const VIDEOS = ['/right-mark.mp4', '/x-mark.mp4', '/wings-to-memories.mp4', '/welcome-hand.mp4', '/review-our-album.mp4'];
-    VIDEOS.forEach((src) => {
-      const v = document.createElement('video');
-      v.src = src; v.preload = 'auto'; v.muted = true; v.load();
-    });
+    const preload = () => {
+      const VIDEOS = ['/right-mark.mp4', '/x-mark.mp4', '/wings-to-memories.mp4', '/welcome-hand.mp4', '/review-our-album.mp4'];
+      VIDEOS.forEach((src) => {
+        const v = document.createElement('video');
+        v.src = src; v.preload = 'auto'; v.muted = true; v.load();
+      });
+    };
+    if ('requestIdleCallback' in window) {
+      const id = window.requestIdleCallback(preload, { timeout: 5000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const t = setTimeout(preload, 3000);
+    return () => clearTimeout(t);
   }, []);
 
   // Preload BOTH MindAR scripts when idle so scans open instantly

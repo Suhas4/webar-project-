@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useTheme } from '../context/ThemeContext.jsx';
 import { API_BASE } from '../config/api.js';
+import PosterEditor from './PosterEditor.jsx';
 
 // Poster generation runs on the festival-greeting backend (Railway), not the main API_BASE.
 // In dev we hit the Vite proxy (/festival-api → Railway) so the request is same-origin
@@ -111,128 +112,32 @@ const POSTER_CHIPS = [
 ];
 
 
-// ── Poster card renderer ──────────────────────────────────────────────────────
-function PosterCard({ poster, onClose }) {
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 9999,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(0,0,0,0.85)', padding: 16,
-    }} onClick={onClose}>
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          width: '100%', maxWidth: 340, borderRadius: 24, overflow: 'hidden',
-          background: poster.colors?.bg || '#0a1628',
-          boxShadow: `0 0 60px ${poster.colors?.primary || TEAL}55`,
-          position: 'relative',
-        }}>
-        {poster.imageBase64 ? (
-          /* Rendered poster image from the backend */
-          <img src={poster.imageBase64} alt={poster.title || 'Poster'} style={{ width: '100%', display: 'block' }} />
-        ) : (
-        <>
-        {/* Decorative top band */}
-        <div style={{
-          height: 6,
-          background: `linear-gradient(90deg, ${poster.colors?.primary || TEAL}, ${poster.colors?.secondary || GOLD}, ${poster.colors?.primary || TEAL})`,
-        }} />
-
-        <div style={{ padding: '28px 24px 24px', textAlign: 'center' }}>
-          {/* Emojis */}
-          <div style={{ fontSize: 40, marginBottom: 12, lineHeight: 1 }}>{poster.emojis}</div>
-
-          {/* Title */}
-          <div style={{
-            fontSize: 26, fontWeight: 800, fontFamily: FONT,
-            color: poster.colors?.primary || TEAL,
-            letterSpacing: 1, marginBottom: 8, lineHeight: 1.2,
-            textShadow: `0 0 20px ${poster.colors?.primary || TEAL}66`,
-          }}>
-            {poster.title}
-          </div>
-
-          {/* Name */}
-          <div style={{
-            fontSize: 20, fontWeight: 700, fontFamily: FONT,
-            color: poster.colors?.secondary || GOLD,
-            marginBottom: 16, letterSpacing: 2,
-          }}>
-            {poster.name}
-          </div>
-
-          {/* Divider */}
-          <div style={{
-            height: 1, margin: '0 auto 16px',
-            width: '60%',
-            background: `linear-gradient(90deg, transparent, ${poster.colors?.primary || TEAL}88, transparent)`,
-          }} />
-
-          {/* Message */}
-          <p style={{
-            fontSize: 13, fontFamily: FONT, lineHeight: 1.7,
-            color: poster.colors?.text || '#fff',
-            opacity: 0.9, margin: '0 0 16px',
-          }}>
-            {poster.message}
-          </p>
-
-          {/* Subtitle */}
-          <div style={{
-            fontSize: 11, fontFamily: FONT, letterSpacing: '0.15em',
-            color: poster.colors?.secondary || GOLD,
-            textTransform: 'uppercase', opacity: 0.8,
-          }}>
-            {poster.subtitle}
-          </div>
-
-          {/* Memoera watermark */}
-          <div style={{
-            marginTop: 20, display: 'flex', alignItems: 'center',
-            justifyContent: 'center', gap: 6, opacity: 0.35,
-          }}>
-            <img src="/logo1.png" alt="" style={{ width: 16, height: 16, objectFit: 'contain' }} />
-            <span style={{ fontSize: 9, fontFamily: FONT, color: '#fff', letterSpacing: '0.1em' }}>
-              MADE WITH MEMOERA
-            </span>
-          </div>
-        </div>
-
-        {/* Bottom band */}
-        <div style={{
-          height: 4,
-          background: `linear-gradient(90deg, ${poster.colors?.secondary || GOLD}, ${poster.colors?.primary || TEAL}, ${poster.colors?.secondary || GOLD})`,
-        }} />
-        </>
-        )}
-
-        {/* Close + hint */}
-        <div style={{
-          background: 'rgba(0,0,0,0.4)', padding: '10px 16px',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        }}>
-          <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.5)', fontFamily: FONT }}>
-            📸 Screenshot to save
-          </span>
-          <button onClick={onClose} style={{
-            background: 'transparent', border: `1px solid rgba(255,255,255,0.2)`,
-            borderRadius: 20, color: '#fff', fontSize: 11, fontFamily: FONT,
-            padding: '4px 12px', cursor: 'pointer',
-          }}>✕ Close</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ── Poster generation mode ────────────────────────────────────────────────────
+const ORIENTATIONS = [
+  { id: 'portrait',  label: '▯ Portrait' },
+  { id: 'landscape', label: '▭ Landscape' },
+  { id: 'square',    label: '▢ Square' },
+];
+
 function PosterMode({ colors, isDark }) {
   const [input, setInput]             = useState('');
   const [name, setName]               = useState('');
+  const [orientation, setOrientation] = useState('portrait');
   const [items, setItems]             = useState([]);
   const [generating, setGenerating]   = useState(false);
-  const [fullPoster, setFullPoster]   = useState(null);
+  const [editingPoster, setEditingPoster] = useState(null);
+  const [attachedLogo, setAttachedLogo]   = useState(null); // dataURL, composited server-side before generation
   const endRef = useRef(null);
+  const logoInputRef = useRef(null);
+
+  const handleAttachLogo = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file later
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setAttachedLogo(reader.result);
+    reader.readAsDataURL(file);
+  };
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -255,7 +160,7 @@ function PosterMode({ colors, isDark }) {
       const res = await fetch(`${POSTER_API_BASE}/api/poster/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ occasion, name: name.trim(), details: '' }),
+        body: JSON.stringify({ occasion, name: name.trim(), details: '', orientation, logoBase64: attachedLogo || undefined }),
       });
       if (!res.ok) throw new Error(await res.text());
       const poster = await res.json();
@@ -263,8 +168,9 @@ function PosterMode({ colors, isDark }) {
         it.id === id + 1 ? { ...it, loading: false, poster } : it
       ));
 
-      // Persist to the user's poster history (Settings → My Posters). Best-effort —
-      // a failed save shouldn't interrupt the poster the user just saw generated.
+      // Persist the raw generation to the user's poster history (Settings → My Posters)
+      // right away — best-effort, so nothing is lost even if they close the editor
+      // below without tapping its own Save button.
       const token = localStorage.getItem('memoera_token');
       if (token) {
         fetch(`${API_BASE}/api/poster/save`, {
@@ -273,6 +179,10 @@ function PosterMode({ colors, isDark }) {
           body: JSON.stringify(poster),
         }).catch(() => {});
       }
+
+      // Show it full-screen immediately, with editing tools, instead of making the
+      // user tap into the mini chat-bubble preview first.
+      setEditingPoster(poster);
     } catch (err) {
       setItems(prev => prev.map(it =>
         it.id === id + 1 ? { ...it, loading: false, error: String(err) } : it
@@ -290,8 +200,8 @@ function PosterMode({ colors, isDark }) {
         @keyframes posterFloat { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-4px)} }
       `}</style>
 
-      {/* Full-screen poster view */}
-      {fullPoster && <PosterCard poster={fullPoster} onClose={() => setFullPoster(null)} />}
+      {/* Full-screen poster view + editor */}
+      {editingPoster && <PosterEditor poster={editingPoster} onClose={() => setEditingPoster(null)} />}
 
       {/* Scroll area */}
       <div style={{ flex: 1, overflowY: 'auto', padding: '10px 12px 6px', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -301,10 +211,10 @@ function PosterMode({ colors, isDark }) {
           <div style={{ textAlign: 'center', padding: '10px 4px 2px' }}>
             <div style={{ fontSize: 34, animation: 'posterFloat 3s ease-in-out infinite' }}>🎨</div>
             <div style={{ fontSize: 14, fontWeight: 700, color: colors.text, fontFamily: FONT, margin: '6px 0 4px' }}>
-              Claude AI Poster Studio
+              AI Poster Studio
             </div>
             <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: FONT, lineHeight: 1.5 }}>
-              Pick a celebration below or type your own. Claude AI will craft a beautiful personalised poster for you!
+              Pick a celebration below or type your own. We'll craft a unique AI-generated poster for you!
             </div>
           </div>
         )}
@@ -324,6 +234,22 @@ function PosterMode({ colors, isDark }) {
                 padding: '9px 12px', outline: 'none',
               }}
             />
+          </div>
+        )}
+
+        {/* Orientation picker */}
+        {items.length === 0 && (
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'center', padding: '0 4px' }}>
+            {ORIENTATIONS.map(o => (
+              <button key={o.id} onClick={() => setOrientation(o.id)} style={{
+                flex: 1, background: orientation === o.id ? `${TEAL}22` : 'transparent',
+                border: `1px solid ${orientation === o.id ? TEAL : colors.border}`, borderRadius: 10,
+                color: orientation === o.id ? TEAL : colors.textMuted,
+                fontSize: 11, fontWeight: 600, fontFamily: FONT, padding: '7px 4px', cursor: 'pointer',
+              }}>
+                {o.label}
+              </button>
+            ))}
           </div>
         )}
 
@@ -399,31 +325,15 @@ function PosterMode({ colors, isDark }) {
               {/* Poster preview */}
               {item.poster && (
                 <div style={{
-                  width: '85%', borderRadius: 16, overflow: 'hidden',
+                  position: 'relative', width: '85%', borderRadius: 16, overflow: 'hidden',
                   background: item.poster.colors?.bg || '#0a1628',
                   border: `1px solid ${item.poster.colors?.primary || TEAL}44`,
                   cursor: 'pointer',
-                }} onClick={() => setFullPoster(item.poster)}>
-                  {item.poster.imageBase64 ? (
-                    <img src={item.poster.imageBase64} alt={item.poster.title || 'Poster'} style={{ width: '100%', display: 'block' }} />
-                  ) : (
-                  <>
-                  {/* Top accent */}
-                  <div style={{ height: 4, background: `linear-gradient(90deg, ${item.poster.colors?.primary || TEAL}, ${item.poster.colors?.secondary || GOLD})` }} />
-                  <div style={{ padding: '16px 14px', textAlign: 'center' }}>
-                    <div style={{ fontSize: 26, marginBottom: 6 }}>{item.poster.emojis}</div>
-                    <div style={{ fontSize: 16, fontWeight: 800, fontFamily: FONT, color: item.poster.colors?.primary || TEAL, marginBottom: 4 }}>
-                      {item.poster.title}
-                    </div>
-                    <div style={{ fontSize: 13, fontWeight: 700, fontFamily: FONT, color: item.poster.colors?.secondary || GOLD, marginBottom: 8 }}>
-                      {item.poster.name}
-                    </div>
-                    <p style={{ fontSize: 11, fontFamily: FONT, color: '#fff', opacity: 0.8, lineHeight: 1.6, margin: 0 }}>
-                      {item.poster.message}
-                    </p>
-                  </div>
-                  <div style={{ height: 3, background: `linear-gradient(90deg, ${item.poster.colors?.secondary || GOLD}, ${item.poster.colors?.primary || TEAL})` }} />
-                  </>
+                }} onClick={() => setEditingPoster(item.poster)}>
+                  {item.poster.imageBase64 && (
+                    <img src={item.poster.imageBase64} alt="" style={{
+                      width: '100%', display: 'block',
+                    }} />
                   )}
                 </div>
               )}
@@ -431,13 +341,13 @@ function PosterMode({ colors, isDark }) {
               {/* Action buttons */}
               {item.poster && (
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => setFullPoster(item.poster)} style={{
+                  <button onClick={() => setEditingPoster(item.poster)} style={{
                     background: `linear-gradient(135deg,${TEAL},#00E5CC)`,
                     border: 'none', borderRadius: 20,
                     color: '#040D0B', fontSize: 11, fontWeight: 700, fontFamily: FONT,
                     padding: '7px 14px', cursor: 'pointer',
                   }}>
-                    🖼 View Full
+                    ✏️ Edit / Download
                   </button>
                   <button onClick={() => { setItems([]); }} style={{
                     background: 'transparent', border: `1px solid ${TEAL}55`,
@@ -457,12 +367,37 @@ function PosterMode({ colors, isDark }) {
         <div ref={endRef} />
       </div>
 
+      {/* Attached logo/photo preview */}
+      {attachedLogo && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px',
+          borderTop: `1px solid ${colors.border}`, flexShrink: 0,
+          background: isDark ? 'rgba(0,201,167,0.06)' : 'rgba(0,201,167,0.08)',
+        }}>
+          <img src={attachedLogo} alt="" style={{ width: 26, height: 26, borderRadius: 6, objectFit: 'cover' }} />
+          <span style={{ fontSize: 11, color: TEAL, fontFamily: FONT, flex: 1 }}>
+            Logo/photo will be added to your next poster
+          </span>
+          <button onClick={() => setAttachedLogo(null)} style={{
+            background: 'transparent', border: 'none', color: colors.textMuted,
+            fontSize: 14, cursor: 'pointer', padding: '0 4px',
+          }}>✕</button>
+        </div>
+      )}
+
       {/* Input row */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
-        padding: '8px 10px', borderTop: `1px solid ${colors.border}`, flexShrink: 0,
+        padding: '8px 10px', borderTop: attachedLogo ? 'none' : `1px solid ${colors.border}`, flexShrink: 0,
         background: isDark ? 'rgba(0,0,0,0.3)' : 'rgba(255,255,255,0.7)',
       }}>
+        <input ref={logoInputRef} type="file" accept="image/*" onChange={handleAttachLogo} style={{ display: 'none' }} />
+        <button onClick={() => logoInputRef.current?.click()} title="Attach logo or photo" style={{
+          width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
+          background: attachedLogo ? `${TEAL}33` : 'transparent', border: `1px solid ${TEAL}55`,
+          color: TEAL, fontSize: 16, fontWeight: 700, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>+</button>
         <input
           value={input}
           onChange={e => setInput(e.target.value)}

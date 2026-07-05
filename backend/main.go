@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -156,8 +157,7 @@ func initDB(ctx context.Context) error {
 			image_key     TEXT,
 			video_key     TEXT,
 			mind_key      TEXT,
-			created_at    TIMESTAMPTZ DEFAULT NOW(),
-			UNIQUE(user_id, target_index, is_public)
+			created_at    TIMESTAMPTZ DEFAULT NOW()
 		);
 
 		CREATE TABLE IF NOT EXISTS poster_history (
@@ -169,6 +169,7 @@ func initDB(ctx context.Context) error {
 			subtitle    TEXT NOT NULL DEFAULT '',
 			emojis      TEXT NOT NULL DEFAULT '',
 			colors      JSONB NOT NULL DEFAULT '{}',
+			image_key   TEXT NOT NULL DEFAULT '',
 			created_at  TIMESTAMPTZ DEFAULT NOW()
 		);
 
@@ -195,6 +196,14 @@ func initDB(ctx context.Context) error {
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS file_size_bytes BIGINT NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS file_name TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS preview_key TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(ctx, `ALTER TABLE poster_history ADD COLUMN IF NOT EXISTS image_key TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS animation_effect TEXT NOT NULL DEFAULT 'popIn'`)
+	// Secondary indexes — ar_targets is filtered by user_id and is_public on nearly
+	// every request; Postgres does not auto-index FK/non-PK columns.
+	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_ar_targets_user_id ON ar_targets(user_id)`)
+	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_ar_targets_is_public ON ar_targets(is_public) WHERE is_public = true`)
+	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_poster_history_user_id ON poster_history(user_id)`)
+
 	// Migrate unique constraint: (user_id, target_index) → (user_id, target_index, is_public)
 	// so public and private targets can coexist at the same index for the same user.
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets DROP CONSTRAINT IF EXISTS ar_targets_user_id_target_index_key`)
@@ -483,7 +492,11 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 		defer func() {
 			if rec := recover(); rec != nil {
 				log.Printf("PANIC on %s %s: %v", r.Method, r.URL.Path, rec)
-				http.Error(w, "service temporarily unavailable (DB not configured)", http.StatusServiceUnavailable)
+				// JSON, not http.Error's plain text — every frontend call site does
+				// `await res.json()` on non-ok responses, so a plain-text body throws
+				// a parse error that gets swallowed into a generic "can't reach
+				// server" message, masking the real cause (this exact response).
+				writeError(w, http.StatusServiceUnavailable, "service temporarily unavailable (DB not configured)")
 			}
 		}()
 		next.ServeHTTP(w, r)
@@ -495,6 +508,33 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		start := time.Now()
 		next.ServeHTTP(w, r)
 		log.Printf("%s %s  (%s)", r.Method, r.URL.Path, time.Since(start))
+	})
+}
+
+type gzipResponseWriter struct {
+	http.ResponseWriter
+	Writer io.Writer
+}
+
+func (w gzipResponseWriter) Write(b []byte) (int, error) {
+	return w.Writer.Write(b)
+}
+
+// gzipMiddleware wraps the entire inner chain (recovery+cors+mux) so that both
+// normal handler output and recovery's panic-caught error responses go through
+// the same writer — avoiding a mismatched Content-Encoding header if a panic
+// happens mid-write.
+func gzipMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions || !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Add("Vary", "Accept-Encoding")
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+		next.ServeHTTP(gzipResponseWriter{ResponseWriter: w, Writer: gz}, r)
 	})
 }
 
@@ -1330,10 +1370,11 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 			PlaneOffsetY  float64 `json:"planeOffsetY"`
 			ImageKey      string  `json:"imageKey"`
 			VideoKey      string  `json:"videoKey"`
-			TargetType    string  `json:"targetType"`
-			URLLink       string  `json:"urlLink"`
-			FileSizeBytes int64   `json:"fileSizeBytes"`
-			FileName      string  `json:"fileName"`
+			TargetType      string  `json:"targetType"`
+			URLLink         string  `json:"urlLink"`
+			AnimationEffect string  `json:"animationEffect"`
+			FileSizeBytes   int64   `json:"fileSizeBytes"`
+			FileName        string  `json:"fileName"`
 		} `json:"targets"`
 		MindKey  string `json:"mindKey"`
 		IsPublic bool   `json:"isPublic"`
@@ -1367,6 +1408,10 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 		if targetType == "" {
 			targetType = "video"
 		}
+		animationEffect := t.AnimationEffect
+		if animationEffect == "" {
+			animationEffect = "popIn"
+		}
 
 		// PSD/CDR have no in-browser renderer — generate a JPG thumbnail
 		// server-side so the scanner can show the user what actually matched
@@ -1383,10 +1428,10 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		_, err = tx.Exec(r.Context(), `
-			INSERT INTO ar_targets (user_id, target_index, label, plane_width, plane_height, plane_offset_y, image_key, video_key, mind_key, is_public, target_type, url_link, file_size_bytes, file_name, preview_key)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+			INSERT INTO ar_targets (user_id, target_index, label, plane_width, plane_height, plane_offset_y, image_key, video_key, mind_key, is_public, target_type, url_link, file_size_bytes, file_name, preview_key, animation_effect)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
 			userID, startIdx+i, t.Label, t.PlaneWidth, t.PlaneHeight, t.PlaneOffsetY, t.ImageKey, t.VideoKey, req.MindKey,
-			req.IsPublic, targetType, t.URLLink, t.FileSizeBytes, t.FileName, previewKey,
+			req.IsPublic, targetType, t.URLLink, t.FileSizeBytes, t.FileName, previewKey, animationEffect,
 		)
 		if err != nil {
 			log.Printf("[saveTargets] insert error: %v", err)
@@ -1420,7 +1465,7 @@ func getTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	rows, err := db.Query(r.Context(), `
 		SELECT target_index, label, plane_width, plane_height, plane_offset_y, image_key, video_key, mind_key,
 		       COALESCE(target_type, 'video'), COALESCE(url_link, ''), COALESCE(is_public, false),
-		       created_at, COALESCE(file_name, ''), COALESCE(preview_key, '')
+		       created_at, COALESCE(file_name, ''), COALESCE(preview_key, ''), COALESCE(animation_effect, 'popIn')
 		FROM ar_targets WHERE user_id=$1
 		ORDER BY target_index`, userID)
 	if err != nil {
@@ -1430,22 +1475,23 @@ func getTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type TargetResponse struct {
-		TargetIndex  int       `json:"targetIndex"`
-		Label        string    `json:"label"`
-		PlaneWidth   float64   `json:"planeWidth"`
-		PlaneHeight  float64   `json:"planeHeight"`
-		PlaneOffsetY float64   `json:"planeOffsetY"`
-		ImageURL     string    `json:"imageUrl"`
-		VideoURL     string    `json:"videoUrl"`
-		ImageKey     string    `json:"imageKey"`
-		VideoKey     string    `json:"videoKey"`
-		MindKey      string    `json:"mindKey"`
-		TargetType   string    `json:"targetType"`
-		URLLink      string    `json:"urlLink"`
-		IsPublic     bool      `json:"isPublic"`
-		CreatedAt    time.Time `json:"createdAt"`
-		FileName     string    `json:"fileName"`
-		PreviewURL   string    `json:"previewUrl"`
+		TargetIndex     int       `json:"targetIndex"`
+		Label           string    `json:"label"`
+		PlaneWidth      float64   `json:"planeWidth"`
+		PlaneHeight     float64   `json:"planeHeight"`
+		PlaneOffsetY    float64   `json:"planeOffsetY"`
+		ImageURL        string    `json:"imageUrl"`
+		VideoURL        string    `json:"videoUrl"`
+		ImageKey        string    `json:"imageKey"`
+		VideoKey        string    `json:"videoKey"`
+		MindKey         string    `json:"mindKey"`
+		TargetType      string    `json:"targetType"`
+		URLLink         string    `json:"urlLink"`
+		AnimationEffect string    `json:"animationEffect"`
+		IsPublic        bool      `json:"isPublic"`
+		CreatedAt       time.Time `json:"createdAt"`
+		FileName        string    `json:"fileName"`
+		PreviewURL      string    `json:"previewUrl"`
 	}
 
 	var targets []TargetResponse
@@ -1456,7 +1502,7 @@ func getTargetsHandler(w http.ResponseWriter, r *http.Request) {
 		var imageKey, videoKey, mindKey, previewKey string
 		if err := rows.Scan(&t.TargetIndex, &t.Label, &t.PlaneWidth, &t.PlaneHeight, &t.PlaneOffsetY,
 			&imageKey, &videoKey, &mindKey, &t.TargetType, &t.URLLink, &t.IsPublic, &t.CreatedAt,
-			&t.FileName, &previewKey); err != nil {
+			&t.FileName, &previewKey, &t.AnimationEffect); err != nil {
 			continue
 		}
 		t.ImageKey = imageKey
@@ -1495,7 +1541,7 @@ func getPublicTargetsHandler(w http.ResponseWriter, r *http.Request) {
 		SELECT label, plane_width, plane_height, plane_offset_y,
 		       COALESCE(image_key,''), COALESCE(video_key,''),
 		       COALESCE(target_type,'video'), COALESCE(url_link,''),
-		       COALESCE(file_name,''), COALESCE(preview_key,'')
+		       COALESCE(file_name,''), COALESCE(preview_key,''), COALESCE(animation_effect,'popIn')
 		FROM ar_targets WHERE is_public = true
 		ORDER BY id`)
 	if err != nil {
@@ -1505,16 +1551,17 @@ func getPublicTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type PublicTarget struct {
-		Label        string  `json:"label"`
-		PlaneWidth   float64 `json:"planeWidth"`
-		PlaneHeight  float64 `json:"planeHeight"`
-		PlaneOffsetY float64 `json:"planeOffsetY"`
-		ImageURL     string  `json:"imageUrl"`
-		VideoURL     string  `json:"videoUrl"`
-		TargetType   string  `json:"targetType"`
-		URLLink      string  `json:"urlLink"`
-		FileName     string  `json:"fileName"`
-		PreviewURL   string  `json:"previewUrl"`
+		Label           string  `json:"label"`
+		PlaneWidth      float64 `json:"planeWidth"`
+		PlaneHeight     float64 `json:"planeHeight"`
+		PlaneOffsetY    float64 `json:"planeOffsetY"`
+		ImageURL        string  `json:"imageUrl"`
+		VideoURL        string  `json:"videoUrl"`
+		TargetType      string  `json:"targetType"`
+		URLLink         string  `json:"urlLink"`
+		AnimationEffect string  `json:"animationEffect"`
+		FileName        string  `json:"fileName"`
+		PreviewURL      string  `json:"previewUrl"`
 	}
 
 	var targets []PublicTarget
@@ -1522,7 +1569,7 @@ func getPublicTargetsHandler(w http.ResponseWriter, r *http.Request) {
 		var t PublicTarget
 		var imageKey, videoKey, previewKey string
 		if err := rows.Scan(&t.Label, &t.PlaneWidth, &t.PlaneHeight, &t.PlaneOffsetY,
-			&imageKey, &videoKey, &t.TargetType, &t.URLLink, &t.FileName, &previewKey); err != nil {
+			&imageKey, &videoKey, &t.TargetType, &t.URLLink, &t.FileName, &previewKey, &t.AnimationEffect); err != nil {
 			continue
 		}
 		t.ImageURL = fileURL(imageKey)
@@ -1677,12 +1724,13 @@ func writeError(w http.ResponseWriter, status int, message string) {
 // ─── AI Poster Generation ────────────────────────────────────────────────────
 
 type PosterContent struct {
-	Title    string            `json:"title"`
-	Name     string            `json:"name"`
-	Message  string            `json:"message"`
-	Subtitle string            `json:"subtitle"`
-	Emojis   string            `json:"emojis"`
-	Colors   map[string]string `json:"colors"`
+	Title       string            `json:"title"`
+	Name        string            `json:"name"`
+	Message     string            `json:"message"`
+	Subtitle    string            `json:"subtitle"`
+	Emojis      string            `json:"emojis"`
+	Colors      map[string]string `json:"colors"`
+	ImageBase64 string            `json:"imageBase64,omitempty"`
 }
 
 // POST /api/poster/generate — calls Claude to create poster content
@@ -1820,13 +1868,36 @@ func savePosterHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Uploading the AI art is best-effort — a failed upload shouldn't lose the poster
+	// text/colors the user already saw generated; it just saves without an image.
+	imageKey := ""
+	if p.ImageBase64 != "" && s3Client != nil {
+		raw := p.ImageBase64
+		if idx := strings.Index(raw, ","); idx != -1 && strings.HasPrefix(raw, "data:") {
+			raw = raw[idx+1:]
+		}
+		if imgData, err := base64.StdEncoding.DecodeString(raw); err == nil {
+			key := fmt.Sprintf("posters/%d/poster-%d.png", userID, time.Now().UnixMilli())
+			bucket := os.Getenv("R2_BUCKET_NAME")
+			contentType := "image/png"
+			_, uploadErr := s3Client.PutObject(r.Context(), &s3.PutObjectInput{
+				Bucket: &bucket, Key: &key, Body: bytes.NewReader(imgData), ContentType: &contentType,
+			})
+			if uploadErr == nil {
+				imageKey = key
+			} else {
+				log.Printf("[poster] R2 upload error: %v", uploadErr)
+			}
+		}
+	}
+
 	colorsJSON, _ := json.Marshal(p.Colors)
 	var id int64
 	err = db.QueryRow(r.Context(), `
-		INSERT INTO poster_history (user_id, title, name, message, subtitle, emojis, colors)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO poster_history (user_id, title, name, message, subtitle, emojis, colors, image_key)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id`,
-		userID, p.Title, p.Name, p.Message, p.Subtitle, p.Emojis, colorsJSON).Scan(&id)
+		userID, p.Title, p.Name, p.Message, p.Subtitle, p.Emojis, colorsJSON, imageKey).Scan(&id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save poster")
 		return
@@ -1850,7 +1921,7 @@ func getPosterHistoryHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Query(r.Context(), `
-		SELECT id, title, name, message, subtitle, emojis, colors, created_at
+		SELECT id, title, name, message, subtitle, emojis, colors, image_key, created_at
 		FROM poster_history WHERE user_id = $1
 		ORDER BY created_at DESC LIMIT 50`, userID)
 	if err != nil {
@@ -1867,16 +1938,19 @@ func getPosterHistoryHandler(w http.ResponseWriter, r *http.Request) {
 		Subtitle  string            `json:"subtitle"`
 		Emojis    string            `json:"emojis"`
 		Colors    map[string]string `json:"colors"`
+		ImageURL  string            `json:"imageUrl,omitempty"`
 		CreatedAt time.Time         `json:"createdAt"`
 	}
 	var posters []PosterEntry
 	for rows.Next() {
 		var p PosterEntry
 		var colorsJSON []byte
-		if err := rows.Scan(&p.ID, &p.Title, &p.Name, &p.Message, &p.Subtitle, &p.Emojis, &colorsJSON, &p.CreatedAt); err != nil {
+		var imageKey string
+		if err := rows.Scan(&p.ID, &p.Title, &p.Name, &p.Message, &p.Subtitle, &p.Emojis, &colorsJSON, &imageKey, &p.CreatedAt); err != nil {
 			continue
 		}
 		_ = json.Unmarshal(colorsJSON, &p.Colors)
+		p.ImageURL = fileURL(imageKey)
 		posters = append(posters, p)
 	}
 	if posters == nil {
@@ -2313,7 +2387,7 @@ func main() {
 	mux.HandleFunc("/api/payment/create-order", createOrderHandler)
 	mux.HandleFunc("/api/payment/verify", verifyPaymentHandler)
 
-	handler := loggingMiddleware(recoveryMiddleware(corsMiddleware(allowedOrigin, mux)))
+	handler := loggingMiddleware(gzipMiddleware(recoveryMiddleware(corsMiddleware(allowedOrigin, mux))))
 
 	server := &http.Server{
 		Addr:         port,

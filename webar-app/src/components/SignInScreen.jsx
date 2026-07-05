@@ -1,5 +1,5 @@
 ﻿import { useState, useCallback } from "react";
-import { API_BASE } from "../config/api.js";
+import { API_BASE, parseApiResponse } from "../config/api.js";
 import { useLanguage } from "../context/LanguageContext.jsx";
 import { T } from "../config/translations.js";
 import { useTheme } from "../context/ThemeContext.jsx";
@@ -24,7 +24,7 @@ export default function SignInScreen({ onSuccess, onGoForgotPassword, successMes
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ identifier: mobile.trim(), password }),
       });
-      const data = await res.json();
+      const data = await parseApiResponse(res);
       if (!res.ok) { setError(data.error || "Sign in failed."); return; }
       localStorage.setItem("memoera_token", data.token);
       localStorage.setItem("memoera_user", JSON.stringify(data.user));

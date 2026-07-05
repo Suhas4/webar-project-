@@ -1,7 +1,8 @@
 ﻿import { useState, useRef, useEffect } from 'react';
 import { useLanguage } from '../context/LanguageContext.jsx';
 import { LANGUAGES, T } from '../config/translations.js';
-import { takeWarmStream } from '../hooks/cameraWarmup.js';
+import { takeWarmStream, getCameraPermissionState, markCameraConfirmed, hasConfirmedCameraThisSession } from '../hooks/cameraWarmup.js';
+import CameraPermissionPrimer from './CameraPermissionPrimer.jsx';
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 
@@ -11,9 +12,11 @@ export default function HelloScreen({ onCreateAccount, onExisting, onGuestScan, 
 
   const [sheetOpen, setSheetOpen]     = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
-  const videoRef    = useRef(null);
-  const streamRef   = useRef(null);
-  const touchStartY = useRef(0);
+  const [showPermissionPrimer, setShowPermissionPrimer] = useState(false);
+  const videoRef      = useRef(null);
+  const streamRef      = useRef(null);
+  const touchStartY   = useRef(0);
+  const pendingOpenRef = useRef(null);
 
   // Auto-dismiss the guest-scan error toast after a few seconds
   useEffect(() => {
@@ -28,6 +31,7 @@ export default function HelloScreen({ onCreateAccount, onExisting, onGuestScan, 
 
     function attachStream(s) {
       if (cancelled) { s.getTracks().forEach((t) => t.stop()); return; }
+      markCameraConfirmed();
       streamRef.current = s;
       if (videoRef.current) {
         videoRef.current.srcObject = s;
@@ -36,21 +40,38 @@ export default function HelloScreen({ onCreateAccount, onExisting, onGuestScan, 
       }
     }
 
+    function requestCameraNow() {
+      if (!navigator.mediaDevices?.getUserMedia) return;
+      navigator.mediaDevices
+        .getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280, max: 1920 }, height: { ideal: 720, max: 1080 } }, audio: false })
+        .then(attachStream)
+        .catch(() => {});
+    }
+
     // 1. Try the pre-warmed stream first (zero wait, instant)
     const warm = takeWarmStream();
     if (warm) { attachStream(warm); }
     else {
       // 2. Warm stream not ready — wait 200 ms so the AR scanner fully releases
       //    the hardware camera before we open a new stream
-      const t = setTimeout(() => {
+      const t = setTimeout(async () => {
         // Try warm stream one more time (App.jsx starts it when appView='hello')
         const warm2 = takeWarmStream();
         if (warm2) { attachStream(warm2); return; }
         if (!navigator.mediaDevices?.getUserMedia) return;
-        navigator.mediaDevices
-          .getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280, max: 1920 }, height: { ideal: 720, max: 1080 } }, audio: false })
-          .then(attachStream)
-          .catch(() => {});
+
+        // Permission already granted in a past visit — no need to explain again,
+        // just open the camera the way this screen always has.
+        const state = await getCameraPermissionState();
+        if (cancelled) return;
+        if (state === 'granted' || hasConfirmedCameraThisSession()) {
+          requestCameraNow();
+        } else {
+          // First time (or previously denied) — show the friendly primer first
+          // instead of surprising the visitor with a native prompt out of nowhere.
+          pendingOpenRef.current = requestCameraNow;
+          setShowPermissionPrimer(true);
+        }
       }, 200);
       return () => {
         cancelled = true;
@@ -66,6 +87,11 @@ export default function HelloScreen({ onCreateAccount, onExisting, onGuestScan, 
       streamRef.current = null;
     };
   }, []);
+
+  const handleAllowCamera = () => {
+    setShowPermissionPrimer(false);
+    pendingOpenRef.current?.();
+  };
 
   /* â”€â”€ Swipe gesture for account sheet â”€â”€ */
   const handleTouchStart = (e) => { touchStartY.current = e.touches[0].clientY; };
@@ -181,6 +207,14 @@ export default function HelloScreen({ onCreateAccount, onExisting, onGuestScan, 
         <div onClick={() => onDismissError?.()} style={st.errorToast}>
           <span style={{ marginRight: 8 }}>⚠️</span>{errorMsg}
         </div>
+      )}
+
+      {/* Friendly camera permission primer — shown before the native prompt */}
+      {showPermissionPrimer && (
+        <CameraPermissionPrimer
+          onAllow={handleAllowCamera}
+          onDismiss={() => setShowPermissionPrimer(false)}
+        />
       )}
 
       {/* Swipe-up indicator */}

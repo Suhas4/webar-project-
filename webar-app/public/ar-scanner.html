@@ -787,7 +787,7 @@
       } else if (t.targetType === 'document' && t.urlLink) {
         openDocument({ url: t.urlLink, category: docCategory(t.urlLink), previewUrl: t.previewUrl || '', fileName: t.fileName || '' });
       } else if (t.urlLink && /\.(glb|gltf|obj|fbx)/i.test(t.urlLink)) {
-        window.parent.postMessage({ type: 'ar-view-in-space', glbUrl: t.urlLink }, '*');
+        window.parent.postMessage({ type: 'ar-view-in-space', glbUrl: t.urlLink, animationEffect: t.animationEffect || 'popIn' }, '*');
       } else if (t.urlLink) {
         // Let the parent app open it (Chrome Custom Tabs on native Android
         // via the Capacitor Browser plugin) instead of window.open() here —
@@ -966,19 +966,19 @@
           glbPlane.setAttribute('opacity', '0');
           entity.appendChild(glbPlane);
 
-          (function(link) {
+          (function(link, animationEffect) {
             entity.addEventListener('targetFound', function() {
               urlBadge.textContent = '👆 Tap to view in 3D';
               urlBadge.classList.add('visible');
               if (Date.now() - lastCloseTime < 3000) return;
               if (needTargetLost) return;
-              window.parent.postMessage({ type: 'ar-view-in-space', glbUrl: link }, '*');
+              window.parent.postMessage({ type: 'ar-view-in-space', glbUrl: link, animationEffect: animationEffect }, '*');
             });
             entity.addEventListener('targetLost', function() {
               needTargetLost = false;
               urlBadge.classList.remove('visible');
             });
-          })(t.urlLink);
+          })(t.urlLink, t.animationEffect || 'popIn');
 
         } else if (t.urlLink) {
           (function(link) {

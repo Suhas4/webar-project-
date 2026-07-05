@@ -33,6 +33,12 @@ export default defineConfig({
     headers: {
       'ngrok-skip-browser-warning': 'true',
     },
+    watch: {
+      // android/ is Capacitor build output, rewritten wholesale by `npx cap sync`/
+      // `cap copy` — watching it serves no purpose and on Windows this collided
+      // with that copy mid-write (EBUSY on a locked file), crashing the dev server.
+      ignored: ['**/android/**'],
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:8181',

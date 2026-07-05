@@ -12,8 +12,24 @@ import { useTheme } from '../context/ThemeContext.jsx';
 const ASPECT_MAP = { '16:9': 0.5625, '4:3': 0.75, '1:1': 1.0, '9:16': 1.7778 };
 const MODEL_EXTENSIONS = ['.glb', '.gltf', '.obj', '.fbx'];
 
+// Entrance animations the uploaded 3D model can play in AR when it first appears
+// after a successful scan. 'popIn' is the default — a friendly, safe-feeling
+// overshoot scale that works for almost any model shape.
+const MODEL_ANIMATIONS = [
+  { id: 'popIn',   icon: '🎈', label: 'Bounce In',  desc: 'Scales up with a springy overshoot' },
+  { id: 'fadeIn',  icon: '✨', label: 'Fade In',     desc: 'Gently fades into view' },
+  { id: 'spinIn',  icon: '🌀', label: 'Spin In',     desc: 'Rotates a full turn while scaling up' },
+  { id: 'riseUp',  icon: '⬆️', label: 'Rise Up',     desc: 'Slides up from below into place' },
+  { id: 'zoomIn',  icon: '💫', label: 'Zoom In',     desc: 'Grows from a tiny point' },
+  { id: 'rotate',  icon: '🔄', label: 'Auto-Rotate', desc: 'Keeps slowly spinning in place' },
+  { id: 'float',   icon: '🌊', label: 'Float',       desc: 'Gentle continuous up-down bob' },
+];
+
 function emptyCard(absoluteNumber) {
-  return { label: `Target ${absoluteNumber}`, imageFile: null, imagePreviewUrl: null, glbFile: null, glbName: '' };
+  return {
+    label: `Target ${absoluteNumber}`, imageFile: null, imagePreviewUrl: null,
+    glbFile: null, glbName: '', animationEffect: 'popIn',
+  };
 }
 
 function isModelFile(file) {
@@ -28,6 +44,7 @@ export default function Model3DSetupScreen({ onStart, onSignOut, isPublic }) {
   const [compileProgress, setCompileProgress] = useState(0);
   const [compileError, setCompileError] = useState('');
   const [showValidation, setShowValidation] = useState(false);
+  const [celebrateIndex, setCelebrateIndex] = useState(null);
   const { lang } = useLanguage();
   const tr = { ...T.en, ...(T[lang] || {}) };
   const { colors } = useTheme();
@@ -67,6 +84,11 @@ export default function Model3DSetupScreen({ onStart, onSignOut, isPublic }) {
     if (!isModelFile(file)) { alert('Please upload a .glb, .gltf, .obj, or .fbx 3D model file.'); return; }
     if (file.size > 100 * 1024 * 1024) { alert('3D model must be under 100 MB.'); return; }
     setCards((prev) => prev.map((card, i) => i === index ? { ...card, glbFile: file, glbName: file.name } : card));
+    setCelebrateIndex(index);
+  }, []);
+
+  const handleSetAnimation = useCallback((index, effectId) => {
+    setCards((prev) => prev.map((card, i) => i === index ? { ...card, animationEffect: effectId } : card));
   }, []);
 
   const handleAddCard = useCallback(() => {
@@ -132,6 +154,7 @@ export default function Model3DSetupScreen({ onStart, onSignOut, isPublic }) {
         planeOffsetY: 0,
         targetType: 'glb',
         urlLink: '',
+        animationEffect: card.animationEffect || 'popIn',
       }));
 
       setCompileState('uploading'); setCompileProgress(0);
@@ -167,6 +190,7 @@ export default function Model3DSetupScreen({ onStart, onSignOut, isPublic }) {
         videoUrl: '',
         targetType: 'glb',
         urlLink: URL.createObjectURL(cards[i].glbFile),
+        animationEffect: meta.animationEffect,
       }));
       onStart({ targets: arTargets, mindFileUrl: localMindUrl });
 
@@ -180,6 +204,9 @@ export default function Model3DSetupScreen({ onStart, onSignOut, isPublic }) {
   return (
     <div style={{ ...styles.screen, background: colors.bg }}>
       {isCompiling && <UploadProgressOverlay compileState={compileState} progress={compileProgress} />}
+      {celebrateIndex !== null && (
+        <ModelUploadCelebration onDone={() => setCelebrateIndex(null)} />
+      )}
 
       <div style={styles.orb1} />
       <div style={styles.orb2} />
@@ -207,6 +234,7 @@ export default function Model3DSetupScreen({ onStart, onSignOut, isPublic }) {
             onImageFile={(f) => handleImageFile(index, f)}
             onGlbFile={(f) => handleGlbFile(index, f)}
             onRemove={() => handleRemoveCard(index)}
+            onSetAnimation={(effectId) => handleSetAnimation(index, effectId)}
           />
         ))}
         <button onClick={handleAddCard} disabled={isCompiling}
@@ -235,7 +263,7 @@ export default function Model3DSetupScreen({ onStart, onSignOut, isPublic }) {
   );
 }
 
-function ModelTargetCard({ index, card, showValidation, onImageFile, onGlbFile, onRemove }) {
+function ModelTargetCard({ index, card, showValidation, onImageFile, onGlbFile, onRemove, onSetAnimation }) {
   const imageMissing = showValidation && !card.imageFile;
   const glbMissing = showValidation && !card.glbFile;
   const [showPicker, setShowPicker] = useState(false);
@@ -337,6 +365,74 @@ function ModelTargetCard({ index, card, showValidation, onImageFile, onGlbFile, 
         )}
       </div>
       {glbMissing && <p style={card_s.fieldError}>3D model file is required</p>}
+
+      {card.glbName && (
+        <>
+          <p style={{ ...card_s.label, marginTop: 16 }}>
+            Entrance Animation<span style={card_s.hint}> &mdash; how it appears when scanned</span>
+          </p>
+          <div style={card_s.animGrid}>
+            {MODEL_ANIMATIONS.map((a) => (
+              <button
+                key={a.id}
+                onClick={() => onSetAnimation(a.id)}
+                title={a.desc}
+                style={{
+                  ...card_s.animChip,
+                  ...(card.animationEffect === a.id ? card_s.animChipActive : {}),
+                }}>
+                <span style={card_s.animIcon}>{a.icon}</span>
+                <span style={card_s.animLabel}>{a.label}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Celebratory full-screen popup shown the moment a .glb/.gltf/.obj/.fbx upload
+// succeeds — a quick, delightful confirmation before the user moves on to
+// picking how the model should animate in. Auto-dismisses itself.
+function ModelUploadCelebration({ onDone }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 1600);
+    return () => clearTimeout(t);
+  }, [onDone]);
+
+  const particles = Array.from({ length: 10 });
+
+  return (
+    <div style={celebrate_s.overlay} onClick={onDone}>
+      <style>{`
+        @keyframes mc-pop   { 0%{transform:scale(0.3);opacity:0} 60%{transform:scale(1.15);opacity:1} 100%{transform:scale(1);opacity:1} }
+        @keyframes mc-ring  { 0%{transform:scale(0.6);opacity:0.8} 100%{transform:scale(2.2);opacity:0} }
+        @keyframes mc-burst { 0%{transform:translate(0,0) scale(1);opacity:1} 100%{transform:translate(var(--tx),var(--ty)) scale(0);opacity:0} }
+      `}</style>
+      <div style={celebrate_s.center}>
+        <div style={celebrate_s.ringWrap}>
+          <div style={{ ...celebrate_s.ring, animation: 'mc-ring 1s ease-out' }} />
+          <div style={{ ...celebrate_s.ring, animation: 'mc-ring 1s ease-out 0.15s' }} />
+          <div style={{ ...celebrate_s.badge, animation: 'mc-pop 0.5s cubic-bezier(.34,1.56,.64,1) both' }}>
+            🧊
+          </div>
+          {particles.map((_, i) => {
+            const angle = (i / particles.length) * Math.PI * 2;
+            const dist = 70 + (i % 3) * 20;
+            return (
+              <span key={i} style={{
+                ...celebrate_s.particle,
+                '--tx': `${Math.cos(angle) * dist}px`,
+                '--ty': `${Math.sin(angle) * dist}px`,
+                animation: `mc-burst ${0.7 + (i % 3) * 0.15}s ease-out both`,
+              }}>{['✨', '🎉', '💫'][i % 3]}</span>
+            );
+          })}
+        </div>
+        <p style={celebrate_s.text}>3D Model Added!</p>
+        <p style={celebrate_s.sub}>Now pick how it animates in ↓</p>
+      </div>
     </div>
   );
 }
@@ -409,4 +505,39 @@ const card_s = {
   fileName: { fontSize: 13, color: 'rgba(255,255,255,0.7)', fontFamily: FONT },
   changeLink: { fontSize: 12, color: TEAL, fontFamily: FONT },
   fieldError: { fontSize: 12, color: '#ff8080', fontFamily: FONT, margin: '4px 0 0' },
+  animGrid: { display: 'flex', flexWrap: 'wrap', gap: 8 },
+  animChip: {
+    display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+    background: 'rgba(0,201,167,0.04)', border: `1px solid ${BORDER}`, borderRadius: 20,
+    padding: '7px 12px', color: 'rgba(255,255,255,0.6)', fontSize: 12, fontFamily: FONT,
+    transition: 'border-color 0.15s, background 0.15s, color 0.15s',
+  },
+  animChipActive: {
+    background: 'rgba(0,201,167,0.16)', border: `1px solid ${TEAL}`, color: TEAL, fontWeight: 600,
+  },
+  animIcon: { fontSize: 14 },
+  animLabel: {},
+};
+
+const celebrate_s = {
+  overlay: {
+    position: 'fixed', inset: 0, zIndex: 3000,
+    background: 'rgba(4,10,15,0.88)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+  },
+  center: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 },
+  ringWrap: { position: 'relative', width: 120, height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  ring: {
+    position: 'absolute', inset: 0, borderRadius: '50%',
+    border: `2px solid ${TEAL}`, pointerEvents: 'none',
+  },
+  badge: {
+    width: 84, height: 84, borderRadius: '50%',
+    background: `linear-gradient(135deg, ${TEAL}, #00E5CC)`,
+    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38,
+    boxShadow: `0 8px 30px rgba(0,201,167,0.5)`,
+  },
+  particle: { position: 'absolute', fontSize: 18, left: '50%', top: '50%' },
+  text: { fontSize: 19, fontWeight: 700, color: '#fff', fontFamily: FONT, margin: '18px 0 2px' },
+  sub: { fontSize: 13, color: 'rgba(255,255,255,0.5)', fontFamily: FONT, margin: 0 },
 };

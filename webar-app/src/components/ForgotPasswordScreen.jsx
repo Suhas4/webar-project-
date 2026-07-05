@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { API_BASE } from "../config/api.js";
+import { API_BASE, parseApiResponse } from "../config/api.js";
 
 export default function ForgotPasswordScreen({ onBack, onSuccess }) {
   const [step, setStep] = useState(1);
@@ -33,7 +33,7 @@ export default function ForgotPasswordScreen({ onBack, onSuccess }) {
     setLoading(true); setError("");
     try {
       const res = await fetch(API_BASE+"/api/auth/forgot-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mobile:mobile.trim()})});
-      const data = await res.json();
+      const data = await parseApiResponse(res);
       if (!res.ok) { setError(data.error||"Account not found."); return; }
       setSecurityQuestion(data.securityQuestion);
       setStep(2);
@@ -46,7 +46,7 @@ export default function ForgotPasswordScreen({ onBack, onSuccess }) {
     setLoading(true); setError("");
     try {
       const res = await fetch(API_BASE+"/api/auth/verify-security-question",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mobile:mobile.trim(),securityAnswer:securityAnswer.trim()})});
-      const data = await res.json();
+      const data = await parseApiResponse(res);
       if (!res.ok) { setError(data.error||"Incorrect answer."); return; }
       setStep(3); startCooldown();
     } catch { setError("Cannot connect to server."); } finally { setLoading(false); }
@@ -58,7 +58,7 @@ export default function ForgotPasswordScreen({ onBack, onSuccess }) {
     setLoading(true); setError("");
     try {
       const res = await fetch(API_BASE+"/api/auth/verify-otp",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mobile:mobile.trim(),otp:otp.trim()})});
-      const data = await res.json();
+      const data = await parseApiResponse(res);
       if (!res.ok) { setError(data.error||"Invalid OTP."); return; }
       setResetToken(data.resetToken);
       setStep(4);
@@ -72,7 +72,7 @@ export default function ForgotPasswordScreen({ onBack, onSuccess }) {
     setLoading(true); setError("");
     try {
       const res = await fetch(API_BASE+"/api/auth/reset-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({resetToken,newPassword})});
-      const data = await res.json();
+      const data = await parseApiResponse(res);
       if (!res.ok) { setError(data.error||"Failed to reset password."); return; }
       localStorage.setItem("memoera_token",data.token);
       localStorage.setItem("memoera_user",JSON.stringify(data.user));

@@ -1,5 +1,5 @@
 ﻿import { useState, useCallback, useRef, useEffect } from 'react';
-import { API_BASE } from '../config/api.js';
+import { API_BASE, parseApiResponse } from '../config/api.js';
 import { useLanguage } from '../context/LanguageContext.jsx';
 import { T } from '../config/translations.js';
 import { useTheme } from '../context/ThemeContext.jsx';
@@ -60,7 +60,7 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mobile: mobile.replace(/\s/g, '') }),
       });
-      const data = await res.json();
+      const data = await parseApiResponse(res);
       if (!res.ok) { setError(data.error || 'Failed to send OTP.'); return; }
       setMaskedMobile(data.maskedMobile || '');
       setStep(2); startCooldown();
@@ -84,7 +84,7 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
           referralCode: form.referralCode || '',
         }),
       });
-      const data = await res.json();
+      const data = await parseApiResponse(res);
       if (!res.ok) {
         setError(data.error || 'Verification failed.');
         if (data.error && data.error.toLowerCase().includes('otp')) {
