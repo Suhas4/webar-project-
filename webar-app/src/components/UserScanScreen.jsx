@@ -35,6 +35,15 @@ function hasImageUrls(arTargets) {
 const FONT = "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif";
 
 export default function UserScanScreen({ onReady, onBack }) {
+  // Decided once, synchronously, before any effect runs. When the session cache
+  // already has a compiled result (e.g. the user scanned once already and is
+  // tapping Scan again), there's no compile wait left to mask with a live
+  // preview — opening the camera here just to close it again moments later
+  // for the AR view's own camera session adds a pure, avoidable delay. Skip
+  // taking the preview stream entirely in that case; the still-warm stream
+  // (if any) is safely stopped by App.jsx's existing effect once appView
+  // leaves 'user-scan', so nothing leaks.
+  const instantPathRef = useRef(!!(_cachedUserMind && hasImageUrls(_cachedUserMind.arTargets)));
   const [phase, setPhase]         = useState('fetching');
   const [progress, setProgress]   = useState(0);
   const [errorMsg, setErrorMsg]   = useState('');
@@ -74,6 +83,7 @@ export default function UserScanScreen({ onReady, onBack }) {
 
   // Use pre-warmed stream or open camera
   useEffect(() => {
+    if (instantPathRef.current) return; // going straight to AR — see instantPathRef above
     let cancelled = false;
 
     function requestCameraNow() {
