@@ -13,7 +13,7 @@ const AD_COOLDOWN_MS = 30 * 60 * 1000; // 30-min cooldown between ads
 
 const COLLECTION_TOTAL = 93;
 
-export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium, onSignOut, onRefer, onCollection, onAdmin, user }) {
+export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium, onSignOut, onRefer, onCollection, onAdmin, onScan, user }) {
   const { lang, setLang } = useLanguage();
   const { theme, toggleTheme, colors } = useTheme();
   const tr = { ...T.en, ...(T[lang] || {}) };
@@ -475,6 +475,13 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
 
       </div>
 
+      {/* Tap to Scan — same button as the starting (Hello) screen */}
+      {onScan && (
+        <button onClick={onScan} style={styles.tapScanBtn}>
+          <ScanCameraIcon /> TAP TO SCAN
+        </button>
+      )}
+
       {/* â"€â"€ Right-side nav bar â"€â"€ */}
       <div className="memoera-nav-bar" style={{ ...styles.navBar, background: colors.navBg }}>
         <NavBtn icon={<PlusIcon    color={colors.navIcon} />} label={tr.upload}   onClick={onUpload} />
@@ -777,10 +784,10 @@ function HappyCustomersCard({ colors, isDark, user }) {
 
   useEffect(() => { loadReviews(); }, [loadReviews]);
 
-  useEffect(() => {
-    const id = setInterval(() => setActive((a) => (a + 1) % reviews.length), 3200);
-    return () => clearInterval(id);
-  }, [reviews.length]);
+  // Manual navigation only (no auto-advance) — arrows below let the user read
+  // a full review at their own pace instead of it flipping away mid-sentence.
+  const goPrev = useCallback(() => setActive((a) => (a - 1 + reviews.length) % reviews.length), [reviews.length]);
+  const goNext = useCallback(() => setActive((a) => (a + 1) % reviews.length), [reviews.length]);
 
   const r = reviews[active] || reviews[0];
 
@@ -846,31 +853,45 @@ function HappyCustomersCard({ colors, isDark, user }) {
       </div>
 
       {/* Review card */}
-      <div key={active} style={{ padding: '16px 18px 6px', animation: 'hc-fadeIn 0.35s ease' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-          <div style={{ width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
-            background: 'linear-gradient(135deg,#00C9A7,#00E5CC)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>
-            {r.avatar}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: colors.text, fontFamily: FONT }}>
-              {r.name}
+      <div style={{ display: 'flex', alignItems: 'stretch', gap: 4, padding: '0 4px' }}>
+        <button onClick={goPrev} aria-label="Previous review" style={{
+          flexShrink: 0, alignSelf: 'center', width: 28, height: 28, borderRadius: '50%',
+          border: 'none', cursor: 'pointer', background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+          color: colors.text, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>‹</button>
+
+        <div key={active} style={{ flex: 1, minWidth: 0, padding: '16px 6px 6px', animation: 'hc-fadeIn 0.35s ease' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <div style={{ width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+              background: 'linear-gradient(135deg,#00C9A7,#00E5CC)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>
+              {r.avatar}
             </div>
-            <div style={{ fontSize: 12, letterSpacing: 1 }}>
-              {Array.from({ length: 5 }).map((_, i) => (
-                <span key={i} style={{
-                  color: i < r.rating ? GOLD : (isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)'),
-                  animation: `hc-starPop 0.3s ease ${i * 0.06}s both`,
-                }}>★</span>
-              ))}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: colors.text, fontFamily: FONT }}>
+                {r.name}
+              </div>
+              <div style={{ fontSize: 12, letterSpacing: 1 }}>
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <span key={i} style={{
+                    color: i < r.rating ? GOLD : (isDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.15)'),
+                    animation: `hc-starPop 0.3s ease ${i * 0.06}s both`,
+                  }}>★</span>
+                ))}
+              </div>
             </div>
           </div>
+          <p style={{ margin: 0, fontSize: 12.5, color: colors.textMuted, fontFamily: FONT,
+            lineHeight: 1.6, fontStyle: 'italic', whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+            “{r.text}”
+          </p>
         </div>
-        <p style={{ margin: 0, fontSize: 12.5, color: colors.textMuted, fontFamily: FONT,
-          lineHeight: 1.6, fontStyle: 'italic' }}>
-          “{r.text}”
-        </p>
+
+        <button onClick={goNext} aria-label="Next review" style={{
+          flexShrink: 0, alignSelf: 'center', width: 28, height: 28, borderRadius: '50%',
+          border: 'none', cursor: 'pointer', background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
+          color: colors.text, fontSize: 15, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>›</button>
       </div>
 
       {/* Dot indicators */}
@@ -988,6 +1009,16 @@ function SunIcon({ size = 18, color = '#555' }) {
       <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
       <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
       <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+    </svg>
+  );
+}
+function ScanCameraIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+      style={{ display:'inline-block', verticalAlign:'middle', marginRight:8 }}>
+      <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
+      <circle cx="12" cy="13" r="4"/>
     </svg>
   );
 }
@@ -1127,6 +1158,17 @@ const styles = {
   bottomBar: { padding:'10px 16px 20px',flexShrink:0,
     borderTop:'1px solid',position:'relative',zIndex:1,
     backdropFilter:'blur(10px)',WebkitBackdropFilter:'blur(10px)' },
+  tapScanBtn: {
+    position:'fixed', left:'50%', bottom:96, transform:'translateX(-50%)', zIndex:8,
+    background: 'linear-gradient(135deg, #00C9A7 0%, #00E5CC 100%)',
+    border: 'none', borderRadius: 50,
+    color: '#040D0B', fontSize: 14, fontWeight: 800,
+    fontFamily: FONT, padding: '14px 34px', cursor: 'pointer',
+    letterSpacing: '0.08em',
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    boxShadow: '0 4px 20px rgba(0,201,167,0.4)',
+    animation: 'scanNavPulse 2s ease-in-out infinite, homeFloat 3s ease-in-out infinite',
+  },
   socialRow: { display:'flex',alignItems:'center',gap:10,flexWrap:'wrap' },
   socialIcon: { width:38,height:38,borderRadius:10,display:'flex',alignItems:'center',
     justifyContent:'center',overflow:'hidden',transition:'filter 0.2s,transform 0.2s' },

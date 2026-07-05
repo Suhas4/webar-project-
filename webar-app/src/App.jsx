@@ -74,15 +74,15 @@ export default function App() {
   // AR state
   const [targets,       setTargets]       = useState(null);
   const [mindFileUrl,   setMindFileUrl]   = useState(null);
-  const [isGuest,       setIsGuest]       = useState(false);
   const [guestScanLoading, setGuestScanLoading] = useState(false);
   const [pendingAR,     setPendingAR]     = useState(null);
   const [guestScanError, setGuestScanError] = useState('');
   const pendingARRef             = useRef(null);
   const activeBlobUrlsRef        = useRef([]);
-  const isGuestRef               = useRef(isGuest);
+  // Tracks which screen a scan was launched from ('home' or 'hello') so the
+  // AR viewer's back button returns there instead of always landing on 'hello'.
+  const scanOriginRef            = useRef('home');
   const prefetchedPublicTargetsRef = useRef(null);
-  useEffect(() => { isGuestRef.current = isGuest; }, [isGuest]);
 
   const [cloudTargets,       setCloudTargets]       = useState(null);
   const appViewRef = useRef(appView);
@@ -172,10 +172,10 @@ export default function App() {
   }, [appView]);
 
   // Prefetch public targets + pre-warm the guest scan's .mind file while on
-  // hello screen, so GuestScanScreen opens instantly with zero wait when the
-  // user taps "Tap to Scan" instead of downloading/compiling at that point.
+  // hello or home, so tapping "Tap to Scan" opens instantly with zero wait
+  // instead of downloading/compiling at that point.
   useEffect(() => {
-    if (appView !== 'hello') return;
+    if (appView !== 'hello' && appView !== 'home') return;
     loadPublicTargets().then((t) => {
       prefetchedPublicTargetsRef.current = t;
       startBackgroundPublicCompile(t);
@@ -312,6 +312,7 @@ export default function App() {
 
   // After upload: bust caches + play video + launch AR
   const handleStart = useCallback(({ targets: t, mindFileUrl: m }) => {
+    scanOriginRef.current = 'home'; // uploads only happen signed-in — always return to Home
     invalidateGuestCache();
     pendingARRef.current = { targets: t, mindFileUrl: m };
     setPendingAR({ targets: t, mindFileUrl: m });
@@ -322,15 +323,21 @@ export default function App() {
     localStorage.removeItem('memoera_token');
     localStorage.removeItem('memoera_user');
     setCurrentUser(null); setTargets(null); setMindFileUrl(null);
-    setCloudTargets(null); setIsGuest(false);
+    setCloudTargets(null);
     setAppView('hello');
   }, []);
 
-  // Guest scan (hello screen / public targets)
+  // Instant "Tap to Scan" (public targets) — used by both the pre-login Hello
+  // screen and the signed-in Home screen's identical scan button.
   const handleGuestReady = useCallback(({ targets: t, mindFileUrl: m }) => {
-    setIsGuest(true);
     launchAR({ targets: t, mindFileUrl: m });
   }, [launchAR]);
+
+  const triggerScan = useCallback((origin) => {
+    scanOriginRef.current = origin;
+    setGuestScanError('');
+    setGuestScanLoading(true);
+  }, []);
 
   const handleGoalPrivate      = useCallback(() => { setSelectedVisibility('private'); setAppView('upload-type'); }, []);
   const handleGoalPublic       = useCallback(() => { setSelectedVisibility('public');  setAppView('upload-type'); }, []);
@@ -351,25 +358,13 @@ export default function App() {
     mainScreen = <SplashScreen onDone={() => setAppView('hello')} />;
   } else if (appView === 'hello') {
     mainScreen = (
-      <>
-        <HelloScreen
-          onCreateAccount={() => setAppView('signup')}
-          onExisting={() => setAppView('signin')}
-          onGuestScan={() => { setGuestScanError(''); setGuestScanLoading(true); }}
-          errorMsg={guestScanError}
-          onDismissError={() => setGuestScanError('')}
-        />
-        {guestScanLoading && (
-          <GuestScanScreen
-            silent
-            onReady={(data) => { setGuestScanLoading(false); handleGuestReady(data); }}
-            onBack={() => setGuestScanLoading(false)}
-            onError={(msg) => setGuestScanError(msg || 'Could not start scanning. Please try again.')}
-            onCreateAccount={() => { setGuestScanLoading(false); setAppView('signup'); }}
-            prefetchedTargets={prefetchedPublicTargetsRef.current}
-          />
-        )}
-      </>
+      <HelloScreen
+        onCreateAccount={() => setAppView('signup')}
+        onExisting={() => setAppView('signin')}
+        onGuestScan={() => triggerScan('hello')}
+        errorMsg={guestScanError}
+        onDismissError={() => setGuestScanError('')}
+      />
     );
   } else if (appView === 'signin') {
     mainScreen = <SignInScreen onSuccess={handleSignIn} onGoForgotPassword={() => setAppView('forgot')} />;
@@ -444,6 +439,7 @@ export default function App() {
           onCollection={() => setAppView('collection')}
           onAdmin={() => setAppView('admin')}
           onSignOut={handleSignOut}
+          onScan={() => triggerScan('home')}
           user={currentUser}
         />
         <Suspense fallback={null}>
@@ -457,7 +453,7 @@ export default function App() {
       <ARScannerScreen
         targets={targets}
         mindFileUrl={mindFileUrl}
-        onBack={() => setAppView(isGuestRef.current ? 'hello' : 'home')}
+        onBack={() => setAppView(scanOriginRef.current)}
       />
     );
   }
@@ -467,6 +463,18 @@ export default function App() {
       <Suspense fallback={<div style={{ position:'fixed', inset:0, background:'#061A1F' }} />}>
         {mainScreen}
       </Suspense>
+
+      {/* Instant "Tap to Scan" — invisible until ready; works identically whether
+          triggered from the pre-login Hello screen or the signed-in Home screen */}
+      {guestScanLoading && (
+        <GuestScanScreen
+          silent
+          onReady={(data) => { setGuestScanLoading(false); handleGuestReady(data); }}
+          onBack={() => setGuestScanLoading(false)}
+          onError={(msg) => setGuestScanError(msg || 'Could not start scanning. Please try again.')}
+          prefetchedTargets={prefetchedPublicTargetsRef.current}
+        />
+      )}
 
       {/* Global pull-to-refresh indicator — hidden on AR scanner views */}
       {!isArView && (ptrDist > 8 || ptrRefreshing) && (
