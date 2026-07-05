@@ -25,8 +25,4 @@ async function setCached(storeKey, fingerprint, mindBuffer, arTargets) {
 
 export const getCachedPublicMind = (fp) => getCached('mind-public', fp);
 export const setCachedPublicMind = (fp, buf, targets) => setCached('mind-public', fp, buf, targets);
-
-export const getCachedUserMind   = (fp) => getCached('mind-user', fp);
-export const setCachedUserMind   = (fp, buf, targets) => setCached('mind-user', fp, buf, targets);
-export const clearCachedUserMind = () => del('mind-user').catch(() => {});
 export const clearCachedPublicMind = () => del('mind-public').catch(() => {});

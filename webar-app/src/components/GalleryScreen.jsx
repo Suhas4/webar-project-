@@ -3,9 +3,7 @@ import { loadTargets, clearTargets, saveTargets } from "../hooks/useArStorage.js
 import { loadAnimationById, deleteAnimation } from "../hooks/usePhotoAnimations.js";
 import { loadMindARCompiler } from "../hooks/loadMindARCompiler.js";
 import { rebuildPublicMindInBackground } from "../utils/rebuildPublicMind.js";
-import { invalidateUserCache } from "./UserScanScreen.jsx";
 import { invalidateGuestCache } from "./GuestScanScreen.jsx";
-import { invalidateBackgroundCompile } from "../hooks/backgroundCompile.js";
 import { invalidateBackgroundPublicCompile } from "../hooks/backgroundCompilePublic.js";
 import ARGlbScreen from "./ARGlbScreen.jsx";
 import UserAnimationViewer from "./UserAnimationViewer.jsx";
@@ -166,8 +164,8 @@ export default function GalleryScreen({ onBack, onCollection }) {
         if (group.isPublic) rebuildPublicMindInBackground();
       }
 
-      invalidateUserCache(); invalidateGuestCache();
-      invalidateBackgroundCompile(); invalidateBackgroundPublicCompile();
+      invalidateGuestCache();
+      invalidateBackgroundPublicCompile();
 
       const { targets: fresh } = await loadTargets();
       setTargets(fresh || []);

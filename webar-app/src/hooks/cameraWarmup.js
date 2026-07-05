@@ -1,4 +1,4 @@
-// Pre-warms the rear camera so UserScanScreen / GuestScanScreen open instantly.
+// Pre-warms the rear camera so GuestScanScreen opens instantly.
 let _warmStream = null;
 let _warming = false;
 let _stopped = false;
@@ -29,7 +29,7 @@ export async function getCameraPermissionState() {
 // Only silently pre-warms when permission was already granted in a past visit — never
 // fires a surprise native permission prompt in the background before the user has done
 // anything. First-time/undecided visitors get the friendly on-screen primer instead,
-// shown by HelloScreen/GuestScanScreen/UserScanScreen right before they call getUserMedia.
+// shown by HelloScreen/GuestScanScreen right before they call getUserMedia.
 export async function startCameraWarm() {
   if (_warmStream || _warming) return;
   if (!navigator.mediaDevices?.getUserMedia) return;

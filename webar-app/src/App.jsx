@@ -19,7 +19,6 @@ const BACK_MAP = {
   'url-setup':   'upload-type',
   'model-setup': 'upload-type',
   'anim-setup':  'upload-type',
-  'user-scan':   'home',
   'admin':       'home',
 };
 
@@ -28,7 +27,6 @@ import SplashScreen   from './components/SplashScreen.jsx';
 import HomeScreen     from './components/HomeScreen.jsx';
 import VideoOverlay      from './components/VideoOverlay.jsx';
 import GuestScanScreen, { invalidateGuestCache } from './components/GuestScanScreen.jsx';
-import UserScanScreen,  { invalidateUserCache  } from './components/UserScanScreen.jsx';
 import PublicArView       from './components/PublicArView.jsx';
 
 // Everything below is only needed after navigation — lazy-load so the
@@ -58,7 +56,6 @@ const AdminScreen              = lazy(() => import('./components/AdminScreen.jsx
 import { loadTargets, loadPublicTargets } from './hooks/useArStorage.js';
 import { initAdMob } from './services/AdMobService.js';
 import { startCameraWarm, stopWarmStream } from './hooks/cameraWarmup.js';
-import { startBackgroundCompile, invalidateBackgroundCompile } from './hooks/backgroundCompile.js';
 import { startBackgroundPublicCompile } from './hooks/backgroundCompilePublic.js';
 
 export default function App() {
@@ -99,7 +96,7 @@ export default function App() {
   const [ptrDist,       setPtrDist]       = useState(0);
   const [ptrRefreshing, setPtrRefreshing] = useState(false);
   const PTR_THRESHOLD = 80;
-  const PTR_EXCLUDED  = ['ar', 'user-scan', 'home']; // home has its own
+  const PTR_EXCLUDED  = ['ar', 'home']; // home has its own
 
   // Initialise AdMob SDK as early as possible
   useEffect(() => { initAdMob(); }, []);
@@ -165,14 +162,13 @@ export default function App() {
     }
   }, [appView]);
 
-  // Pre-warm camera as early as possible — even on splash so it's ready by hello/scan
+  // Pre-warm camera as early as possible — even on splash so it's ready by hello's guest scan
   useEffect(() => {
-    if (['splash', 'home', 'hello'].includes(appView)) {
+    if (['splash', 'hello'].includes(appView)) {
       startCameraWarm();
-      if (appView === 'home') startBackgroundCompile();
       return;
     }
-    if (appView !== 'user-scan') stopWarmStream();
+    stopWarmStream();
   }, [appView]);
 
   // Prefetch public targets + pre-warm the guest scan's .mind file while on
@@ -317,8 +313,6 @@ export default function App() {
   // After upload: bust caches + play video + launch AR
   const handleStart = useCallback(({ targets: t, mindFileUrl: m }) => {
     invalidateGuestCache();
-    invalidateUserCache();
-    invalidateBackgroundCompile();
     pendingARRef.current = { targets: t, mindFileUrl: m };
     setPendingAR({ targets: t, mindFileUrl: m });
     setVideoOverlay({ src: '/wings-to-memories.mp4', next: 'ar-ready' });
@@ -338,12 +332,6 @@ export default function App() {
     launchAR({ targets: t, mindFileUrl: m });
   }, [launchAR]);
 
-  // Logged-in user scan (home screen / own targets)
-  const handleUserScanReady = useCallback(({ targets: t, mindFileUrl: m }) => {
-    setIsGuest(false);
-    launchAR({ targets: t, mindFileUrl: m });
-  }, [launchAR]);
-
   const handleGoalPrivate      = useCallback(() => { setSelectedVisibility('private'); setAppView('upload-type'); }, []);
   const handleGoalPublic       = useCallback(() => { setSelectedVisibility('public');  setAppView('upload-type'); }, []);
   const handleUploadPhotoVideo     = useCallback(() => { setAppView('setup'); }, []);
@@ -354,7 +342,7 @@ export default function App() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
-  const isArView = appView === 'ar' || appView === 'user-scan';
+  const isArView = appView === 'ar';
 
   let mainScreen;
   if (videoOverlay) {
@@ -382,15 +370,6 @@ export default function App() {
           />
         )}
       </>
-    );
-  } else if (appView === 'user-scan') {
-    mainScreen = (
-      <UserScanScreen
-        onReady={handleUserScanReady}
-        onBack={() => setAppView('home')}
-        onGallery={() => setAppView('gallery')}
-        onUpload={() => setAppView('goal-select')}
-      />
     );
   } else if (appView === 'signin') {
     mainScreen = <SignInScreen onSuccess={handleSignIn} onGoForgotPassword={() => setAppView('forgot')} />;
@@ -457,7 +436,6 @@ export default function App() {
     mainScreen = !localStorage.getItem('memoera_token') ? null : (
       <>
         <HomeScreen
-          onScan={() => setAppView('user-scan')}
           onUpload={() => setAppView('goal-select')}
           onGallery={() => setVideoOverlay({ src: '/review-our-album.mp4', next: 'gallery' })}
           onSettings={() => setAppView('settings')}

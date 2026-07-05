@@ -13,7 +13,7 @@ const AD_COOLDOWN_MS = 30 * 60 * 1000; // 30-min cooldown between ads
 
 const COLLECTION_TOTAL = 93;
 
-export default function HomeScreen({ onScan, onUpload, onGallery, onSettings, onPremium, onSignOut, onRefer, onCollection, onAdmin, user }) {
+export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium, onSignOut, onRefer, onCollection, onAdmin, user }) {
   const { lang, setLang } = useLanguage();
   const { theme, toggleTheme, colors } = useTheme();
   const tr = { ...T.en, ...(T[lang] || {}) };
@@ -401,10 +401,10 @@ export default function HomeScreen({ onScan, onUpload, onGallery, onSettings, on
         )}
 
         {/* Greeting hero card */}
-        <GreetingHero user={user} onScan={onScan} colors={colors} isDark={isDark} />
+        <GreetingHero user={user} colors={colors} isDark={isDark} />
 
         {/* Demo video → then "How It Works" steps, in one combined card */}
-        <DemoAndHowItWorksCard colors={colors} isDark={isDark} onScan={onScan} />
+        <DemoAndHowItWorksCard colors={colors} isDark={isDark} />
 
         {/* Animated "Happy Customers" reviews */}
         <HappyCustomersCard colors={colors} isDark={isDark} user={user} />
@@ -477,7 +477,6 @@ export default function HomeScreen({ onScan, onUpload, onGallery, onSettings, on
 
       {/* â"€â"€ Right-side nav bar â"€â"€ */}
       <div className="memoera-nav-bar" style={{ ...styles.navBar, background: colors.navBg }}>
-        <ScanNavBtn onClick={onScan} label={tr.scan} />
         <NavBtn icon={<PlusIcon    color={colors.navIcon} />} label={tr.upload}   onClick={onUpload} />
         <NavBtn icon={<GalleryIcon color={colors.navIcon} />} label={tr.gallery}  onClick={onGallery} />
         <NavBtn icon={<GearIcon    color={colors.navIcon} />} label={tr.settings} onClick={onSettings} />
@@ -503,7 +502,7 @@ export default function HomeScreen({ onScan, onUpload, onGallery, onSettings, on
 }
 
 /* ── Greeting hero ── */
-function GreetingHero({ user, onScan, colors, isDark }) {
+function GreetingHero({ user, colors, isDark }) {
   const hour = new Date().getHours();
   const [greeting, emoji] = hour < 12
     ? ['Good Morning', '☀️']
@@ -556,7 +555,7 @@ const HOW_STEPS = [
 // a single card instead of separate ones.
 const VIDEO_PLAYLIST = ['/wings-to-memories.mp4', '/review-our-album.mp4'];
 
-function DemoAndHowItWorksCard({ colors, isDark, onScan }) {
+function DemoAndHowItWorksCard({ colors, isDark }) {
   const videoRef = useRef(null);
   const fallbackRef = useRef(null);
   const startedRef = useRef(false);
@@ -742,14 +741,6 @@ function DemoAndHowItWorksCard({ colors, isDark, onScan }) {
         </p>
       </div>
 
-      {/* CTA */}
-      {onScan && (
-        <button onClick={onScan} style={{ width: '100%', border: 'none', cursor: 'pointer',
-          background: 'linear-gradient(135deg,#00C9A7,#00E5CC)', color: '#040D0B',
-          fontSize: 13, fontWeight: 700, fontFamily: FONT, padding: '12px 0' }}>
-          Try It Now — Tap to Scan →
-        </button>
-      )}
     </div>
   );
 }
@@ -980,22 +971,6 @@ function NavBtn({ icon, label, onClick, active }) {
     </button>
   );
 }
-function ScanNavBtn({ onClick, label }) {
-  return (
-    <button onClick={onClick} title={label}
-      style={{ ...styles.navBtn, position:'relative',
-        background:'linear-gradient(135deg,#00C9A7,#0099CC)',
-        borderRadius:12, animation:'scanNavPulse 2s ease-in-out infinite' }}>
-      <style>{`
-        @keyframes scanNavPulse {
-          0%,100%{box-shadow:0 0 0 0 rgba(0,201,167,0.6)}
-          50%{box-shadow:0 0 0 7px rgba(0,201,167,0)}
-        }
-      `}</style>
-      <ScanIcon color="#fff" />
-    </button>
-  );
-}
 function SocialLink({ href, icon }) {
   return (
     <a href={href} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
@@ -1027,7 +1002,6 @@ function BellIcon({ size = 20, color = '#555' }) { return <svg width={size} heig
 function PowerIcon({ color = '#555' }) {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"/><line x1="12" y1="2" x2="12" y2="12"/></svg>;
 }
-function ScanIcon({ color='#555' }) { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 7 4 4 7 4"/><polyline points="17 4 20 4 20 7"/><polyline points="20 17 20 20 17 20"/><polyline points="7 20 4 20 4 17"/></svg>; }
 function PlusIcon({ color='#555' }) { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>; }
 function GalleryIcon({ color='#555' }) { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>; }
 function GearIcon({ color='#555' }) { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>; }

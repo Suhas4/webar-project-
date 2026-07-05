@@ -3,11 +3,9 @@ import { API_BASE, R2_PUBLIC_URL } from '../config/api.js';
 import { useTheme, THEME_LIST, themes as ALL_THEMES } from '../context/ThemeContext.jsx';
 import { useLanguage } from '../context/LanguageContext.jsx';
 import { T } from '../config/translations.js';
-import { invalidateUserCache } from './UserScanScreen.jsx';
 import { invalidateGuestCache } from './GuestScanScreen.jsx';
-import { invalidateBackgroundCompile } from '../hooks/backgroundCompile.js';
 import { invalidateBackgroundPublicCompile } from '../hooks/backgroundCompilePublic.js';
-import { clearCachedUserMind, clearCachedPublicMind } from '../hooks/useMindCache.js';
+import { clearCachedPublicMind } from '../hooks/useMindCache.js';
 import { uploadPresigned } from '../hooks/useArStorage.js';
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
@@ -181,16 +179,13 @@ export default function SettingsScreen({ onBack, onProfile }) {
             value={darkFlash} onChange={v => toggle('memoera_dark_flash', v, setDarkFlash)} colors={colors} />
           <Divider colors={colors} />
           <div style={{ padding: '10px 0 2px' }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 2 }}>AR Scan Engine</div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, marginBottom: 2 }}>Guest Scan Cache</div>
             <div style={{ fontSize: 11, color: colors.textMuted, marginBottom: 10 }}>
-              MindAR — the same reliable engine used for every scan.
+              Clears the cached scan data guests use when scanning your public content.
             </div>
             <button onClick={() => {
-                invalidateUserCache();
                 invalidateGuestCache();
-                invalidateBackgroundCompile();
                 invalidateBackgroundPublicCompile();
-                clearCachedUserMind();
                 clearCachedPublicMind();
                 setCacheCleared(true);
                 setTimeout(() => setCacheCleared(false), 2500);
@@ -201,8 +196,7 @@ export default function SettingsScreen({ onBack, onProfile }) {
               {cacheCleared ? '✓ Scan cache cleared' : '🗑 Clear Scan Cache'}
             </button>
             <div style={{ fontSize: 10, color: colors.textMuted, marginTop: 6 }}>
-              Forces a fresh scan-data rebuild next time you tap Scan. Useful if a scan mode
-              isn't finding any targets after switching engines.
+              Forces a fresh scan-data rebuild next time a guest scans your public content.
             </div>
           </div>
         </AccordionCard>
