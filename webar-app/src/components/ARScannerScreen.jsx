@@ -3,7 +3,6 @@ import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import ARGlbScreen from './ARGlbScreen.jsx';
 import AnimationArOverlay from './AnimationArOverlay.jsx';
-import DocumentPreviewOverlay from './DocumentPreviewOverlay.jsx';
 import { loadAnimationById } from '../hooks/usePhotoAnimations.js';
 
 // The AR scanner runs inside an iframe backed by a plain WebView with no
@@ -30,7 +29,6 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
   const [spaceGlbUrl, setSpaceGlbUrl] = useState(null);
   const [spaceGlbEffect, setSpaceGlbEffect] = useState('popIn');
   const [animOverlay, setAnimOverlay] = useState(null); // { title, frames }
-  const [docPreview, setDocPreview]   = useState(null); // { previewUrl, fileName, openUrl }
   const iframeRef      = useRef(null);
   const bufferRef      = useRef(null);
   const targetsRef     = useRef(targets);
@@ -90,9 +88,6 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
       if (e.data?.type === 'ar-open-link' && e.data?.url) {
         openExternalLink(e.data.url);
       }
-      if (e.data?.type === 'ar-document-preview' && e.data?.previewUrl) {
-        setDocPreview({ previewUrl: e.data.previewUrl, fileName: e.data.fileName || '', openUrl: e.data.openUrl || e.data.previewUrl });
-      }
       if (e.data?.type === 'ar-animation-triggered' && e.data?.animId) {
         const animId = e.data.animId;
         const label  = e.data.label || '';
@@ -149,14 +144,6 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
             lastCloseRef.current = Date.now();
             setIframeKey(k => k + 1);
           }}
-        />
-      )}
-      {docPreview && (
-        <DocumentPreviewOverlay
-          previewUrl={docPreview.previewUrl}
-          fileName={docPreview.fileName}
-          onOpen={() => { openExternalLink(docPreview.openUrl); setDocPreview(null); }}
-          onClose={() => setDocPreview(null)}
         />
       )}
     </div>

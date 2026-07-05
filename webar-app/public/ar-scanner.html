@@ -754,11 +754,12 @@
       }, 800);
     }
 
-    // ── Document type → confirmation strategy ──────────────────────────────
-    // PDF/AI render natively in Chrome; Office formats preview via Microsoft's
-    // online viewer; PSD/CDR have no browser renderer at all, so the server
-    // generates a real JPG thumbnail (previewUrl) the user can check before
-    // committing to a download; anything else falls back to filename-only.
+    // ── Document type → open strategy ───────────────────────────────────────
+    // All formats now open immediately on detection, same as video/animation
+    // targets — no tap-to-view step. Office formats still route through
+    // Microsoft's online viewer since the WebView can't render them directly;
+    // everything else (including PSD/CDR, which used to show a preview-first
+    // confirmation) opens straight via Chrome Custom Tabs / native handler.
     function docCategory(link) {
       var ext = (link.split('.').pop() || '').split('?')[0].toLowerCase();
       if (ext === 'pdf' || ext === 'ai') return 'preview';
@@ -769,8 +770,6 @@
     function openDocument(doc) {
       if (doc.category === 'office') {
         window.parent.postMessage({ type: 'ar-open-link', url: 'https://view.officeapps.live.com/op/view.aspx?src=' + encodeURIComponent(doc.url), label: doc.fileName || '' }, '*');
-      } else if (doc.category === 'thumb' && doc.previewUrl) {
-        window.parent.postMessage({ type: 'ar-document-preview', previewUrl: doc.previewUrl, fileName: doc.fileName || '', openUrl: doc.url }, '*');
       } else {
         window.parent.postMessage({ type: 'ar-open-link', url: doc.url, label: doc.fileName || '' }, '*');
       }
@@ -927,10 +926,9 @@
 
         } else if (t.targetType === 'document' && t.urlLink) {
           // Document target (PDF, PSD, CDR, AI, DOC...) — invisible plane keeps
-          // the AR entity trackable; tapping routes through docCategory()/
-          // openDocument() so the user gets real confirmation before opening:
-          // PDF/AI preview directly, Office formats preview via Microsoft's
-          // online viewer, PSD/CDR show a server-generated thumbnail first.
+          // the AR entity trackable. Opens immediately on detection, same as
+          // video/animation targets — no tap-to-view step. The badge stays as
+          // a "tap to reopen" affordance while the target is in view.
           var docPlane = document.createElement('a-plane');
           docPlane.setAttribute('width', '0.01');
           docPlane.setAttribute('height', '0.01');
@@ -942,17 +940,15 @@
             var name = fileName || 'Document';
             entity.addEventListener('targetFound', function() {
               pendingDoc = { url: link, category: cat, previewUrl: previewUrl, fileName: fileName };
-              if (cat === 'preview' || cat === 'office') {
-                urlBadge.textContent = '👆 Tap to view document';
-              } else if (cat === 'thumb' && previewUrl) {
-                urlBadge.textContent = '👆 ' + name + ' — tap to preview';
-              } else {
-                urlBadge.textContent = '👆 ' + name + ' — tap to download';
-              }
+              urlBadge.textContent = '👆 ' + name + ' — tap to reopen';
               urlBadge.classList.add('visible');
+              if (Date.now() - lastCloseTime < 3000) return;
+              if (needTargetLost) return;
+              openDocument(pendingDoc);
             });
             entity.addEventListener('targetLost', function() {
               pendingDoc = null;
+              needTargetLost = false;
               urlBadge.classList.remove('visible');
             });
           })(t.urlLink, t.fileName || '', t.previewUrl || '');
