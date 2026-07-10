@@ -271,7 +271,7 @@ export default function CollectionScreen({ onBack }) {
                   boxShadow:'0 2px 10px rgba(0,0,0,0.06)' }}>
                 <div style={{ position:'relative', aspectRatio:'4/3', overflow:'hidden',
                   background:'#F0F0F0' }}>
-                  <img src={anim.frames[0]} alt={anim.name}
+                  <img src={anim.frames[0]} alt={anim.name} loading="lazy" decoding="async"
                     style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
                   {/* Frame count badge */}
                   <div style={{ position:'absolute', bottom:6, right:8,
@@ -319,7 +319,7 @@ export default function CollectionScreen({ onBack }) {
                   border: s.id === 'sample3' ? `1.5px solid ${TEAL}55` : '1px solid rgba(0,0,0,0.08)',
                   background:'#fff', boxShadow:'0 2px 10px rgba(0,0,0,0.06)' }}>
                 <div style={{ position:'relative', width:'100%', aspectRatio:'4/3', overflow:'hidden', background:'#eee' }}>
-                  <img src={s.thumb} alt={s.title}
+                  <img src={s.thumb} alt={s.title} loading="lazy" decoding="async"
                     style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
                   {s.id === 'sample3' && (
                     <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center',

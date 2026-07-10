@@ -212,6 +212,7 @@ export default function GuestScanScreen({ onReady, onBack, onCreateAccount, onEr
 
         const buildArTargets = (targets) =>
           targets.map((t, i) => ({
+            id: t.id, // lets the AR scanner's Report button flag the right DB row
             targetIndex: i,
             label: t.label,
             planeWidth: t.planeWidth,

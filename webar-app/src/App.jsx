@@ -104,7 +104,7 @@ export default function App() {
   useEffect(() => { initAdMob(); }, []);
 
   // Preload video overlay assets — deferred until the browser is idle so this
-  // ~17MB of video doesn't compete with the initial app load/interactivity.
+  // video doesn't compete with the initial app load/interactivity.
   useEffect(() => {
     const preload = () => {
       const VIDEOS = ['/right-mark.mp4', '/x-mark.mp4', '/wings-to-memories.mp4', '/welcome-hand.mp4', '/review-our-album.mp4'];
@@ -173,16 +173,19 @@ export default function App() {
     stopWarmStream();
   }, [appView]);
 
-  // Prefetch public targets + pre-warm the guest scan's .mind file while on
-  // hello or home, so tapping "Tap to Scan" opens instantly with zero wait
-  // instead of downloading/compiling at that point.
+  // Prefetch public targets + pre-warm the guest scan's .mind file as early as
+  // possible — including during the splash screen, not just once hello/home is
+  // reached — so tapping "Tap to Scan" opens instantly with zero wait instead
+  // of downloading/compiling at that point. This also fires the first request
+  // to the backend (which sleeps after ~15 min idle on its free hosting tier
+  // and cold-starts in 30-60s+) as early as possible, since the splash screen
+  // alone was costing ~4s of wasted head-start against that cold start.
   useEffect(() => {
-    if (appView !== 'hello' && appView !== 'home') return;
     loadPublicTargets().then((t) => {
       prefetchedPublicTargetsRef.current = t;
       startBackgroundPublicCompile(t);
     }).catch(() => {});
-  }, [appView]);
+  }, []);
 
   // Bounce to 'hello' if the session token is gone while on 'home'
   useEffect(() => {

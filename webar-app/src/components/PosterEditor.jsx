@@ -161,9 +161,12 @@ function drawFrame(ctx, w, h, frame) {
   }
 }
 
+// The headline/name are now baked directly into the AI artwork itself (see
+// webar-backend/routes/poster.js), so the overlay starts blank instead of
+// duplicating them — the "Text" panel is only for adding extra custom text.
 const initialEdit = (poster) => ({
-  title: poster.title || '',
-  name: poster.name || '',
+  title: '',
+  name: '',
   textColor: '#ffffff',
   textPos: 'bottom',
   font: 'Outfit',
@@ -373,6 +376,43 @@ export default function PosterEditor({ poster, onClose, onSaved, onRegenerate, r
     }, 'image/png');
   };
 
+  // Native share (mobile: WhatsApp, Instagram, etc. all show up in the OS share
+  // sheet) when the browser supports sharing files; desktop browsers generally
+  // don't, so there we download the poster and open WhatsApp Web with a
+  // prefilled caption instead — the user just attaches the file they already have.
+  const handleShare = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.toBlob(async (blob) => {
+      if (!blob) return;
+      const fileName = `memoera-poster-${Date.now()}.png`;
+      const file = new File([blob], fileName, { type: 'image/png' });
+
+      if (navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({
+            files: [file],
+            title: edit.title.trim() || poster.title || 'My Poster',
+            text: 'Made with Memoera AI Poster Studio ✨',
+          });
+          return;
+        } catch (err) {
+          if (err?.name === 'AbortError') return; // user cancelled the share sheet
+        }
+      }
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      window.open(`https://wa.me/?text=${encodeURIComponent('Check out my poster made with Memoera! 🎉')}`, '_blank', 'noopener,noreferrer');
+    }, 'image/png');
+  };
+
   const handleSave = async () => {
     const token = localStorage.getItem('memoera_token');
     if (!token) { setSaveMsg('Please sign in to save to My Posters.'); return; }
@@ -519,8 +559,9 @@ export default function PosterEditor({ poster, onClose, onSaved, onRegenerate, r
 
         <div style={st.actionRow}>
           <button onClick={handleDownload} style={st.downloadBtn}>⬇ Download</button>
+          <button onClick={handleShare} style={st.shareBtn}>📤 Share</button>
           <button onClick={handleSave} disabled={saving} style={{ ...st.saveBtn, opacity: saving ? 0.6 : 1 }}>
-            {saving ? 'Saving…' : '💾 Save to My Posters'}
+            {saving ? 'Saving…' : '💾 Save'}
           </button>
         </div>
       </div>
@@ -575,13 +616,17 @@ const st = {
   },
   miniBtnActive: { border: `1px solid ${TEAL}`, color: TEAL, background: 'rgba(0,201,167,0.12)' },
   saveMsg: { fontSize: 12, color: TEAL, fontFamily: FONT, margin: 0, textAlign: 'center' },
-  actionRow: { display: 'flex', gap: 10 },
+  actionRow: { display: 'flex', gap: 8 },
   downloadBtn: {
     flex: 1, background: 'transparent', border: `1.5px solid ${TEAL}`, borderRadius: 50,
-    color: TEAL, fontSize: 13, fontWeight: 700, fontFamily: FONT, padding: '12px', cursor: 'pointer',
+    color: TEAL, fontSize: 12.5, fontWeight: 700, fontFamily: FONT, padding: '12px 6px', cursor: 'pointer',
+  },
+  shareBtn: {
+    flex: 1, background: 'transparent', border: `1.5px solid ${GOLD}`, borderRadius: 50,
+    color: GOLD, fontSize: 12.5, fontWeight: 700, fontFamily: FONT, padding: '12px 6px', cursor: 'pointer',
   },
   saveBtn: {
     flex: 1, background: `linear-gradient(135deg,${TEAL},#00E5CC)`, border: 'none', borderRadius: 50,
-    color: '#040D0B', fontSize: 13, fontWeight: 700, fontFamily: FONT, padding: '12px', cursor: 'pointer',
+    color: '#040D0B', fontSize: 12.5, fontWeight: 700, fontFamily: FONT, padding: '12px 6px', cursor: 'pointer',
   },
 };

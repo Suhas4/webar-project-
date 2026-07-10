@@ -66,6 +66,18 @@
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
+# Vite-built app bundle (JS/CSS under /assets/). Every filename here is
+# content-hashed (e.g. index-K84vYR6I.js) — a rebuild always produces a new
+# hash, so these files never change in place. Without this rule they fell
+# back to Netlify's default "max-age=0, must-revalidate", forcing every page
+# load (including repeat visits) to make a network round-trip just to
+# re-confirm the main app bundle hadn't changed — the single biggest
+# contributor to the site feeling slow.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
 # ar-scanner.html itself changes frequently during active development of the
 # AR camera flow — force browsers to ALWAYS fetch the latest copy instead of
 # silently reusing a stale cached version (which would make every fix here

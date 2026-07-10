@@ -268,7 +268,7 @@ export default function GalleryScreen({ onBack, onCollection }) {
                 {/* Photo thumbnail — tap to view fullscreen */}
                 {t._imagePreviewUrl ? (
                   <div style={s.thumbWrap} onClick={() => setPlayingImage(t._imagePreviewUrl)}>
-                    <img src={t._imagePreviewUrl} style={s.thumb} alt={t.label} />
+                    <img src={t._imagePreviewUrl} style={s.thumb} alt={t.label} loading="lazy" decoding="async" />
                     <div style={s.thumbOverlay}>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                         <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>

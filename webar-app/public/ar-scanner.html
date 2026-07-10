@@ -146,6 +146,17 @@
       backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
     }
 
+    /* Report button — flags this piece of public content for admin review */
+    #fs-report-btn {
+      position: absolute; top: 48px; right: 16px; z-index: 10000;
+      background: rgba(0,0,0,0.60); border: 1px solid rgba(255,107,107,0.55);
+      border-radius: 22px; color: #FF6B6B;
+      font-size: 13px; font-weight: 700; font-family: inherit;
+      padding: 8px 18px; cursor: pointer;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    #fs-report-btn:disabled { opacity: 0.6; cursor: default; }
+
     /* Video loader spinner */
     #fs-loader {
       position: absolute; inset: 0; z-index: 10002;
@@ -253,6 +264,7 @@
   <!-- Full-screen video overlay -->
   <div id="fs-overlay">
     <button id="fs-close-btn" onclick="closeFullscreen()">← Scan Again</button>
+    <button id="fs-report-btn" onclick="reportCurrentVideoTarget()">🚩 Report</button>
     <video id="fs-video" playsinline webkit-playsinline style="visibility:hidden"></video>
     <div id="fs-loader">
       <div id="fs-loader-ring"></div>
@@ -313,6 +325,7 @@
     var needTargetLost    = false; // true after reload: require camera to leave target first
     var videoLandscape    = false; // tracks the forced orientation state
     var foundTargets      = {};    // targetIndex -> target data, while currently detected
+    var currentVideoTarget = null; // { id, label } of the target whose video is currently in the fullscreen overlay — used by the Report button
     var diag               = {};   // diagnostic state surfaced on the error screen
 
     // ── Track the scene's 'renderstart' event from the EARLIEST possible
@@ -625,6 +638,9 @@
       }
       fsOpen = true;
 
+      var reportBtn = document.getElementById('fs-report-btn');
+      if (reportBtn) { reportBtn.disabled = false; reportBtn.textContent = '🚩 Report'; }
+
       backBtn.style.display  = 'none';
       torchBtn.style.display = 'none';
       urlBadge.classList.remove('visible');
@@ -754,6 +770,21 @@
       }, 800);
     }
 
+    // Flags the video currently in the fullscreen overlay for admin review.
+    // This iframe has no API config of its own (it's a static asset with no
+    // build-time env vars), so the actual network call is delegated to the
+    // parent React app, which already has the backend URL — same pattern as
+    // ar-open-link / ar-animation-triggered above.
+    function reportCurrentVideoTarget() {
+      if (!currentVideoTarget || !currentVideoTarget.id) return;
+      var btn = document.getElementById('fs-report-btn');
+      if (btn) { btn.disabled = true; btn.textContent = '🚩 Reported'; }
+      window.parent.postMessage(
+        { type: 'ar-report-target', targetId: currentVideoTarget.id, label: currentVideoTarget.label || '' },
+        '*'
+      );
+    }
+
     // ── Document type → open strategy ───────────────────────────────────────
     // All formats now open immediately on detection, same as video/animation
     // targets — no tap-to-view step. Office formats still route through
@@ -780,6 +811,7 @@
     //    since this is a deliberate user action. ───────────────────────────────
     function triggerFoundTarget(t) {
       if (t.targetType === 'video' && t.videoUrl) {
+        currentVideoTarget = { id: t.id, label: t.label || '' };
         openFullscreen(t.videoUrl, true);
       } else if (t.targetType === 'animation' && t.urlLink) {
         window.parent.postMessage({ type: 'ar-animation-triggered', animId: t.urlLink, label: t.label || '' }, '*');
@@ -887,8 +919,9 @@
           plane.setAttribute('opacity', '0');
           entity.appendChild(plane);
 
-          (function(url) {
+          (function(url, targetId, targetLabel) {
             entity.addEventListener('targetFound', function() {
+              currentVideoTarget = { id: targetId, label: targetLabel };
               openFullscreen(url);
               urlBadge.textContent = '👆 Tap to replay';
               urlBadge.classList.add('visible');
@@ -899,7 +932,7 @@
               needTargetLost = false;
               urlBadge.classList.remove('visible');
             });
-          })(t.videoUrl);
+          })(t.videoUrl, t.id, t.label || '');
 
         } else if (t.targetType === 'animation' && t.urlLink) {
           // Animation target — tell parent to open the frame overlay

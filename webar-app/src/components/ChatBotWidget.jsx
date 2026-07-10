@@ -11,7 +11,7 @@ const POSTER_API_BASE = import.meta.env.DEV ? '/festival-api' : (import.meta.env
 const FONT    = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const TEAL    = "#00C9A7";
 const GOLD    = "#C9A84C";
-const WHATSAPP = "https://wa.me/918660418820";
+const WHATSAPP = "https://wa.me/919187713120";
 
 // ── FAQ knowledge base ────────────────────────────────────────────────────────
 const FAQS = [
@@ -148,6 +148,26 @@ function PosterMode({ colors, isDark }) {
   const endRef = useRef(null);
   const logoInputRef = useRef(null);
 
+  // Batch mode: generate several (occasion, name) posters in one go, sharing the
+  // same orientation/style/logo settings, instead of one-at-a-time chat turns.
+  const [batchMode, setBatchMode]           = useState(false);
+  const [batchRows, setBatchRows]           = useState([{ occasion: '', name: '' }]);
+  const [batchResults, setBatchResults]     = useState([]);
+  const [batchGenerating, setBatchGenerating] = useState(false);
+
+  // Free-tier AI poster allowance — fetched once on open so the limit is visible
+  // up front, then kept in sync from each generate response's postersRemaining.
+  const [quotaInfo, setQuotaInfo] = useState(null); // { remaining, limit, unlimited } | null
+
+  useEffect(() => {
+    const token = localStorage.getItem('memoera_token');
+    if (!token) return;
+    fetch(`${API_BASE}/api/poster/quota`, { headers: { Authorization: 'Bearer ' + token } })
+      .then(r => r.ok ? r.json() : null)
+      .then(q => { if (q) setQuotaInfo(q); })
+      .catch(() => {});
+  }, []);
+
   const handleAttachLogo = (e) => {
     const file = e.target.files?.[0];
     e.target.value = ''; // allow re-selecting the same file later
@@ -160,6 +180,68 @@ function PosterMode({ colors, isDark }) {
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [items]);
+
+  const MAX_BATCH_ROWS = 6;
+  const addBatchRow    = () => setBatchRows(rows => rows.length >= MAX_BATCH_ROWS ? rows : [...rows, { occasion: '', name: '' }]);
+  const removeBatchRow = (i) => setBatchRows(rows => rows.filter((_, idx) => idx !== i));
+  const updateBatchRow = (i, patch) => setBatchRows(rows => rows.map((r, idx) => idx === i ? { ...r, ...patch } : r));
+
+  // Runs each row's generation one at a time (not in parallel) so a slow/failed
+  // row doesn't block the others and we don't slam the image API with a burst
+  // of simultaneous requests — each row's tile updates from spinner to result
+  // as soon as its own call resolves.
+  const generateBatch = async () => {
+    const rows = batchRows.filter(r => r.occasion.trim());
+    if (!rows.length || batchGenerating) return;
+
+    const token = localStorage.getItem('memoera_token');
+    if (!token) {
+      setBatchResults(rows.map((r, i) => ({
+        id: Date.now() + i, occasion: r.occasion.trim(), name: r.name.trim(),
+        poster: null, loading: false, error: 'Please sign in to create AI posters.',
+      })));
+      return;
+    }
+
+    setBatchGenerating(true);
+    setBatchResults(rows.map((r, i) => ({
+      id: Date.now() + i, occasion: r.occasion.trim(), name: r.name.trim(),
+      poster: null, loading: true, error: null,
+    })));
+
+    for (let i = 0; i < rows.length; i++) {
+      try {
+        const res = await fetch(`${POSTER_API_BASE}/api/poster/generate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify({
+            occasion: rows[i].occasion.trim(), name: rows[i].name.trim(), details: '', orientation,
+            logoBase64: attachedLogo || undefined,
+            styleIndex: styleIndex != null ? styleIndex - 1 : undefined,
+          }),
+        });
+        if (!res.ok) {
+          let msg = "Couldn't generate this poster.";
+          try { const errData = await res.json(); if (errData?.error) msg = errData.error; } catch {}
+          throw new Error(msg);
+        }
+        const poster = await res.json();
+        setBatchResults(prev => prev.map((r, idx) => idx === i ? { ...r, loading: false, poster } : r));
+        setQuotaInfo(q => ({ ...(q || {}), remaining: poster.postersRemaining, unlimited: poster.unlimited }));
+
+        // Same best-effort history save single-generate already does, so batch
+        // results show up in Settings → My Posters too.
+        fetch(`${API_BASE}/api/poster/save`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify(poster),
+        }).catch(() => {});
+      } catch (err) {
+        setBatchResults(prev => prev.map((r, idx) => idx === i ? { ...r, loading: false, error: err.message || 'Failed' } : r));
+      }
+    }
+    setBatchGenerating(false);
+  };
 
   const generate = async (occasionHint, opts = {}) => {
     const occasion = (occasionHint || input).trim();
@@ -186,10 +268,23 @@ function PosterMode({ colors, isDark }) {
       });
     }
 
+    const token = localStorage.getItem('memoera_token');
+    if (!token) {
+      setItems(prev => {
+        const next = [...prev];
+        for (let i = next.length - 1; i >= 0; i--) {
+          if (next[i].type === 'poster') { next[i] = { ...next[i], loading: false, error: 'Please sign in to create AI posters.' }; break; }
+        }
+        return next;
+      });
+      setGenerating(false);
+      return;
+    }
+
     try {
       const res = await fetch(`${POSTER_API_BASE}/api/poster/generate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({
           occasion, name: name.trim(), details: '', orientation,
           logoBase64: attachedLogo || undefined,
@@ -212,18 +307,17 @@ function PosterMode({ colors, isDark }) {
         }
         return next;
       });
+      setQuotaInfo(q => ({ ...(q || {}), remaining: poster.postersRemaining, unlimited: poster.unlimited }));
 
       // Persist the raw generation to the user's poster history (Settings → My Posters)
       // right away — best-effort, so nothing is lost even if they close the editor
-      // below without tapping its own Save button.
-      const token = localStorage.getItem('memoera_token');
-      if (token) {
-        fetch(`${API_BASE}/api/poster/save`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-          body: JSON.stringify(poster),
-        }).catch(() => {});
-      }
+      // below without tapping its own Save button. (token is guaranteed set here —
+      // generation itself now requires sign-in.)
+      fetch(`${API_BASE}/api/poster/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify(poster),
+      }).catch(() => {});
 
       // Show it full-screen immediately, with editing tools, instead of making the
       // user tap into the mini chat-bubble preview first.
@@ -276,11 +370,38 @@ function PosterMode({ colors, isDark }) {
             <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: FONT, lineHeight: 1.5 }}>
               Pick a celebration below or type your own. We'll craft a unique AI-generated poster for you!
             </div>
+            {quotaInfo && !quotaInfo.unlimited && (
+              <div style={{
+                display: 'inline-block', marginTop: 8, padding: '4px 12px', borderRadius: 20,
+                fontSize: 10.5, fontFamily: FONT, fontWeight: 600,
+                color: quotaInfo.remaining > 0 ? GOLD : '#FF6B6B',
+                background: quotaInfo.remaining > 0 ? 'rgba(201,168,76,0.12)' : 'rgba(255,107,107,0.12)',
+                border: `1px solid ${quotaInfo.remaining > 0 ? GOLD : '#FF6B6B'}55`,
+              }}>
+                {quotaInfo.remaining > 0
+                  ? `🎁 ${quotaInfo.remaining} free poster${quotaInfo.remaining === 1 ? '' : 's'} left`
+                  : '⚠ Free posters used — Upgrade to Premium for unlimited'}
+              </div>
+            )}
           </div>
         )}
 
-        {/* Name input */}
+        {/* Batch mode toggle */}
         {items.length === 0 && (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '0 4px' }}>
+            <button onClick={() => setBatchMode(v => !v)} style={{
+              background: batchMode ? `${GOLD}22` : 'transparent',
+              border: `1px solid ${batchMode ? GOLD : colors.border}`, borderRadius: 20,
+              color: batchMode ? GOLD : colors.textMuted,
+              fontSize: 11, fontWeight: 600, fontFamily: FONT, padding: '6px 14px', cursor: 'pointer',
+            }}>
+              {batchMode ? '✕ Exit Batch Mode' : '🗂 Batch Generate (multiple posters)'}
+            </button>
+          </div>
+        )}
+
+        {/* Name input (single-poster mode only — batch mode has its own per-row name field) */}
+        {items.length === 0 && !batchMode && (
           <div style={{ padding: '0 4px' }}>
             <input
               value={name}
@@ -329,8 +450,8 @@ function PosterMode({ colors, isDark }) {
           </div>
         )}
 
-        {/* Category chips */}
-        {items.length === 0 && (
+        {/* Category chips (single-poster mode only) */}
+        {items.length === 0 && !batchMode && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', padding: '2px 0 4px' }}>
             {POSTER_CHIPS.map(c => (
               <button key={c.label}
@@ -345,6 +466,98 @@ function PosterMode({ colors, isDark }) {
                 }}>
                 {c.label}
               </button>
+            ))}
+          </div>
+        )}
+
+        {/* Batch rows editor */}
+        {items.length === 0 && batchMode && (
+          <div style={{ padding: '2px 4px 4px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {batchRows.map((row, i) => (
+              <div key={i} style={{ display: 'flex', gap: 6 }}>
+                <input
+                  value={row.occasion}
+                  onChange={e => updateBatchRow(i, { occasion: e.target.value })}
+                  placeholder="Occasion e.g. Birthday"
+                  style={{
+                    flex: 1.4, boxSizing: 'border-box', border: `1px solid ${TEAL}44`, borderRadius: 10,
+                    background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+                    color: colors.text, fontSize: 11.5, fontFamily: FONT, padding: '8px 10px', outline: 'none',
+                  }}
+                />
+                <input
+                  value={row.name}
+                  onChange={e => updateBatchRow(i, { name: e.target.value })}
+                  placeholder="Name (optional)"
+                  style={{
+                    flex: 1, boxSizing: 'border-box', border: `1px solid ${TEAL}44`, borderRadius: 10,
+                    background: isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
+                    color: colors.text, fontSize: 11.5, fontFamily: FONT, padding: '8px 10px', outline: 'none',
+                  }}
+                />
+                {batchRows.length > 1 && (
+                  <button onClick={() => removeBatchRow(i)} title="Remove row" style={{
+                    flexShrink: 0, width: 30, background: 'transparent', border: `1px solid ${colors.border}`,
+                    borderRadius: 10, color: '#FF6B6B', fontSize: 13, cursor: 'pointer',
+                  }}>✕</button>
+                )}
+              </div>
+            ))}
+
+            <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+              <button onClick={addBatchRow} disabled={batchRows.length >= MAX_BATCH_ROWS} style={{
+                flex: 1, background: 'transparent', border: `1px solid ${colors.border}`, borderRadius: 20,
+                color: colors.textMuted, fontSize: 11, fontFamily: FONT, padding: '8px', cursor: 'pointer',
+                opacity: batchRows.length >= MAX_BATCH_ROWS ? 0.5 : 1,
+              }}>
+                + Add Occasion ({batchRows.length}/{MAX_BATCH_ROWS})
+              </button>
+              <button onClick={generateBatch} disabled={batchGenerating || !batchRows.some(r => r.occasion.trim())} style={{
+                flex: 1.3, background: batchGenerating ? 'rgba(0,201,167,0.3)' : `linear-gradient(135deg,${TEAL},#00E5CC)`,
+                border: 'none', borderRadius: 20, color: '#040D0B', fontSize: 11.5, fontWeight: 700,
+                fontFamily: FONT, padding: '8px', cursor: batchGenerating ? 'not-allowed' : 'pointer',
+              }}>
+                {batchGenerating ? '⏳ Generating…' : `🚀 Generate All (${batchRows.filter(r => r.occasion.trim()).length})`}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Batch results grid — stays visible even after toggling batch mode off */}
+        {batchResults.length > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, padding: '2px 4px 8px' }}>
+            {batchResults.map(r => (
+              <div key={r.id}
+                onClick={() => r.poster && setEditingPoster(r.poster)}
+                style={{
+                  position: 'relative', borderRadius: 12, overflow: 'hidden', aspectRatio: '3/4',
+                  background: isDark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)',
+                  border: `1px solid ${TEAL}33`, cursor: r.poster ? 'pointer' : 'default',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                {r.loading && (
+                  <div style={{
+                    width: 24, height: 24, borderRadius: '50%',
+                    border: `2.5px solid ${TEAL}33`, borderTopColor: TEAL,
+                    animation: 'posterSpin 0.9s linear infinite',
+                  }} />
+                )}
+                {r.error && (
+                  <div style={{ fontSize: 10, color: '#FF6B6B', fontFamily: FONT, padding: 8, textAlign: 'center' }}>
+                    ⚠ {r.error}
+                  </div>
+                )}
+                {r.poster?.imageBase64 && (
+                  <img src={r.poster.imageBase64} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                )}
+                <div style={{
+                  position: 'absolute', bottom: 0, left: 0, right: 0,
+                  background: 'rgba(0,0,0,0.55)', color: '#fff', fontSize: 9,
+                  fontFamily: FONT, padding: '3px 6px', textAlign: 'center',
+                }}>
+                  {r.occasion}{r.name ? ` · ${r.name}` : ''}
+                </div>
+              </div>
             ))}
           </div>
         )}

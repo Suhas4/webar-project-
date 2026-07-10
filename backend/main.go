@@ -200,6 +200,20 @@ func initDB(ctx context.Context) error {
 	_, _ = db.Exec(ctx, `ALTER TABLE poster_history ADD COLUMN IF NOT EXISTS image_key TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS animation_effect TEXT NOT NULL DEFAULT 'popIn'`)
 
+	// Content moderation: reversible admin takedown for Public targets (kept
+	// separate from delete so a wrongly-flagged target can be restored), plus
+	// a viewer-facing report queue for admin review.
+	_, _ = db.Exec(ctx, `ALTER TABLE ar_targets ADD COLUMN IF NOT EXISTS is_hidden BOOLEAN NOT NULL DEFAULT false`)
+	_, _ = db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS content_reports (
+			id          BIGSERIAL PRIMARY KEY,
+			target_id   BIGINT NOT NULL REFERENCES ar_targets(id) ON DELETE CASCADE,
+			reason      TEXT NOT NULL,
+			status      TEXT NOT NULL DEFAULT 'pending',
+			created_at  TIMESTAMPTZ DEFAULT NOW()
+		)`)
+	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_content_reports_status ON content_reports(status) WHERE status = 'pending'`)
+
 	// Real storage quota / plan / referral bonus tracking (server-authoritative —
 	// previously these were only simulated client-side in localStorage).
 	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS own_referral_code TEXT`)
@@ -207,6 +221,11 @@ func initDB(ctx context.Context) error {
 	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS referral_redeemed BOOLEAN NOT NULL DEFAULT false`)
 	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS ad_bonus_last_at TIMESTAMPTZ`)
 	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'free'`)
+	// Free-plan accounts get a capped number of AI poster generations before
+	// they must upgrade — tracked server-side here (not just in poster_history,
+	// which only records posters the user chose to save) so usage can't be
+	// under-counted by skipping the save step.
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS poster_generations_used INT NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_own_referral_code ON users(own_referral_code) WHERE own_referral_code IS NOT NULL`)
 
 	_, _ = db.Exec(ctx, `
@@ -297,6 +316,11 @@ var planLimitBytes = map[string]int64{
 	"pro":        5 * 1024 * 1024 * 1024,
 	"enterprise": -1,
 }
+
+// freePosterLimit is the lifetime number of AI poster generations a "free"
+// plan account gets before the AI Poster Studio requires a Premium upgrade.
+// Any non-"free" plan (basic/pro/enterprise) is unlimited.
+const freePosterLimit = 2
 
 // maxBonusStorageBytes is the combined cap across ad-watch + referral bonus,
 // matching MAX_BONUS_MB=100 in ReferFriendScreen.jsx / PremiumScreen.jsx.
@@ -1545,6 +1569,30 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Authoritative, server-side content check for anything about to become
+	// visible to every user — the frontend's own moderation check is only
+	// wired into one of five upload flows and is trivially bypassed by
+	// calling this endpoint directly, so it can't be relied on alone. Skipped
+	// for admin (official/global content) and for private uploads, which
+	// aren't the policy-relevant surface.
+	if req.IsPublic && !isAdminEmail(email) {
+		for _, t := range req.Targets {
+			if t.ImageKey == "" {
+				continue
+			}
+			flagged, modErr := moderateImageKey(r.Context(), t.ImageKey)
+			if modErr != nil {
+				log.Printf("[saveTargets] moderation check failed for %s: %v", t.ImageKey, modErr)
+				writeError(w, http.StatusServiceUnavailable, "Could not verify this content right now. Please try again in a moment.")
+				return
+			}
+			if flagged {
+				writeError(w, http.StatusUnprocessableEntity, "This content violates our content policy and can't be made public.")
+				return
+			}
+		}
+	}
+
 	// Append new targets instead of replacing — find the next available index
 	tx, err := db.Begin(r.Context())
 	if err != nil {
@@ -1695,11 +1743,11 @@ func getPublicTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Query(r.Context(), `
-		SELECT label, plane_width, plane_height, plane_offset_y,
+		SELECT id, label, plane_width, plane_height, plane_offset_y,
 		       COALESCE(image_key,''), COALESCE(video_key,''),
 		       COALESCE(target_type,'video'), COALESCE(url_link,''),
 		       COALESCE(file_name,''), COALESCE(preview_key,''), COALESCE(animation_effect,'popIn')
-		FROM ar_targets WHERE is_public = true
+		FROM ar_targets WHERE is_public = true AND is_hidden = false
 		ORDER BY id`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to fetch public targets")
@@ -1708,6 +1756,7 @@ func getPublicTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type PublicTarget struct {
+		ID              int64   `json:"id"`
 		Label           string  `json:"label"`
 		PlaneWidth      float64 `json:"planeWidth"`
 		PlaneHeight     float64 `json:"planeHeight"`
@@ -1725,7 +1774,7 @@ func getPublicTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var t PublicTarget
 		var imageKey, videoKey, previewKey string
-		if err := rows.Scan(&t.Label, &t.PlaneWidth, &t.PlaneHeight, &t.PlaneOffsetY,
+		if err := rows.Scan(&t.ID, &t.Label, &t.PlaneWidth, &t.PlaneHeight, &t.PlaneOffsetY,
 			&imageKey, &videoKey, &t.TargetType, &t.URLLink, &t.FileName, &previewKey, &t.AnimationEffect); err != nil {
 			continue
 		}
@@ -1740,6 +1789,161 @@ func getPublicTargetsHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"targets": targets})
+}
+
+// POST /api/targets/report — lets anyone (no auth required, so scanning as a
+// guest doesn't block reporting) flag a public target for admin review.
+// Doesn't hide anything itself — only an admin action does that — so this
+// can't be used to take content down via a report brigade.
+func reportTargetHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		TargetID int64  `json:"targetId"`
+		Reason   string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TargetID == 0 {
+		writeError(w, http.StatusBadRequest, "targetId is required")
+		return
+	}
+	reason := strings.TrimSpace(req.Reason)
+	if reason == "" {
+		reason = "Not specified"
+	}
+	if len(reason) > 500 {
+		reason = reason[:500]
+	}
+
+	var exists bool
+	_ = db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM ar_targets WHERE id=$1 AND is_public=true)`, req.TargetID).Scan(&exists)
+	if !exists {
+		writeError(w, http.StatusNotFound, "target not found")
+		return
+	}
+
+	_, err := db.Exec(r.Context(),
+		`INSERT INTO content_reports (target_id, reason) VALUES ($1, $2)`, req.TargetID, reason)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to submit report")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "reported"})
+}
+
+// GET /api/admin/reports — pending reports with enough target context for an
+// admin to judge them without leaving the panel.
+func adminListReportsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	_, mobile, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	var email string
+	_ = db.QueryRow(r.Context(), `SELECT COALESCE(email,'') FROM users WHERE mobile=$1`, mobile).Scan(&email)
+	if !isAdminEmail(email) {
+		writeError(w, http.StatusForbidden, "admin access required")
+		return
+	}
+
+	rows, err := db.Query(r.Context(), `
+		SELECT cr.id, cr.target_id, cr.reason, cr.created_at,
+		       t.label, COALESCE(t.image_key,''), t.is_hidden, COUNT(*) OVER (PARTITION BY cr.target_id)
+		FROM content_reports cr
+		JOIN ar_targets t ON t.id = cr.target_id
+		WHERE cr.status = 'pending'
+		ORDER BY cr.created_at DESC
+		LIMIT 200`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch reports")
+		return
+	}
+	defer rows.Close()
+
+	type ReportEntry struct {
+		ID          int64     `json:"id"`
+		TargetID    int64     `json:"targetId"`
+		Reason      string    `json:"reason"`
+		CreatedAt   time.Time `json:"createdAt"`
+		Label       string    `json:"label"`
+		ImageURL    string    `json:"imageUrl"`
+		IsHidden    bool      `json:"isHidden"`
+		ReportCount int       `json:"reportCount"`
+	}
+	var reports []ReportEntry
+	for rows.Next() {
+		var rep ReportEntry
+		var imageKey string
+		if err := rows.Scan(&rep.ID, &rep.TargetID, &rep.Reason, &rep.CreatedAt, &rep.Label, &imageKey, &rep.IsHidden, &rep.ReportCount); err != nil {
+			continue
+		}
+		rep.ImageURL = fileURL(imageKey)
+		reports = append(reports, rep)
+	}
+	if reports == nil {
+		reports = []ReportEntry{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"reports": reports})
+}
+
+// POST /api/admin/reports/resolve — action is "hide" (reversible takedown,
+// removes the target from /api/targets/public without deleting it), "unhide",
+// or "dismiss" (no content action, just clears the report queue for this
+// target). Always marks matching pending reports as reviewed.
+func adminResolveReportHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	_, mobile, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	var email string
+	_ = db.QueryRow(r.Context(), `SELECT COALESCE(email,'') FROM users WHERE mobile=$1`, mobile).Scan(&email)
+	if !isAdminEmail(email) {
+		writeError(w, http.StatusForbidden, "admin access required")
+		return
+	}
+
+	var req struct {
+		TargetID int64  `json:"targetId"`
+		Action   string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TargetID == 0 {
+		writeError(w, http.StatusBadRequest, "targetId is required")
+		return
+	}
+	switch req.Action {
+	case "hide":
+		_, err = db.Exec(r.Context(), `UPDATE ar_targets SET is_hidden = true WHERE id=$1`, req.TargetID)
+	case "unhide":
+		_, err = db.Exec(r.Context(), `UPDATE ar_targets SET is_hidden = false WHERE id=$1`, req.TargetID)
+	case "dismiss":
+		// no content change — just clear the queue below
+	default:
+		writeError(w, http.StatusBadRequest, "action must be hide, unhide, or dismiss")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update target")
+		return
+	}
+
+	_, _ = db.Exec(r.Context(), `UPDATE content_reports SET status='reviewed' WHERE target_id=$1 AND status='pending'`, req.TargetID)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // DELETE /api/targets
@@ -2233,6 +2437,62 @@ Return ONLY valid JSON with this exact structure (no markdown, no extra text):
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(poster)
+}
+
+// GET /api/poster/quota — how many free AI poster generations this account has
+// left. Called by the festival-greeting backend (webar-backend, Node) before it
+// spends money calling the image API, and by the frontend to show a remaining-
+// count badge. Admin account and any paid plan are always unlimited.
+func getPosterQuotaHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	var email, plan string
+	var used int
+	_ = db.QueryRow(r.Context(), `SELECT COALESCE(email,''), plan, poster_generations_used FROM users WHERE id=$1`, userID).
+		Scan(&email, &plan, &used)
+
+	unlimited := isAdminEmail(email) || (plan != "" && plan != "free")
+	remaining := freePosterLimit - used
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"plan":      plan,
+		"used":      used,
+		"limit":     freePosterLimit,
+		"remaining": remaining,
+		"unlimited": unlimited,
+	})
+}
+
+// POST /api/poster/quota/record — server-to-server call from the festival-
+// greeting backend right after a successful AI image generation. Counts
+// against the free-tier allowance independent of whether the user later saves
+// the poster, so the cap can't be under-counted by skipping /api/poster/save.
+func recordPosterUsageHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	_, _ = db.Exec(r.Context(), `UPDATE users SET poster_generations_used = poster_generations_used + 1 WHERE id=$1`, userID)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok"})
 }
 
 // POST /api/poster/save — persists a generated poster to the caller's history.
@@ -2785,6 +3045,11 @@ func main() {
 	mux.HandleFunc("/api/targets/public", getPublicTargetsHandler)
 	mux.HandleFunc("/api/targets", getTargetsHandler)
 	mux.HandleFunc("/api/targets/delete", deleteTargetsHandler)
+	mux.HandleFunc("/api/targets/report", reportTargetHandler)
+
+	// Content moderation (admin)
+	mux.HandleFunc("/api/admin/reports", adminListReportsHandler)
+	mux.HandleFunc("/api/admin/reports/resolve", adminResolveReportHandler)
 	mux.HandleFunc("/api/storage", getStorageHandler)
 	mux.HandleFunc("/api/referral/status", referralStatusHandler)
 	mux.HandleFunc("/api/referral/redeem", referralRedeemHandler)
@@ -2794,6 +3059,8 @@ func main() {
 	mux.HandleFunc("/api/poster/generate", generatePosterHandler)
 	mux.HandleFunc("/api/poster/save", savePosterHandler)
 	mux.HandleFunc("/api/poster/history", getPosterHistoryHandler)
+	mux.HandleFunc("/api/poster/quota", getPosterQuotaHandler)
+	mux.HandleFunc("/api/poster/quota/record", recordPosterUsageHandler)
 
 	// Reviews
 	mux.HandleFunc("/api/reviews", getReviewsHandler)

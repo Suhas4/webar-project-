@@ -34,7 +34,7 @@ export async function rebuildPublicMindInBackground() {
     await compiler.compileImageTargets(imageElements, () => {});
     const mindBuffer = await compiler.exportData();
 
-    const arTargets = targets.map((t, i) => ({ targetIndex:i, label:t.label, planeWidth:t.planeWidth, planeHeight:t.planeHeight, planeOffsetY:t.planeOffsetY, videoUrl:t.videoUrl, targetType:t.targetType||'video', urlLink:t.urlLink||'', imageUrl:t.imageUrl||'' }));
+    const arTargets = targets.map((t, i) => ({ id:t.id, targetIndex:i, label:t.label, planeWidth:t.planeWidth, planeHeight:t.planeHeight, planeOffsetY:t.planeOffsetY, videoUrl:t.videoUrl, targetType:t.targetType||'video', urlLink:t.urlLink||'', imageUrl:t.imageUrl||'' }));
 
     invalidateBackgroundPublicCompile();
     await Promise.all([

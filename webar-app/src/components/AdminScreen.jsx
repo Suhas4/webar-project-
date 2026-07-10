@@ -1,8 +1,13 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { API_BASE as MAIN_API_BASE } from '../config/api.js';
 
 const FONT     = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const TEAL     = "#00C9A7";
 const GOLD     = "#C9A84C";
+// Festival-blast (below) runs on the Node/Railway backend and uses the
+// x-admin-key header; the content-report tools further down run on the main
+// Go/Render backend (MAIN_API_BASE) and use the normal signed-in admin's
+// Bearer token instead — two different backends, two different auth schemes.
 const API_BASE = import.meta.env.VITE_BACKEND_URL || '';
 
 // Preset style suggestions for the AI image
@@ -23,6 +28,52 @@ export default function AdminScreen({ onBack, adminKey, onUploadGlobal }) {
   const [error,        setError]        = useState('');
   const [status,       setStatus]       = useState(null);
   const [statusLoading, setStatusLoading] = useState(false);
+
+  // Content reports — public AR targets flagged via the 🚩 button in the
+  // scanner, awaiting admin review (hide/unhide/dismiss).
+  const [reports,        setReports]        = useState([]);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [reportsError,   setReportsError]   = useState('');
+  const [resolvingId,    setResolvingId]    = useState(null);
+
+  const loadReports = useCallback(async () => {
+    const token = localStorage.getItem('memoera_token');
+    if (!token) { setReportsError('Not signed in.'); return; }
+    setReportsLoading(true); setReportsError('');
+    try {
+      const res = await fetch(`${MAIN_API_BASE}/api/admin/reports`, {
+        headers: { Authorization: 'Bearer ' + token },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load reports');
+      setReports(data.reports || []);
+    } catch (e) {
+      setReportsError(e.message);
+    } finally {
+      setReportsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadReports(); }, [loadReports]);
+
+  const resolveReport = async (targetId, action) => {
+    const token = localStorage.getItem('memoera_token');
+    if (!token) return;
+    setResolvingId(targetId);
+    try {
+      const res = await fetch(`${MAIN_API_BASE}/api/admin/reports/resolve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ targetId, action }),
+      });
+      if (!res.ok) throw new Error();
+      setReports(prev => prev.filter(r => r.targetId !== targetId));
+    } catch {
+      setReportsError('Failed to update — please try again.');
+    } finally {
+      setResolvingId(null);
+    }
+  };
 
   const sendBlast = async () => {
     if (!festivalName.trim()) { setError('Please enter a festival name.'); return; }
@@ -86,6 +137,67 @@ export default function AdminScreen({ onBack, adminKey, onUploadGlobal }) {
 
       {/* ── Form ── */}
       <div style={{ flex:1, overflowY:'auto', padding:'20px 20px 40px' }}>
+
+        {/* ── Content Reports ── flagged public AR targets awaiting review */}
+        <div style={{ marginBottom:28 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:'#fff' }}>
+              🚩 Content Reports {reports.length > 0 && `(${reports.length})`}
+            </div>
+            <button onClick={loadReports} disabled={reportsLoading}
+              style={{ background:'transparent', border:'1px solid rgba(255,255,255,0.15)', borderRadius:14,
+                color:'rgba(255,255,255,0.6)', fontSize:11, fontFamily:FONT, padding:'5px 12px', cursor:'pointer' }}>
+              {reportsLoading ? '⏳' : '↻'} Refresh
+            </button>
+          </div>
+
+          {reportsError && (
+            <div style={{ background:'rgba(220,50,50,0.10)', border:'1px solid rgba(220,50,50,0.3)',
+              borderRadius:10, padding:'10px 14px', marginBottom:10, color:'#FF6B6B', fontSize:12 }}>
+              ⚠ {reportsError}
+            </div>
+          )}
+
+          {!reportsLoading && reports.length === 0 && !reportsError && (
+            <div style={{ fontSize:12, color:'rgba(255,255,255,0.35)', padding:'8px 2px' }}>
+              No pending reports.
+            </div>
+          )}
+
+          {reports.map(rep => (
+            <div key={rep.id} style={{ display:'flex', gap:10, alignItems:'center',
+              background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.1)',
+              borderRadius:12, padding:10, marginBottom:8 }}>
+              {rep.imageUrl && (
+                <img src={rep.imageUrl} alt="" style={{ width:48, height:48, borderRadius:8, objectFit:'cover', flexShrink:0 }} />
+              )}
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:12.5, fontWeight:700, color:'#fff', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                  {rep.label || 'Untitled'} {rep.reportCount > 1 && `· ${rep.reportCount} reports`}
+                </div>
+                <div style={{ fontSize:11, color:'rgba(255,255,255,0.5)', marginTop:2 }}>
+                  "{rep.reason}"{rep.isHidden ? ' — currently hidden' : ''}
+                </div>
+              </div>
+              <div style={{ display:'flex', gap:6, flexShrink:0 }}>
+                <button onClick={() => resolveReport(rep.targetId, rep.isHidden ? 'unhide' : 'hide')}
+                  disabled={resolvingId === rep.targetId}
+                  style={{ background: rep.isHidden ? 'rgba(0,201,167,0.12)' : 'rgba(220,50,50,0.14)',
+                    border:`1px solid ${rep.isHidden ? TEAL : '#FF6B6B'}55`, borderRadius:14,
+                    color: rep.isHidden ? TEAL : '#FF6B6B', fontSize:11, fontWeight:700,
+                    fontFamily:FONT, padding:'6px 12px', cursor:'pointer' }}>
+                  {rep.isHidden ? 'Unhide' : 'Hide'}
+                </button>
+                <button onClick={() => resolveReport(rep.targetId, 'dismiss')}
+                  disabled={resolvingId === rep.targetId}
+                  style={{ background:'transparent', border:'1px solid rgba(255,255,255,0.15)', borderRadius:14,
+                    color:'rgba(255,255,255,0.6)', fontSize:11, fontFamily:FONT, padding:'6px 12px', cursor:'pointer' }}>
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
 
         {/* Upload Global Content — creates public AR content visible to every
             user's scanner (reuses the same is_public mechanism regular users

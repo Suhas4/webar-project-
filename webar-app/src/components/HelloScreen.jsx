@@ -285,7 +285,14 @@ export default function HelloScreen({ onCreateAccount, onExisting, onGuestScan, 
             {s.existingAccount}
           </button>
         </div>
-        <p style={st.sheetNote}>By continuing you agree to our Terms &amp; Privacy Policy</p>
+        <p style={st.sheetNote}>
+          By continuing you agree to our{' '}
+          <a href="/terms-of-service.html" target="_blank" rel="noreferrer" style={st.sheetNoteLink}
+            onClick={(e) => e.stopPropagation()}>Terms</a>{' '}
+          &amp;{' '}
+          <a href="/privacy-policy.html" target="_blank" rel="noreferrer" style={st.sheetNoteLink}
+            onClick={(e) => e.stopPropagation()}>Privacy Policy</a>
+        </p>
       </div>
     </div>
   );
@@ -439,5 +446,8 @@ const st = {
   sheetNote: {
     fontSize: 10, fontFamily: FONT, textAlign: 'center',
     color: 'rgba(255,255,255,0.3)', marginTop: 16, letterSpacing: '0.03em',
+  },
+  sheetNoteLink: {
+    color: 'rgba(255,255,255,0.55)', textDecoration: 'underline',
   },
 };

@@ -357,6 +357,9 @@ export default function SettingsScreen({ onBack, onProfile }) {
           <Divider colors={colors} />
           <div style={{ padding: '10px 6px 6px', textAlign: 'center' }}>
             <span style={{ fontSize: 11, color: colors.textMuted, fontFamily: FONT }}>© 2025 Memoera (OPC) Private Limited · All rights reserved</span>
+            <div style={{ fontSize: 10, color: colors.textMuted, fontFamily: FONT, fontStyle: 'italic', marginTop: 4 }}>
+              This app is built by the Memoera Team, with the help of Claude AI.
+            </div>
           </div>
         </AccordionCard>
 

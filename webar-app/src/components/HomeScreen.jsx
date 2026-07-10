@@ -18,7 +18,7 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
   const { lang, setLang } = useLanguage();
   const { theme, toggleTheme, colors } = useTheme();
   const tr = { ...T.en, ...(T[lang] || {}) };
-  const whatsappUrl = "https://wa.me/918660418820";
+  const whatsappUrl = "https://wa.me/919187713120";
 
   const [infoSlide,    setInfoSlide]    = useState(0);   // 0=About Us  1=Company Details
   const [infoExpanded, setInfoExpanded] = useState(false);
@@ -437,6 +437,9 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
                 Enhance your business with Smart Brochures. We prevent 1st Copy or Duplicate Products &amp; act as
                 Mini Theft Protection.
               </p>
+              <p style={{ ...styles.cardText, color: colors.textMuted, marginTop: 6, fontStyle: 'italic' }}>
+                This app is built by the Memoera Team, with the help of Claude AI.
+              </p>
             </div>
           )}
         </div>
@@ -456,10 +459,11 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
             <div style={{ borderTop: '1px solid ' + colors.border, padding: '8px 12px 12px' }}>
               {[
                 { label: 'Email',        value: 'memoerabangalore@gmail.com' },
-                { label: 'Mobile',       value: '+91 8660418820' },
+                { label: 'Mobile',       value: '+91 9187713120' },
                 { label: 'MD & Founder', value: 'Lohith B.' },
                 { label: 'Website',      value: 'www.memoera.in', link: 'https://www.memoera.in' },
                 { label: 'GSTIN',        value: '29AAUCM9420H1ZU' },
+                { label: 'Terms of Service', value: 'View Terms', link: '/terms-of-service.html' },
                 { label: 'Privacy Policy', value: 'View Policy', link: '/privacy-policy.html' },
               ].map(({ label, value, link }) => (
                 <div key={label} style={styles.detailRow}>

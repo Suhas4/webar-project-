@@ -4,6 +4,7 @@ import { Browser } from '@capacitor/browser';
 import ARGlbScreen from './ARGlbScreen.jsx';
 import AnimationArOverlay from './AnimationArOverlay.jsx';
 import { loadAnimationById } from '../hooks/usePhotoAnimations.js';
+import { API_BASE } from '../config/api.js';
 
 // The AR scanner runs inside an iframe backed by a plain WebView with no
 // PDF renderer, so a raw window.open() to a PDF just downloads it instead
@@ -29,6 +30,7 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
   const [spaceGlbUrl, setSpaceGlbUrl] = useState(null);
   const [spaceGlbEffect, setSpaceGlbEffect] = useState('popIn');
   const [animOverlay, setAnimOverlay] = useState(null); // { title, frames }
+  const [reportToast, setReportToast] = useState(null); // brief confirmation text after reporting content
   const iframeRef      = useRef(null);
   const bufferRef      = useRef(null);
   const targetsRef     = useRef(targets);
@@ -98,6 +100,16 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
       if (e.data?.type === 'ar-animation-lost') {
         // keep overlay visible so user can keep scrubbing
       }
+      if (e.data?.type === 'ar-report-target' && e.data?.targetId) {
+        fetch(`${API_BASE}/api/targets/report`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ targetId: e.data.targetId, reason: 'Reported from AR scanner' }),
+        })
+          .then(res => setReportToast(res.ok ? 'Thanks — content reported for review.' : "Couldn't submit report. Please try again."))
+          .catch(() => setReportToast("Couldn't submit report. Please try again."));
+        setTimeout(() => setReportToast(null), 3500);
+      }
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
@@ -145,6 +157,16 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
             setIframeKey(k => k + 1);
           }}
         />
+      )}
+      {reportToast && (
+        <div style={{
+          position: 'absolute', left: '50%', bottom: 90, transform: 'translateX(-50%)',
+          zIndex: 10050, background: 'rgba(0,0,0,0.85)', color: '#fff',
+          fontFamily: FONT, fontSize: 13, padding: '10px 18px', borderRadius: 20,
+          border: `1px solid ${TEAL}55`, whiteSpace: 'nowrap',
+        }}>
+          {reportToast}
+        </div>
       )}
     </div>
   );
