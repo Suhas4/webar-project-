@@ -13,6 +13,11 @@ const TEAL    = "#00C9A7";
 const GOLD    = "#C9A84C";
 const WHATSAPP = "https://wa.me/919187713120";
 
+// AI poster generation is hidden from users for now (shows a "Coming Soon" placeholder
+// instead) while the feature is finished. Flip back to true to re-enable it — the
+// PosterMode implementation below is untouched.
+const POSTER_FEATURE_ENABLED = false;
+
 // ── FAQ knowledge base ────────────────────────────────────────────────────────
 const FAQS = [
   {
@@ -880,7 +885,24 @@ export default function ChatBotWidget() {
           )}
 
           {/* ── Poster tab ── */}
-          {tab === 'poster' && <PosterMode colors={colors} isDark={isDark} />}
+          {tab === 'poster' && (
+            POSTER_FEATURE_ENABLED
+              ? <PosterMode colors={colors} isDark={isDark} />
+              : (
+                <div style={{
+                  flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                  justifyContent: 'center', textAlign: 'center', padding: '40px 24px', gap: 10,
+                }}>
+                  <div style={{ fontSize: 40 }}>🎨</div>
+                  <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 16, color: colors.text }}>
+                    Coming Soon
+                  </div>
+                  <div style={{ fontFamily: FONT, fontSize: 13, color: colors.textMuted, maxWidth: 260 }}>
+                    AI poster creation is on its way. Check back soon!
+                  </div>
+                </div>
+              )
+          )}
         </div>
       )}
     </>
