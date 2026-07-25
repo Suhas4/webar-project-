@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { API_BASE, parseApiResponse } from "../config/api.js";
 import { useTheme } from "../context/ThemeContext.jsx";
+import OtpKeypad from "./OtpKeypad.jsx";
 
 export default function ForgotPasswordScreen({ onBack, onSuccess }) {
   const { colors } = useTheme();
@@ -128,7 +129,7 @@ export default function ForgotPasswordScreen({ onBack, onSuccess }) {
           {step===3 && (
             <form onSubmit={handleVerifyOTP} style={S.form}>
               <p style={{ ...S.hint, color: colors.textMuted }}>OTP sent to your mobile. Valid 10 minutes.</p>
-              <input style={{...S.input,letterSpacing:"0.3em",fontSize:22,textAlign:"center", color: colors.text, background: colors.inputBg}} type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={otp} onChange={e=>setOtp(e.target.value.replace(/\D/g,"").slice(0,6))} />
+              <OtpKeypad value={otp} onChange={setOtp} />
               <button type="submit" disabled={loading} style={{...S.btn,...(loading?S.btnDisabled:{})}}>Verify OTP</button>
               <button type="button" disabled={resendCooldown>0} onClick={resendOTP} style={{ ...S.resendBtn, color: colors.textMuted }}>{resendCooldown>0?"Resend in "+resendCooldown+"s":"Resend OTP"}</button>
             </form>

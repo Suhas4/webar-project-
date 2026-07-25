@@ -3,6 +3,7 @@ import { API_BASE, parseApiResponse } from '../config/api.js';
 import { useLanguage } from '../context/LanguageContext.jsx';
 import { T } from '../config/translations.js';
 import { useTheme } from '../context/ThemeContext.jsx';
+import OtpKeypad from './OtpKeypad.jsx';
 
 const SECURITY_QUESTIONS = [
   "What was the name of your first pet?",
@@ -21,11 +22,18 @@ function validateStep1(form) {
   } else if (!/^\d{10}$/.test(form.mobile.replace(/\s/g, ''))) {
     errors.mobile = 'Enter a valid 10-digit mobile number.';
   }
+  if (!form.dateOfBirth) errors.dateOfBirth = 'Date of birth is required.';
   if (!form.password) {
     errors.password = 'Password is required.';
   } else if (form.password.length < 6) {
     errors.password = 'Password must be at least 6 characters.';
   }
+  if (!form.confirmPassword) {
+    errors.confirmPassword = 'Please confirm your password.';
+  } else if (form.confirmPassword !== form.password) {
+    errors.confirmPassword = 'Passwords do not match.';
+  }
+  if (!form.securityAnswer.trim()) errors.securityAnswer = 'Security answer is required.';
   return errors;
 }
 
@@ -35,8 +43,10 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
   const { colors } = useTheme();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({
-    firstName: '', lastName: '', mobile: '',
-    password: '',
+    firstName: '', lastName: '', mobile: '', dateOfBirth: '',
+    password: '', confirmPassword: '',
+    securityQuestion: SECURITY_QUESTIONS[0], securityAnswer: '',
+    referralCode: '',
   });
   const [otp, setOtp] = useState('');
   const [maskedMobile, setMaskedMobile] = useState('');
@@ -101,7 +111,10 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
           firstName: form.firstName, lastName: form.lastName,
           mobile: form.mobile.replace(/\s/g, ''),
           password: form.password, otp: otp.trim(),
-          securityQuestion: SECURITY_QUESTIONS[0],
+          dateOfBirth: form.dateOfBirth,
+          securityQuestion: form.securityQuestion,
+          securityAnswer: form.securityAnswer,
+          referralCode: form.referralCode.trim(),
         }),
       });
       const data = await parseApiResponse(res);
@@ -141,6 +154,9 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
                 <Field label={tr.mobileNumber} required error={showValidation ? fieldErrors.mobile : null} colors={colors}>
                   <input required style={{ ...S.input, color: colors.text, background: colors.surface, borderBottomColor: showValidation && fieldErrors.mobile ? '#FF6B6B' : undefined }} type="tel" placeholder="10-digit mobile number" value={form.mobile} onChange={set('mobile')} maxLength={10} />
                 </Field>
+                <Field label="Date of Birth" required error={showValidation ? fieldErrors.dateOfBirth : null} colors={colors}>
+                  <input required style={{ ...S.input, color: colors.text, background: colors.surface, borderBottomColor: showValidation && fieldErrors.dateOfBirth ? '#FF6B6B' : undefined }} type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} />
+                </Field>
                 <Field label={tr.createPassword} required error={showValidation ? fieldErrors.password : null} colors={colors}>
                   <div style={{ position:'relative' }}>
                     <input required style={{ ...S.input, paddingRight:44, color: colors.text, background: colors.surface, borderBottomColor: showValidation && fieldErrors.password ? '#FF6B6B' : undefined }}
@@ -151,9 +167,25 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
                     </button>
                   </div>
                 </Field>
-                <p style={{ ...S.hint, color: colors.textMuted, margin: '-4px 0 0' }}>
-                  You can add your date of birth, security question, and a referral code any time later from Profile Settings.
-                </p>
+                <Field label="Confirm Password" required error={showValidation ? fieldErrors.confirmPassword : null} colors={colors}>
+                  <input required style={{ ...S.input, color: colors.text, background: colors.surface, borderBottomColor: showValidation && fieldErrors.confirmPassword ? '#FF6B6B' : undefined }}
+                    type={showPass ? 'text' : 'password'} placeholder="Re-enter password"
+                    value={form.confirmPassword} onChange={set('confirmPassword')} />
+                </Field>
+                <Field label="Security Question" required colors={colors}>
+                  <select style={{ ...S.input, color: colors.text, background: colors.surface }}
+                    value={form.securityQuestion} onChange={set('securityQuestion')}>
+                    {SECURITY_QUESTIONS.map((q) => <option key={q} value={q}>{q}</option>)}
+                  </select>
+                </Field>
+                <Field label="Security Answer" required error={showValidation ? fieldErrors.securityAnswer : null} colors={colors}>
+                  <input required style={{ ...S.input, color: colors.text, background: colors.surface, borderBottomColor: showValidation && fieldErrors.securityAnswer ? '#FF6B6B' : undefined }}
+                    type="text" placeholder="Your answer" value={form.securityAnswer} onChange={set('securityAnswer')} />
+                </Field>
+                <Field label="Employee / Referral Code" colors={colors}>
+                  <input style={{ ...S.input, color: colors.text, background: colors.surface }}
+                    type="text" placeholder="Optional" value={form.referralCode} onChange={set('referralCode')} />
+                </Field>
                 <button type="submit" disabled={loading} style={{ ...S.btn, ...(loading ? S.btnDisabled : {}) }}>
                   {loading ? 'Sending OTP...' : tr.sendOtp}
                 </button>
@@ -165,9 +197,7 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
               <p style={{ ...S.hint, color: colors.textMuted }}>OTP sent to {maskedMobile}. Valid for 10 minutes.</p>
               {error && <div style={S.errorBox}>{error}</div>}
               <form onSubmit={handleVerifyOTP} style={S.form}>
-                <input style={{ ...S.input, letterSpacing:'0.3em', fontSize:22, textAlign:'center', color: colors.text, background: colors.surface }}
-                  type="text" inputMode="numeric" maxLength={6} placeholder="000000"
-                  value={otp} onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))} />
+                <OtpKeypad value={otp} onChange={setOtp} />
                 <button type="submit" disabled={loading} style={{ ...S.btn, ...(loading ? S.btnDisabled : {}) }}>
                   {loading ? 'Verifying...' : tr.verifyOtpBtn}
                 </button>

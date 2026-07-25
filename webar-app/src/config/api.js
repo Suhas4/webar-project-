@@ -1,4 +1,8 @@
-export const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8181';
+// In dev, default to same-origin so requests go through Vite's own /api proxy
+// (vite.config.js) to localhost:8181. This lets the app work over ngrok or a
+// LAN IP without ever needing VITE_API_BASE to point at a real host — the
+// browser calls a relative /api/... path no matter what domain served the page.
+export const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.DEV ? '' : 'https://webar-project-8jbi.onrender.com');
 export const R2_PUBLIC_URL = (import.meta.env.VITE_R2_PUBLIC_URL ?? 'https://pub-4cb6dfb082c64346a30587f3e9123a37.r2.dev').replace(/\/$/, '');
 
 // Backend error responses are usually JSON ({ error: "..." }) but some failure

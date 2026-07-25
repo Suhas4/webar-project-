@@ -564,6 +564,8 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
           </div>
         </div>
 
+        <AboutUsAccordion colors={colors} />
+
         {toastMsg && (
           <div style={{ ...styles.toast, background: colors.bgSolid, border: `1px solid ${colors.border}`, color: colors.text }}>
             {toastMsg}
@@ -929,6 +931,31 @@ function SocialLink({ href, icon, className }) {
     <a href={href} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
       <div className={`social-icon-hover ${className || ''}`} style={styles.socialIcon}>{icon}</div>
     </a>
+  );
+}
+
+function AboutUsAccordion({ colors }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ borderRadius: 16, overflow: 'hidden', background: colors.surface, border: `1px solid ${colors.border}` }}>
+      <button onClick={() => setOpen(o => !o)} style={{
+        width: '100%', background: 'transparent', border: 'none', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '14px 16px', fontFamily: FONT,
+      }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: colors.text }}>About Us</span>
+        <span style={{ color: colors.textMuted, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
+      </button>
+      {open && (
+        <div style={{ padding: '0 16px 16px' }}>
+          <p style={{ margin: 0, fontSize: 12.5, color: colors.textMuted, fontFamily: FONT, lineHeight: 1.6 }}>
+            Memoera (OPC) Private Limited, based in Bengaluru, India, builds AR experiences that
+            bring your printed photos, cards, and keepsakes to life. Scan any Memoera target and
+            watch your memories play back as video, audio, or animation — instantly.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 

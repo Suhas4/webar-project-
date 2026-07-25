@@ -46,6 +46,7 @@ import VideoOverlay      from './components/VideoOverlay.jsx';
 import GuestScanScreen, { invalidateGuestCache } from './components/GuestScanScreen.jsx';
 import PublicArView       from './components/PublicArView.jsx';
 import CameraPermissionPrimer from './components/CameraPermissionPrimer.jsx';
+import TermsGateModal from './components/TermsGateModal.jsx';
 
 // Everything below is only needed after navigation — lazy-load so the
 // initial bundle (and time-to-interactive) stays small.
@@ -67,8 +68,10 @@ const AccountTypeScreen        = lazy(() => import('./components/AccountTypeScre
 const AccountConfirmScreen     = lazy(() => import('./components/AccountConfirmScreen.jsx'));
 const BusinessCategoryScreen   = lazy(() => import('./components/BusinessCategoryScreen.jsx'));
 const BusinessDetailsScreen    = lazy(() => import('./components/BusinessDetailsScreen.jsx'));
+const BusinessDeniedScreen     = lazy(() => import('./components/BusinessDeniedScreen.jsx'));
 const SetupCompleteScreen      = lazy(() => import('./components/SetupCompleteScreen.jsx'));
 const ImageUploadScreen        = lazy(() => import('./components/ImageUploadScreen.jsx'));
+const GoalSelectScreen         = lazy(() => import('./components/GoalSelectScreen.jsx'));
 const UrlSetupScreen           = lazy(() => import('./components/UrlSetupScreen.jsx'));
 const PremiumScreen            = lazy(() => import('./components/PremiumScreen.jsx'));
 const ReferFriendScreen        = lazy(() => import('./components/ReferFriendScreen.jsx'));
@@ -102,6 +105,10 @@ export default function App() {
   const [scanHint,      setScanHint]      = useState(false);
   const [pendingAR,     setPendingAR]     = useState(null);
   const [guestScanError, setGuestScanError] = useState('');
+  // Session-only Terms & Conditions demo gate — 'scan' before the camera
+  // opens, 'signup' right after account creation. No persistence by design.
+  const [pendingTermsGate, setPendingTermsGate] = useState(null);
+  const termsAgreedRef           = useRef(false);
   const pendingARRef             = useRef(null);
   const activeBlobUrlsRef        = useRef([]);
   // Tracks which screen a scan was launched from ('home' or 'hello') so the
@@ -370,7 +377,11 @@ export default function App() {
     registerUserForGreetings(user);
     setAppView(nextViewAfterAuth(user));
   }, [registerUserForGreetings, nextViewAfterAuth]);
-  const handleSignUp  = useCallback((user) => { setCurrentUser(user); registerUserForGreetings(user); setAppView('account-type'); }, [registerUserForGreetings]);
+  const handleSignUp  = useCallback((user) => {
+    setCurrentUser(user);
+    registerUserForGreetings(user);
+    setPendingTermsGate('signup');
+  }, [registerUserForGreetings]);
   const handleOtpFail = useCallback(() => { setVideoOverlay({ src: '/x-mark.mp4', next: 'signup' }); }, []);
 
   const handleAccountType = useCallback((accountType) => {
@@ -410,7 +421,7 @@ export default function App() {
       localStorage.setItem('memoera_user', JSON.stringify(updated));
       return updated;
     });
-    setAppView('business-complete');
+    setAppView(details?.gstin?.trim().toLowerCase() === 'deny' ? 'business-denied' : 'business-complete');
   }, [businessCategoryChoice]);
 
   const finishOnboarding = useCallback(() => {
@@ -429,7 +440,7 @@ export default function App() {
 
   const handleCreateFirstMemory = useCallback(() => {
     finishOnboarding();
-    setAppView('image-upload');
+    setAppView('goal-select');
   }, [finishOnboarding]);
 
   const handleVideoOverlayDone = useCallback(() => {
@@ -478,9 +489,30 @@ export default function App() {
   }, [launchAR]);
 
   const triggerScan = useCallback((origin) => {
+    if (!termsAgreedRef.current) {
+      scanOriginRef.current = origin;
+      setPendingTermsGate('scan');
+      return;
+    }
     scanOriginRef.current = origin;
     setGuestScanError('');
     setGuestScanLoading(true);
+  }, []);
+
+  const handleTermsAgree = useCallback(() => {
+    termsAgreedRef.current = true;
+    const gate = pendingTermsGate;
+    setPendingTermsGate(null);
+    if (gate === 'scan') {
+      setGuestScanError('');
+      setGuestScanLoading(true);
+    } else if (gate === 'signup') {
+      setAppView('account-type');
+    }
+  }, [pendingTermsGate]);
+
+  const handleTermsCancel = useCallback(() => {
+    setPendingTermsGate(null);
   }, []);
 
   // Used by the admin "Upload Global" shortcut to jump straight into the
@@ -530,6 +562,8 @@ export default function App() {
     mainScreen = <BusinessDetailsScreen onContinue={handleBusinessDetails} onBack={() => setAppView('business-category')} />;
   } else if (appView === 'business-complete') {
     mainScreen = <SetupCompleteScreen accountType="business" onCreateMemory={handleCreateFirstMemory} onGoToDashboard={handleGoToDashboard} onBack={() => setAppView('business-details')} />;
+  } else if (appView === 'business-denied') {
+    mainScreen = <BusinessDeniedScreen onRetry={() => setAppView('business-details')} onGoToDashboard={handleGoToDashboard} onBack={() => setAppView('business-details')} />;
   } else if (appView === 'individual-complete') {
     mainScreen = <SetupCompleteScreen accountType="individual" onCreateMemory={handleCreateFirstMemory} onGoToDashboard={handleGoToDashboard} onBack={() => setAppView('account-confirm')} />;
   } else if (appView === 'forgot') {
@@ -550,6 +584,13 @@ export default function App() {
     mainScreen = <ReferFriendScreen onBack={() => setAppView('home')} user={currentUser} />;
   } else if (appView === 'streak') {
     mainScreen = <StreakScreen onBack={() => setAppView('home')} />;
+  } else if (appView === 'goal-select') {
+    mainScreen = (
+      <GoalSelectScreen
+        onContinue={(v) => { setSelectedVisibility(v); setAppView('image-upload'); }}
+        onBack={() => setAppView('home')}
+      />
+    );
   } else if (appView === 'image-upload') {
     mainScreen = (
       <ImageUploadScreen
@@ -596,7 +637,7 @@ export default function App() {
     mainScreen = !localStorage.getItem('memoera_token') ? null : (
       <>
         <HomeScreen
-          onUpload={() => setAppView('image-upload')}
+          onUpload={() => setAppView('goal-select')}
           onGallery={() => setVideoOverlay({ src: '/review-our-album.mp4', next: 'gallery' })}
           onSearch={(q) => { setGalleryQuery(q); setVideoOverlay({ src: '/review-our-album.mp4', next: 'gallery' }); }}
           onSettings={(section) => { setSettingsInitialSection(section || null); setAppView('settings'); }}
@@ -630,6 +671,10 @@ export default function App() {
       <Suspense fallback={<div style={{ position:'fixed', inset:0, background:'#061A1F' }} />}>
         {mainScreen}
       </Suspense>
+
+      {pendingTermsGate && (
+        <TermsGateModal onAgree={handleTermsAgree} onCancel={handleTermsCancel} />
+      )}
 
       {/* Instant "Tap to Scan" — invisible until ready; works identically whether
           triggered from the pre-login Hello screen or the signed-in Home screen */}

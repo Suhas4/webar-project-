@@ -22,7 +22,7 @@ export default function ImageUploadScreen({ onSelectContent, onBack, visibility:
   const [showPicker, setShowPicker] = useState(false);
   const [error, setError] = useState('');
   const [title, setTitle] = useState('');
-  const [vis, setVis] = useState(initialVisibility === 'public' ? 'public' : 'private');
+  const vis = initialVisibility === 'public' ? 'public' : 'private';
 
   const CONTENT_TILES = [
     { key: 'video',     icon: '🎬', bg: 'linear-gradient(135deg,#6C5CE7,#8F7CF7)', label: tr.videoType },
@@ -137,19 +137,10 @@ export default function ImageUploadScreen({ onSelectContent, onBack, visibility:
             />
 
             <p style={{ ...s.fieldLabel, color: colors.textMuted, marginTop: 22 }}>{tr.wizVisibility}</p>
-            <div style={{ ...s.visRow, background: colors.inputBg, border: `1px solid ${colors.inputBorder}` }}>
-              <button
-                onClick={() => setVis('private')}
-                style={{ ...s.visBtn, background: vis === 'private' ? `${GOLD}22` : 'transparent',
-                  color: vis === 'private' ? GOLD : colors.textMuted, fontWeight: vis === 'private' ? 700 : 600 }}>
-                🔒 {tr.privateLabel}
-              </button>
-              <button
-                onClick={() => setVis('public')}
-                style={{ ...s.visBtn, background: vis === 'public' ? `${TEAL}22` : 'transparent',
-                  color: vis === 'public' ? TEAL : colors.textMuted, fontWeight: vis === 'public' ? 700 : 600 }}>
-                🌐 {tr.publicLabel}
-              </button>
+            <div style={{ ...s.reviewRow }}>
+              <span style={{ ...s.reviewVal, color: vis === 'public' ? TEAL : GOLD, fontWeight: 700 }}>
+                {vis === 'public' ? `🌐 ${tr.publicLabel}` : `🔒 ${tr.privateLabel}`}
+              </span>
             </div>
             <p style={{ ...s.visHint, color: colors.textMuted }}>
               {vis === 'public' ? tr.wizPublicHint : tr.wizPrivateHint}
