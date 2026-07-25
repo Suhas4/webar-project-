@@ -1,0 +1,30 @@
+{
+  "appId": "app.memoera.webar",
+  "appName": "Memoera",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "android": {
+    "buildOptions": {
+      "keystorePath": "memoera.keystore",
+      "keystoreAlias": "memoera"
+    }
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 3000,
+      "backgroundColor": "#040D0B",
+      "androidSplashResourceName": "splash",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": false
+    },
+    "Camera": {
+      "ios": {},
+      "android": {}
+    },
+    "AdMob": {
+      "appId": "ca-app-pub-3940256099942544~3347511713",
+      "testingDevices": [],
+      "initializeForTesting": true
+    }
+  }
+}

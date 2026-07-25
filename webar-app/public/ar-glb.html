@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Model Viewer</title>
+
+    <!-- model-viewer renders .glb / .gltf with a polished card UI + native "View in your space" AR.
+         It cannot render .obj, so .obj files fall through to the Three.js viewer below. -->
+    <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.3.1/model-viewer.min.js"></script>
+
+    <script type="importmap">
+    { "imports": { "three": "/libs/three/three.module.js" } }
+    </script>
+
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', Arial, sans-serif;
+            background-color: #061A1F;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            background: #101418;
+            overflow: hidden;
+            display: none;
+            flex-direction: column;
+        }
+
+        model-viewer {
+            width: 100%;
+            height: 100%;
+            flex-grow: 1;
+            background-color: #101418;
+            --poster-color: transparent;
+        }
+
+        .back-btn {
+            position: absolute; top: 16px; left: 16px; z-index: 30;
+            background: rgba(0,0,0,0.35); border: none;
+            border-radius: 8px; color: #fff;
+            font-size: 15px; font-weight: 600; font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+            padding: 8px 16px; cursor: pointer;
+        }
+
+        #ar-button {
+            background-color: white;
+            border-radius: 100px;
+            border: 1px solid #dadce0;
+            white-space: nowrap;
+            padding: 0 24px;
+            font-family: 'Google Sans', Roboto, Helvetica, Arial, sans-serif;
+            font-size: 16px;
+            font-weight: 500;
+            line-height: 40px;
+            color: #1a73e8;
+            position: absolute;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            transition: background-color 0.2s, box-shadow 0.2s;
+        }
+        #ar-button:hover { background-color: #f8f9fa; }
+        #ar-button:active { background-color: #f1f3f4; box-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+
+        .ar-icon {
+            width: 20px;
+            height: 20px;
+            display: inline-block;
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%231a73e8"><path d="M4 6V4h2V2H4c-1.1 0-2 .9-2 2v2h2zm16-2V2h-2v2h-2v2h2v2h2V6h2V4h-2zm0 14v2h-2v2h2c1.1 0 2-.9 2-2v-2h-2zM4 18v2h2v2H4c-1.1 0-2-.9-2-2v-2h2zm8-7.25l4.5 2.6v5.2l-4.5 2.6-4.5-2.6v-5.2l4.5-2.6zM12 4l-5.5 3.18v6.36L12 16.73l5.5-3.18V7.18L12 4z"/></svg>');
+            background-size: contain;
+            background-repeat: no-repeat;
+        }
+
+        #ar-button[slot="ar-button"] { display: none; }
+        model-viewer[ar-status="session-started"] > #ar-button { display: none; }
+
+        /* ---- Three.js (.obj) full-screen viewer ---- */
+        #three-wrap { position: fixed; inset: 0; display: none; }
+        #three-wrap.active { display: block; }
+        #three-canvas { position: fixed; inset: 0; display: block; touch-action: none; }
+        #status, #status-gltf {
+            position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+            color: rgba(255,255,255,0.75); font-size: 14px; text-align: center;
+            white-space: pre-line; word-break: break-all;
+            z-index: 20; pointer-events: none;
+        }
+        #status.error, #status-gltf.error { color: #ff6b6b; padding: 0 32px; }
+        #status.hidden, #status-gltf.hidden { display: none; }
+
+        /* ---- Entrance/idle animations for the model-viewer (.glb/.gltf) path ---- */
+        @keyframes mv-popIn  { 0%{opacity:0;transform:scale(.4);} 65%{opacity:1;transform:scale(1.08);} 100%{opacity:1;transform:scale(1);} }
+        @keyframes mv-fadeIn { from{opacity:0;} to{opacity:1;} }
+        @keyframes mv-spinIn { 0%{opacity:0;transform:scale(.5) rotate(-200deg);} 100%{opacity:1;transform:scale(1) rotate(0deg);} }
+        @keyframes mv-riseUp { 0%{opacity:0;transform:translateY(60px);} 100%{opacity:1;transform:translateY(0);} }
+        @keyframes mv-zoomIn { 0%{opacity:0;transform:scale(.05);} 100%{opacity:1;transform:scale(1);} }
+        @keyframes mv-float  { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-10px);} }
+        model-viewer.mv-anim-popIn  { animation: mv-popIn .7s cubic-bezier(.34,1.56,.64,1) both; }
+        model-viewer.mv-anim-fadeIn { animation: mv-fadeIn .6s ease both; }
+        model-viewer.mv-anim-spinIn { animation: mv-spinIn .8s cubic-bezier(.34,1.56,.64,1) both; }
+        model-viewer.mv-anim-riseUp { animation: mv-riseUp .6s ease-out both; }
+        model-viewer.mv-anim-zoomIn { animation: mv-zoomIn .7s ease-out both; }
+        model-viewer.mv-anim-float  { animation: mv-float 3s ease-in-out infinite; }
+    </style>
+</head>
+<body>
+
+<!-- .glb / .gltf path -->
+<div class="container" id="gltf-view">
+    <button id="back-btn" class="back-btn" onclick="closePage()">← Back</button>
+    <p id="status-gltf" class="hidden">Could not load this 3D model.</p>
+
+    <model-viewer
+        id="viewer"
+        src=""
+        alt="A 3D model"
+        ar
+        ar-modes="webxr scene-viewer quick-look"
+        camera-controls
+        touch-action="pan-y"
+        shadow-intensity="1"
+        autoplay>
+
+        <button slot="ar-button" id="ar-button">
+            <i class="ar-icon"></i>
+            <span>View in your space</span>
+        </button>
+    </model-viewer>
+</div>
+
+<!-- .obj path -->
+<div id="three-wrap">
+    <button id="back-btn-three" class="back-btn" onclick="closePage()">← Back</button>
+    <canvas id="three-canvas"></canvas>
+    <p id="status">Loading 3D model…</p>
+</div>
+
+<script>
+    function closePage() {
+        try { window.parent.postMessage({ type: 'ar-glb-close' }, '*'); } catch(_) {}
+        try { window.history.back(); } catch(_) {}
+    }
+    window.closePage = closePage;
+</script>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from '/libs/three/addons/loaders/GLTFLoader.js';
+    import { OBJLoader } from '/libs/three/addons/loaders/OBJLoader.js';
+    import { MTLLoader } from '/libs/three/addons/loaders/MTLLoader.js';
+    import { FBXLoader } from '/libs/three/addons/loaders/FBXLoader.js';
+    import { OrbitControls } from '/libs/three/addons/controls/OrbitControls.js';
+
+    const params = new URLSearchParams(window.location.search);
+    const url = params.get('glb') || '';
+    const ext = (url.split('?')[0].split('.').pop() || '').toLowerCase();
+    const effect = params.get('effect') || 'popIn';
+
+    if (ext === 'obj' || ext === 'fbx') {
+        showThreeViewer(ext);
+    } else {
+        showModelViewer();
+    }
+
+    function notifyReady() {
+        try { window.parent.postMessage({ type: 'ar-glb-ready' }, '*'); } catch(_) {}
+    }
+
+    function showModelViewer() {
+        document.getElementById('gltf-view').style.display = 'flex';
+        const viewer = document.getElementById('viewer');
+        const statusEl = document.getElementById('status-gltf');
+        const fileName = url.split('/').pop().split('?')[0] || 'model';
+
+        viewer.addEventListener('load', () => {
+            // 'rotate' uses model-viewer's own native camera orbit (a true 3D spin,
+            // not a flat CSS one) — plus a quick pop so it doesn't just snap into view.
+            if (effect === 'rotate') {
+                viewer.setAttribute('auto-rotate', '');
+                viewer.classList.add('mv-anim-popIn');
+            } else {
+                viewer.classList.add('mv-anim-' + effect);
+            }
+            notifyReady();
+        });
+        viewer.addEventListener('error', (e) => {
+            const reason = (e?.detail?.type) || (e?.message) || 'unknown error';
+            console.error('GLB load failed:', url, e);
+            statusEl.textContent = `Could not load this 3D model.\n${fileName}\n(${reason})`;
+            statusEl.classList.remove('hidden');
+            statusEl.classList.add('error');
+            notifyReady();
+        });
+
+        if (url) viewer.setAttribute('src', url);
+        else {
+            statusEl.textContent = 'No 3D model to display.';
+            statusEl.classList.remove('hidden');
+            statusEl.classList.add('error');
+            notifyReady();
+        }
+    }
+
+    function showThreeViewer(ext) {
+        document.getElementById('gltf-view').remove();
+        const wrap = document.getElementById('three-wrap');
+        wrap.classList.add('active');
+
+        const statusEl = document.getElementById('status');
+        function setStatus(text, isError) {
+            if (!text) { statusEl.classList.add('hidden'); return; }
+            statusEl.classList.remove('hidden');
+            statusEl.classList.toggle('error', !!isError);
+            statusEl.textContent = text;
+        }
+
+        const canvas = document.getElementById('three-canvas');
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x101418);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.01, 1000);
+        camera.position.set(0, 0, 3);
+
+        scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.2));
+        const keyLight = new THREE.DirectionalLight(0xffffff, 1.4);
+        keyLight.position.set(3, 5, 4);
+        scene.add(keyLight);
+        const fillLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        fillLight.position.set(-4, -2, -3);
+        scene.add(fillLight);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.08;
+        controls.target.set(0, 0, 0);
+
+        let modelRoot = null;
+        let mixer = null;
+        const clock = new THREE.Clock();
+
+        // Entrance tween state for the .obj/.fbx path (model-viewer path handles its
+        // own animations via CSS — see the <style> block and showModelViewer above).
+        const ENTRANCE_MS = 700;
+        let targetScale = 1;
+        let baseY = 0;
+        let animStart = null;
+
+        function easeOutBack(t) { const c1 = 1.70158, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); }
+        function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+        function setModelOpacity(object, opacity) {
+            object.traverse((node) => {
+                if (!node.material) return;
+                const mats = Array.isArray(node.material) ? node.material : [node.material];
+                mats.forEach((m) => { m.transparent = true; m.opacity = opacity; });
+            });
+        }
+
+        function applyEntrance(object, t) {
+            switch (effect) {
+                case 'fadeIn':
+                    setModelOpacity(object, t);
+                    break;
+                case 'zoomIn':
+                    object.scale.setScalar(targetScale * Math.max(0.001, easeOutCubic(t)));
+                    break;
+                case 'spinIn':
+                    object.scale.setScalar(targetScale * Math.max(0.001, easeOutBack(t)));
+                    object.rotation.y = (1 - t) * Math.PI * 1.2;
+                    break;
+                case 'riseUp':
+                    object.position.y = baseY + (1 - easeOutCubic(t)) * 0.6;
+                    break;
+                case 'popIn':
+                default:
+                    object.scale.setScalar(targetScale * Math.max(0.001, easeOutBack(t)));
+                    break;
+            }
+        }
+
+        function frameObject(object) {
+            const box = new THREE.Box3().setFromObject(object);
+            const size = box.getSize(new THREE.Vector3());
+            const center = box.getCenter(new THREE.Vector3());
+            object.position.sub(center);
+
+            const maxDim = Math.max(size.x, size.y, size.z) || 1;
+            object.scale.setScalar(1.6 / maxDim);
+
+            const distance = 3.2;
+            camera.position.set(distance * 0.4, distance * 0.3, distance);
+            camera.near = distance / 100;
+            camera.far = distance * 100;
+            camera.updateProjectionMatrix();
+            controls.target.set(0, 0, 0);
+            controls.update();
+        }
+
+        function showModel(object, animations) {
+            if (modelRoot) { scene.remove(modelRoot); modelRoot = null; }
+            mixer = null;
+            modelRoot = object;
+            scene.add(object);
+            frameObject(object);
+
+            // frameObject just computed the model's resting scale/position — remember
+            // it as the tween target, then animate from zero/offset into that rest state.
+            targetScale = object.scale.x;
+            baseY = object.position.y;
+            animStart = performance.now();
+            if (effect === 'fadeIn') setModelOpacity(object, 0);
+            else object.scale.setScalar(0.001);
+
+            if (animations && animations.length) {
+                mixer = new THREE.AnimationMixer(object);
+                animations.forEach((clip) => mixer.clipAction(clip).play());
+            }
+
+            setStatus('');
+            notifyReady();
+        }
+
+        function loadObj(modelUrl) {
+            const baseUrl = modelUrl.replace(/[^/]*$/, '');
+            const fileName = modelUrl.split('/').pop().split('?')[0];
+            const mtlUrl = baseUrl + fileName.replace(/\.obj$/i, '.mtl');
+
+            function loadWithMaterials(materials) {
+                const objLoader = new OBJLoader();
+                if (materials) {
+                    materials.preload();
+                    objLoader.setMaterials(materials);
+                }
+                objLoader.load(
+                    modelUrl,
+                    (object) => showModel(object),
+                    (xhr) => { if (xhr.lengthComputable) setStatus(`Loading 3D model… ${Math.round((xhr.loaded / xhr.total) * 100)}%`); },
+                    (err) => {
+                        const reason = (err && (err.message || err.type || err.target?.status)) || 'unknown error';
+                        console.error('OBJ load failed:', modelUrl, err);
+                        setStatus(`Could not load this 3D model.\n${fileName}\n(${reason})`, true);
+                        notifyReady();
+                    }
+                );
+            }
+
+            new MTLLoader().load(mtlUrl, loadWithMaterials, undefined, () => loadWithMaterials(null));
+        }
+
+        function loadFbx(modelUrl) {
+            const fileName = modelUrl.split('/').pop().split('?')[0];
+            new FBXLoader().load(
+                modelUrl,
+                (object) => showModel(object, object.animations),
+                (xhr) => { if (xhr.lengthComputable) setStatus(`Loading 3D model… ${Math.round((xhr.loaded / xhr.total) * 100)}%`); },
+                (err) => {
+                    const reason = (err && (err.message || err.type || err.target?.status)) || 'unknown error';
+                    console.error('FBX load failed:', modelUrl, err);
+                    setStatus(`Could not load this 3D model.\n${fileName}\n(${reason})`, true);
+                    notifyReady();
+                }
+            );
+        }
+
+        if (url) {
+            if (ext === 'fbx') loadFbx(url);
+            else loadObj(url);
+        } else setStatus('No 3D model to display.', true);
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        (function animate() {
+            requestAnimationFrame(animate);
+            const delta = clock.getDelta();
+            if (mixer) mixer.update(delta);
+
+            if (modelRoot && animStart !== null) {
+                const t = Math.min(1, (performance.now() - animStart) / ENTRANCE_MS);
+                applyEntrance(modelRoot, t);
+                if (t >= 1) {
+                    animStart = null;
+                    modelRoot.scale.setScalar(targetScale);
+                    if (effect === 'fadeIn') setModelOpacity(modelRoot, 1);
+                }
+            }
+            if (modelRoot && animStart === null) {
+                if (effect === 'rotate') modelRoot.rotation.y += delta * 0.6;
+                else if (effect === 'float') modelRoot.position.y = baseY + Math.sin(performance.now() / 700) * 0.08;
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        })();
+    }
+</script>
+
+</body>
+</html>

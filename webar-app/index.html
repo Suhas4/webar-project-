@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+
+    <!-- Google AdSense site verification -->
+    <meta name="google-adsense-account" content="ca-pub-3826485527589023">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-3826485527589023"
+     crossorigin="anonymous"></script>
+    <!-- Auto ads — without this push call the script above only verifies the
+         site with Google, it never actually requests an ad, which is why no
+         impressions/updates were showing up in the AdSense dashboard. -->
+    <script>
+      (adsbygoogle = window.adsbygoogle || []).push({
+        google_ad_client: "ca-pub-3826485527589023",
+        enable_page_level_ads: true
+      });
+    </script>
+
+    <!-- Stylized display fonts for the AI Poster Studio's text overlay picker -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;800&family=Playfair+Display:wght@700;900&family=Bebas+Neue&family=Pacifico&family=Anton&family=Cinzel:wght@700;900&display=swap" rel="stylesheet">
+
+    <!--
+      Import map — MUST be first in <head>, before any <script type="module">.
+
+      MindAR's dist files are ES modules that do `import { ... } from "three"`.
+      Browsers cannot resolve bare specifiers like "three" without an import map.
+      Without this, dynamic import() of MindAR fails with:
+        "Failed to resolve module specifier 'three'"
+
+      WHY three@0.150.0:
+      MindAR 1.2.5 uses `sRGBEncoding` which was removed in Three.js r152.
+      r150 is the last compatible version. Our app's three npm package also
+      uses 0.150.0 to stay in sync.
+    -->
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.150.0/examples/jsm/"
+      }
+    }
+    </script>
+
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <!-- iOS fullscreen / status bar -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+
+    <title>Memoera — Bring Memories to Life with AR</title>
+    <meta name="description" content="Memoera is an Augmented Reality platform from Bangalore. Scan any Memoera-linked image to experience AR videos, 3D models, and interactive content — no special glasses needed." />
+
+    <!-- Open Graph / Social sharing -->
+    <meta property="og:type"        content="website" />
+    <meta property="og:url"         content="https://www.memoera.in" />
+    <meta property="og:title"       content="Memoera — Bring Memories to Life" />
+    <meta property="og:description" content="Scan images with Memoera to unlock hidden AR experiences. Upload your targets, attach videos or 3D models, and share instantly." />
+    <meta property="og:image"       content="https://memoera.in/logo1.png" />
+    <meta property="og:site_name"   content="Memoera" />
+    <meta property="og:locale"      content="en_IN" />
+
+    <!-- Twitter / X card -->
+    <meta name="twitter:card"        content="summary" />
+    <meta name="twitter:title"       content="Memoera — Augmented Reality Platform" />
+    <meta name="twitter:description" content="Bring memories to life. Scan → AR." />
+    <meta name="twitter:image"       content="https://memoera.in/logo1.png" />
+    <meta name="twitter:site"        content="@Memo_Era" />
+
+    <!-- Schema.org — tells Google Lens this logo = Memoera brand -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Memoera",
+      "alternateName": "Memo Era",
+      "url": "https://www.memoera.in",
+      "logo": "https://memoera.in/logo1.png",
+      "description": "Memoera is an Augmented Reality platform that brings memories to life. Scan any Memoera-linked image with your phone to unlock AR videos, 3D models, and interactive experiences.",
+      "foundingLocation": {
+        "@type": "Place",
+        "addressLocality": "Bangalore",
+        "addressCountry": "IN"
+      },
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "telephone": "+91-9187713120",
+        "email": "memoerabangalore@gmail.com",
+        "contactType": "customer support"
+      },
+      "sameAs": [
+        "https://www.instagram.com/memoerabangalore/",
+        "https://www.facebook.com/profile.php?id=61574312286741",
+        "https://www.youtube.com/@memoerabangalore",
+        "https://x.com/Memo_Era"
+      ]
+    }
+    </script>
+    <style>
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body {
+        margin: 0; padding: 0;
+        background: #040D0B;
+        /* Prevent any white flash on load or between screens */
+      }
+      #root {
+        /* Push all screens below the device status bar */
+        padding-top: env(safe-area-inset-top, 0px);
+        min-height: 100dvh;
+        background: #040D0B;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
