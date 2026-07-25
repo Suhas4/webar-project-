@@ -8,6 +8,23 @@ const hiddenInput = {
   position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none',
 };
 
+function RecordVideoIcon() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={TEAL} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2.5" y="6" width="13" height="12" rx="2.5" />
+      <path d="M15.5 10.5 21 7.5v9l-5.5-3z" />
+    </svg>
+  );
+}
+
+function FilesIcon() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={TEAL} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+    </svg>
+  );
+}
+
 // VideoPickerSheet — file picker for video overlay only
 function VideoPickerSheet({ onFile, onClose }) {
   function handleChange(e) {
@@ -25,13 +42,13 @@ function VideoPickerSheet({ onFile, onClose }) {
         <label style={sheet.optionBtn}>
           <input type="file" accept="video/mp4,video/webm,video/*"
             capture="environment" style={hiddenInput} onChange={handleChange} onClick={(e) => { e.target.value = ''; }} />
-          <span style={sheet.optionIcon}>📷</span>
+          <span style={sheet.optionIcon}><RecordVideoIcon /></span>
           <div><p style={sheet.optionLabel}>Record Video</p><p style={sheet.optionHint}>Record with camera</p></div>
         </label>
         <label style={sheet.optionBtn}>
           <input type="file" accept="video/mp4,video/webm,video/*"
             style={hiddenInput} onChange={handleChange} onClick={(e) => { e.target.value = ''; }} />
-          <span style={sheet.optionIcon}>📁</span>
+          <span style={sheet.optionIcon}><FilesIcon /></span>
           <div><p style={sheet.optionLabel}>Files</p><p style={sheet.optionHint}>Choose from device</p></div>
         </label>
         <button style={sheet.cancelBtn} onClick={onClose}>Cancel</button>

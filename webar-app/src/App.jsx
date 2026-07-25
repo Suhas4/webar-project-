@@ -121,6 +121,7 @@ export default function App() {
   useEffect(() => { appViewRef.current = appView; }, [appView]);
   const [videoOverlay,       setVideoOverlay]       = useState(null);
   const [selectedVisibility, setSelectedVisibility] = useState('private');
+  const [forcedContentType, setForcedContentType] = useState(null);
   const [sharedImageFile, setSharedImageFile] = useState(null);
   const [sharedImagePreviewUrl, setSharedImagePreviewUrl] = useState(null);
   const [sharedLabel, setSharedLabel] = useState('');
@@ -588,15 +589,16 @@ export default function App() {
     mainScreen = (
       <GoalSelectScreen
         onContinue={(v) => { setSelectedVisibility(v); setAppView('image-upload'); }}
-        onBack={() => setAppView('home')}
+        onBack={() => { setForcedContentType(null); setAppView('home'); }}
       />
     );
   } else if (appView === 'image-upload') {
     mainScreen = (
       <ImageUploadScreen
         onSelectContent={handleContentSelect}
-        onBack={() => setAppView('home')}
+        onBack={() => { setForcedContentType(null); setAppView('home'); }}
         visibility={selectedVisibility}
+        initialContentType={forcedContentType}
       />
     );
   } else if (appView === 'anim-setup') {
@@ -637,8 +639,8 @@ export default function App() {
     mainScreen = !localStorage.getItem('memoera_token') ? null : (
       <>
         <HomeScreen
-          onUpload={() => setAppView('goal-select')}
-          onGallery={() => setVideoOverlay({ src: '/review-our-album.mp4', next: 'gallery' })}
+          onUpload={() => { setForcedContentType(null); setAppView('goal-select'); }}
+          onGallery={() => { setGalleryQuery(''); setVideoOverlay({ src: '/review-our-album.mp4', next: 'gallery' }); }}
           onSearch={(q) => { setGalleryQuery(q); setVideoOverlay({ src: '/review-our-album.mp4', next: 'gallery' }); }}
           onSettings={(section) => { setSettingsInitialSection(section || null); setAppView('settings'); }}
           onPremium={() => setAppView('premium')}
@@ -648,6 +650,7 @@ export default function App() {
           onAdmin={() => setAppView('admin')}
           onSignOut={handleSignOut}
           onScan={() => triggerScan('home')}
+          onAnimation={() => { setForcedContentType('animation'); setAppView('goal-select'); }}
           user={currentUser}
         />
         <Suspense fallback={null}>
@@ -683,7 +686,7 @@ export default function App() {
           silent
           onReady={(data) => { setGuestScanLoading(false); handleGuestReady(data); }}
           onBack={() => setGuestScanLoading(false)}
-          onError={(msg) => setGuestScanError(msg || 'Could not start scanning. Please try again.')}
+          onError={(msg) => { setGuestScanLoading(false); setGuestScanError(msg || 'Could not start scanning. Please try again.'); }}
           prefetchedTargets={prefetchedPublicTargetsRef.current}
         />
       )}
@@ -704,6 +707,23 @@ export default function App() {
           onAllow={() => setScanHint(false)}
           onDismiss={() => { setGuestScanLoading(false); setScanHint(false); }}
         />
+      )}
+
+      {/* Scan-failure toast — the Home screen (unlike HelloScreen) has nowhere
+          inline to show guestScanError, so a failed "Tap to Scan" from Home
+          used to fail completely silently (tap → nothing → back where you
+          started). Surface it here instead. */}
+      {guestScanError && appView !== 'hello' && (
+        <div style={{ position: 'fixed', left: 16, right: 16, bottom: 28, zIndex: 9999,
+          background: 'rgba(20,10,10,0.92)', border: '1px solid rgba(255,107,107,0.4)',
+          borderRadius: 14, padding: '14px 16px', display: 'flex', alignItems: 'flex-start', gap: 10,
+          fontFamily: "'Outfit', sans-serif", boxShadow: '0 8px 24px rgba(0,0,0,0.35)' }}>
+          <span style={{ fontSize: 18, flexShrink: 0 }}>⚠️</span>
+          <span style={{ color: '#fff', fontSize: 13.5, lineHeight: 1.4, flex: 1 }}>{guestScanError}</span>
+          <button onClick={() => setGuestScanError('')}
+            style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)',
+              fontSize: 15, cursor: 'pointer', flexShrink: 0, padding: 0 }}>✕</button>
+        </div>
       )}
 
       {/* Global pull-to-refresh indicator — hidden on AR scanner views */}

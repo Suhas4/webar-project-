@@ -12,13 +12,13 @@ const GOLD = '#C9A84C';
 // attaches to it, (2) name it and choose Private/Public — visibility is
 // chosen here, AFTER the content itself, not up front — (3) review + confirm,
 // then hand off to the per-type setup screen that does the real compile/upload.
-export default function ImageUploadScreen({ onSelectContent, onBack, visibility: initialVisibility }) {
+export default function ImageUploadScreen({ onSelectContent, onBack, visibility: initialVisibility, initialContentType }) {
   const { colors } = useTheme();
   const { tr } = useLanguage();
   const [step, setStep] = useState(0);
   const [imageFile, setImageFile] = useState(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState(null);
-  const [contentType, setContentType] = useState(null);
+  const [contentType, setContentType] = useState(initialContentType || null);
   const [showPicker, setShowPicker] = useState(false);
   const [error, setError] = useState('');
   const [title, setTitle] = useState('');
@@ -215,7 +215,7 @@ function Stepper({ step, colors, steps }) {
 
 const s = {
   screen: { position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', fontFamily: FONT, overflowY: 'auto' },
-  backBtn: { position: 'absolute', top: 48, left: 16, background: 'transparent', border: 'none', fontSize: 14, fontWeight: 600, fontFamily: FONT, cursor: 'pointer', padding: '6px 4px', zIndex: 2 },
+  backBtn: { position: 'fixed', top: 48, left: 16, background: 'transparent', border: 'none', fontSize: 14, fontWeight: 600, fontFamily: FONT, cursor: 'pointer', padding: '6px 4px', zIndex: 2 },
   top: { padding: '60px 24px 0', textAlign: 'center' },
   title: { fontSize: 24, fontWeight: 700, fontFamily: FONT, margin: 0 },
   stepper: { display: 'flex', alignItems: 'flex-start', justifyContent: 'center', gap: 0, marginTop: 20 },

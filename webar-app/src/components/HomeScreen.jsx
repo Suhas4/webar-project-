@@ -37,7 +37,7 @@ const PROMO_CARDS = [
   { key: 'tip',       eyebrow: 'Tip', title: 'Steadier scans', body: 'Hold for 2 seconds for sharper 3D detail.', variant: 'violet' },
 ];
 
-export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium, onSignOut, onRefer, onStreak, onCollection, onAdmin, onScan, onSearch, user }) {
+export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium, onSignOut, onRefer, onStreak, onCollection, onAdmin, onScan, onSearch, onAnimation, user }) {
   const { lang, setLang } = useLanguage();
   const { theme, toggleTheme, colors } = useTheme();
   const tr = { ...T.en, ...(T[lang] || {}) };
@@ -477,7 +477,7 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
           {onStreak && (
             <NavBtn className="home-feature" img="/nav-streak.png" count={streakCount} label={tr.navStreak || 'Streak'} labelColor={colors.text} onClick={onStreak} />
           )}
-          <NavBtn className="home-feature" img="/nav-animation.png" label={tr.navAnimation || 'Animation'} labelColor={colors.text} onClick={() => onSettings('posters')} />
+          <NavBtn className="home-feature" img="/nav-animation.png" label={tr.navAnimation || 'Animation'} labelColor={colors.text} onClick={() => onAnimation ? onAnimation() : onSettings('posters')} />
           <NavBtn className="home-feature" icon={<ShareIcon color="#fff" />} bg="linear-gradient(135deg,#00C9A7,#00E5CC)" label={tr.navShare || 'Share'} labelColor={colors.text} onClick={handleShare} />
         </div>
 

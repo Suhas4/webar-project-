@@ -1736,7 +1736,10 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	// calling this endpoint directly, so it can't be relied on alone. Skipped
 	// for admin (official/global content) and for private uploads, which
 	// aren't the policy-relevant surface.
-	if req.IsPublic && !isAdminEmail(email) {
+	// Temporarily disabled at the user's request: OPENAI_API_KEY isn't
+	// configured yet, so this always failed closed and blocked every public
+	// upload. Re-enable once a real key is set in .env / Render.
+	if false && req.IsPublic && !isAdminEmail(email) {
 		for _, t := range req.Targets {
 			if t.ImageKey == "" {
 				continue
