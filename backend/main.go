@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -272,6 +273,34 @@ func initDB(ctx context.Context) error {
 			UNIQUE (user_id, target_id, kind)
 		)`)
 	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_target_interactions_user_kind ON target_interactions(user_id, kind)`)
+
+	// Product catalogs — a single scannable marker (stored as a normal
+	// ar_targets row with targetType='catalog' and urlLink=catalogs.id) opens
+	// a browsable list of items, each with its own photo + optional
+	// video/link. Reads are public (no auth) so anyone who scans the marker
+	// can view the catalog regardless of who created it.
+	_, _ = db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS catalogs (
+			id          BIGSERIAL PRIMARY KEY,
+			user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			name        TEXT NOT NULL,
+			created_at  TIMESTAMPTZ DEFAULT NOW()
+		)`)
+	_, _ = db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS catalog_items (
+			id           BIGSERIAL PRIMARY KEY,
+			catalog_id   BIGINT NOT NULL REFERENCES catalogs(id) ON DELETE CASCADE,
+			position     INT NOT NULL DEFAULT 0,
+			title        TEXT NOT NULL DEFAULT '',
+			description  TEXT NOT NULL DEFAULT '',
+			price        TEXT NOT NULL DEFAULT '',
+			image_key    TEXT NOT NULL DEFAULT '',
+			video_key    TEXT NOT NULL DEFAULT '',
+			url_link     TEXT NOT NULL DEFAULT '',
+			created_at   TIMESTAMPTZ DEFAULT NOW()
+		)`)
+	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_catalog_items_catalog ON catalog_items(catalog_id, position)`)
+	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_catalogs_user ON catalogs(user_id)`)
 
 	// Real storage quota / plan / referral bonus tracking (server-authoritative —
 	// previously these were only simulated client-side in localStorage).
@@ -2129,6 +2158,139 @@ func listTargetInteractionsHandler(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{"targets": out})
 }
 
+// POST /api/catalogs — creates a catalog with its items in one shot. Item
+// image/video keys are uploaded beforehand via the existing generic
+// /api/upload/presign endpoint (same pattern every other content type uses),
+// this handler just persists the metadata pointing at those already-uploaded
+// R2 objects.
+func createCatalogHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	var req struct {
+		Name  string `json:"name"`
+		Items []struct {
+			Title       string `json:"title"`
+			Description string `json:"description"`
+			Price       string `json:"price"`
+			ImageKey    string `json:"imageKey"`
+			VideoKey    string `json:"videoKey"`
+			URLLink     string `json:"urlLink"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if strings.TrimSpace(req.Name) == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if len(req.Items) == 0 {
+		writeError(w, http.StatusBadRequest, "at least one item is required")
+		return
+	}
+
+	tx, err := db.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	var catalogID int64
+	if err := tx.QueryRow(r.Context(),
+		`INSERT INTO catalogs (user_id, name) VALUES ($1,$2) RETURNING id`,
+		userID, strings.TrimSpace(req.Name),
+	).Scan(&catalogID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create catalog")
+		return
+	}
+
+	for i, item := range req.Items {
+		if _, err := tx.Exec(r.Context(),
+			`INSERT INTO catalog_items (catalog_id, position, title, description, price, image_key, video_key, url_link)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+			catalogID, i, item.Title, item.Description, item.Price, item.ImageKey, item.VideoKey, item.URLLink,
+		); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to save catalog items")
+			return
+		}
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save catalog")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": catalogID})
+}
+
+// GET /api/catalogs?id=123 — public, no auth: anyone who scans the catalog's
+// marker image needs to be able to load its contents regardless of who
+// created it.
+func getCatalogHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	idStr := r.URL.Query().Get("id")
+	catalogID, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil || catalogID == 0 {
+		writeError(w, http.StatusBadRequest, "a valid id is required")
+		return
+	}
+
+	var name string
+	if err := db.QueryRow(r.Context(), `SELECT name FROM catalogs WHERE id=$1`, catalogID).Scan(&name); err != nil {
+		writeError(w, http.StatusNotFound, "catalog not found")
+		return
+	}
+
+	rows, err := db.Query(r.Context(), `
+		SELECT title, description, price, image_key, video_key, url_link
+		FROM catalog_items WHERE catalog_id=$1 ORDER BY position ASC`, catalogID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load catalog items")
+		return
+	}
+	defer rows.Close()
+
+	type CatalogItem struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Price       string `json:"price"`
+		ImageURL    string `json:"imageUrl"`
+		VideoURL    string `json:"videoUrl"`
+		URLLink     string `json:"urlLink"`
+	}
+	var items []CatalogItem
+	for rows.Next() {
+		var it CatalogItem
+		var imageKey, videoKey string
+		if err := rows.Scan(&it.Title, &it.Description, &it.Price, &imageKey, &videoKey, &it.URLLink); err != nil {
+			continue
+		}
+		it.ImageURL = fileURL(imageKey)
+		it.VideoURL = fileURL(videoKey)
+		items = append(items, it)
+	}
+	if items == nil {
+		items = []CatalogItem{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": catalogID, "name": name, "items": items})
+}
+
 // GET /api/admin/reports — pending reports with enough target context for an
 // admin to judge them without leaving the panel.
 func adminListReportsHandler(w http.ResponseWriter, r *http.Request) {
@@ -3462,6 +3624,14 @@ func main() {
 	mux.HandleFunc("/api/targets/report", reportTargetHandler)
 	mux.HandleFunc("/api/targets/interaction", toggleTargetInteractionHandler)
 	mux.HandleFunc("/api/targets/interactions", listTargetInteractionsHandler)
+
+	mux.HandleFunc("/api/catalogs", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			createCatalogHandler(w, r)
+			return
+		}
+		getCatalogHandler(w, r)
+	})
 
 	// Content moderation (admin)
 	mux.HandleFunc("/api/admin/reports", adminListReportsHandler)

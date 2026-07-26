@@ -48,7 +48,11 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.NFC" />
 
     <uses-feature android:name="android.hardware.camera" android:required="true" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <!-- Not required — the app installs fine on devices without NFC hardware,
+         the NFC screen just shows "not supported" via CapacitorNfc.isSupported(). -->
+    <uses-feature android:name="android.hardware.nfc" android:required="false" />
 </manifest>

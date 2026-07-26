@@ -35,7 +35,7 @@ const PROMO_CARDS = [
   { key: 'streak',    eyebrow: 'Milestone', title: 'Keep your streak', body: null, variant: 'warm' },
 ];
 
-export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium, onSignOut, onRefer, onStreak, onCollection, onLiked, onAdmin, onScan, onSearch, onAnimation, user }) {
+export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium, onSignOut, onRefer, onStreak, onCollection, onLiked, onAdmin, onScan, onSearch, onAnimation, onNfc, onCatalog, user }) {
   const { lang, setLang } = useLanguage();
   const { theme, toggleTheme, colors } = useTheme();
   const tr = { ...T.en, ...(T[lang] || {}) };
@@ -469,10 +469,10 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
               onClick={() => { playScanFeedback(); onScan(); }} />
           )}
           <NavBtn className="home-feature" img="/nav-create.png" bg="#F970B4" label={tr.upload || 'Create'} labelColor={colors.text} onClick={onUpload} />
-          {onScan && (
-            <NavBtn className="home-feature" icon={<NfcNavIcon size={37} color="#fff" />}
+          {onNfc && (
+            <NavBtn className="home-feature" icon={<img src="/nav-nfc.png" alt="" style={{ width: 48, height: 48, objectFit: 'contain' }} />}
               bg="linear-gradient(135deg,#00C9A7,#00E5CC)" label="NFC" labelColor={colors.text}
-              onClick={() => { playScanFeedback(); onScan(); }} />
+              onClick={onNfc} />
           )}
           {onCollection && (
             <NavBtn className="home-feature" icon={<SavedNavIcon size={39} color="#fff" />} bg="linear-gradient(135deg,#FEAE3B,#FFC768)" label={tr.navSaved || 'Saved'} labelColor={colors.text} onClick={onCollection} />
@@ -486,6 +486,9 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
           )}
           {onAnimation && (
             <NavBtn className="home-feature" img="/nav-animation.png" bg="#CA8540" label={tr.navAnimation || 'Animation'} labelColor={colors.text} onClick={onAnimation} />
+          )}
+          {onCatalog && (
+            <NavBtn className="home-feature" icon={<CatalogNavIcon size={39} color="#fff" />} bg="linear-gradient(135deg,#6366F1,#8B85F8)" label="Catalog" labelColor={colors.text} onClick={onCatalog} />
           )}
           <NavBtn className="home-feature" icon={<ShareIcon size={48} color="#fff" />} bg="linear-gradient(135deg,#00C9A7,#00E5CC)" label={tr.navShare || 'Share'} labelColor={colors.text} onClick={handleShare} />
         </div>
@@ -994,12 +997,13 @@ function MoonIcon({ size = 17, color = '#555' }) {
 function BellIcon({ size = 20, color = '#555' }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>; }
 function GlobeIcon({ size = 15, color = '#555' }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18Z"/></svg>; }
 function HeartIcon({ size = 20, color = '#555' }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill={color} stroke="none"><path d="M12 21s-7.5-4.8-10-9.3C.4 8.6 1.7 5 5.2 4.2c2-.5 4 .3 5.2 2 .3.4.9.4 1.2 0 1.2-1.7 3.2-2.5 5.2-2 3.5.8 4.8 4.4 3.2 7.5C19.5 16.2 12 21 12 21z"/></svg>; }
-function NfcNavIcon({ size = 32, color = '#fff' }) {
+function CatalogNavIcon({ size = 34, color = '#fff' }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill={color} stroke="none">
-      <rect x="2.5"  y="13.5" width="4.5" height="7.5" rx="1.8" />
-      <rect x="9.75" y="8.5"  width="4.5" height="12.5" rx="1.8" />
-      <rect x="17"   y="3.5"  width="4.5" height="17.5" rx="1.8" />
+      <rect x="3"  y="3"  width="8" height="8" rx="2" />
+      <rect x="13" y="3"  width="8" height="8" rx="2" />
+      <rect x="3"  y="13" width="8" height="8" rx="2" />
+      <rect x="13" y="13" width="8" height="8" rx="2" />
     </svg>
   );
 }

@@ -23,6 +23,12 @@ const BACK_MAP = {
   'anim-setup':  'home',
   'doc-setup':   'image-upload',
   'admin':       'home',
+  'nfc':          'home',
+  'nfc-write':    'nfc',
+  'nfc-read':     'nfc',
+  'nfc-clear':    'nfc',
+  'nfc-history':  'nfc',
+  'catalog-setup': 'home',
   // Onboarding (account type → category → details → complete) now has an
   // on-screen Back button on every step, mirroring these same targets — kept
   // in sync so the hardware back button / edge-swipe gesture behaves the
@@ -57,6 +63,12 @@ const DocumentSetupScreen      = lazy(() => import('./components/DocumentSetupSc
 const PhotoAnimationSetupScreen = lazy(() => import('./components/PhotoAnimationSetupScreen.jsx'));
 const CollectionScreen         = lazy(() => import('./components/CollectionScreen.jsx'));
 const LikedSavedScreen         = lazy(() => import('./components/LikedSavedScreen.jsx'));
+const NfcDashboardScreen       = lazy(() => import('./components/NfcDashboardScreen.jsx'));
+const NfcWriteMenuScreen       = lazy(() => import('./components/NfcWriteMenuScreen.jsx'));
+const NfcReadScreen            = lazy(() => import('./components/NfcReadScreen.jsx'));
+const NfcClearScreen           = lazy(() => import('./components/NfcClearScreen.jsx'));
+const NfcHistoryScreen         = lazy(() => import('./components/NfcHistoryScreen.jsx'));
+const CatalogSetupScreen       = lazy(() => import('./components/CatalogSetupScreen.jsx'));
 const SetupScreen              = lazy(() => import('./components/SetupScreen.jsx'));
 const SignInScreen             = lazy(() => import('./components/SignInScreen.jsx'));
 const SignUpScreen             = lazy(() => import('./components/SignUpScreen.jsx'));
@@ -645,6 +657,26 @@ export default function App() {
         onUploadGlobal={handleGoalPublic}
       />
     );
+  } else if (appView === 'nfc') {
+    mainScreen = (
+      <NfcDashboardScreen
+        onBack={() => setAppView('home')}
+        onRead={() => setAppView('nfc-read')}
+        onWrite={() => setAppView('nfc-write')}
+        onClear={() => setAppView('nfc-clear')}
+        onHistory={() => setAppView('nfc-history')}
+      />
+    );
+  } else if (appView === 'nfc-write') {
+    mainScreen = <NfcWriteMenuScreen onBack={() => setAppView('nfc')} onHistory={() => setAppView('nfc-history')} />;
+  } else if (appView === 'nfc-read') {
+    mainScreen = <NfcReadScreen onBack={() => setAppView('nfc')} />;
+  } else if (appView === 'nfc-clear') {
+    mainScreen = <NfcClearScreen onBack={() => setAppView('nfc')} />;
+  } else if (appView === 'nfc-history') {
+    mainScreen = <NfcHistoryScreen onBack={() => setAppView('nfc')} />;
+  } else if (appView === 'catalog-setup') {
+    mainScreen = <CatalogSetupScreen onStart={handleStart} onBack={() => setAppView('home')} isPublic={selectedVisibility === 'public'} />;
   } else if (appView === 'home') {
     mainScreen = !localStorage.getItem('memoera_token') ? null : (
       <>
@@ -657,6 +689,11 @@ export default function App() {
           onRefer={() => setAppView('refer')}
           onStreak={() => setAppView('streak')}
           onCollection={() => setAppView('collection')}
+          onNfc={() => setAppView('nfc')}
+          onCatalog={() => {
+            setSelectedVisibility('private');
+            setAppView('catalog-setup');
+          }}
           onLiked={() => setAppView('liked')}
           onAdmin={() => setAppView('admin')}
           onSignOut={handleSignOut}
