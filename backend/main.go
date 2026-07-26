@@ -797,7 +797,7 @@ func signUpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.FirstName == "" || req.LastName == "" || req.Mobile == "" || req.Password == "" || req.OTP == "" {
+	if req.FirstName == "" || req.Mobile == "" || req.Password == "" || req.OTP == "" {
 		writeError(w, http.StatusBadRequest, "All fields are required")
 		return
 	}

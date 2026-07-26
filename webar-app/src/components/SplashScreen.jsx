@@ -1,24 +1,15 @@
 import { useEffect, useState } from 'react';
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
-const TAGLINE = "Bring Memories to Life";
 
 export default function SplashScreen({ onDone }) {
   const [exiting, setExiting] = useState(false);
-  const [charIdx, setCharIdx] = useState(0);
 
   useEffect(() => {
     const exitT = setTimeout(() => setExiting(true), 3800);
     const doneT = setTimeout(onDone, 4400);
     return () => { clearTimeout(exitT); clearTimeout(doneT); };
   }, [onDone]);
-
-  // Typewriter effect for tagline — starts after 1.1s
-  useEffect(() => {
-    if (charIdx >= TAGLINE.length) return;
-    const t = setTimeout(() => setCharIdx(i => i + 1), charIdx === 0 ? 1100 : 55);
-    return () => clearTimeout(t);
-  }, [charIdx]);
 
   return (
     <div style={{
@@ -116,17 +107,6 @@ export default function SplashScreen({ onDone }) {
           </p>
         </div>
 
-        {/* Typewriter tagline */}
-        <div style={{ minHeight:22, textAlign:'center' }}>
-          <span style={{ fontSize:13, fontWeight:500, letterSpacing:'0.12em', color:'#00C9A7',
-            fontFamily:FONT, textTransform:'uppercase' }}>
-            {TAGLINE.slice(0, charIdx)}
-          </span>
-          {charIdx < TAGLINE.length && (
-            <span style={{ fontSize:13, color:'#00C9A7', fontFamily:FONT,
-              animation:'sp-cursor 0.7s step-end infinite' }}>|</span>
-          )}
-        </div>
       </div>
     </div>
   );

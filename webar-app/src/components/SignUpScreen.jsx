@@ -5,24 +5,14 @@ import { T } from '../config/translations.js';
 import { useTheme } from '../context/ThemeContext.jsx';
 import OtpKeypad from './OtpKeypad.jsx';
 
-const SECURITY_QUESTIONS = [
-  "What was the name of your first pet?",
-  "What is your mother's maiden name?",
-  "What city were you born in?",
-  "What was the name of your primary school?",
-  "What is your oldest sibling's middle name?",
-];
-
 function validateStep1(form) {
   const errors = {};
-  if (!form.firstName.trim()) errors.firstName = 'First name is required.';
-  if (!form.lastName.trim()) errors.lastName = 'Last name is required.';
+  if (!form.firstName.trim()) errors.firstName = 'Name is required.';
   if (!form.mobile.trim()) {
     errors.mobile = 'Mobile number is required.';
   } else if (!/^\d{10}$/.test(form.mobile.replace(/\s/g, ''))) {
     errors.mobile = 'Enter a valid 10-digit mobile number.';
   }
-  if (!form.dateOfBirth) errors.dateOfBirth = 'Date of birth is required.';
   if (!form.password) {
     errors.password = 'Password is required.';
   } else if (form.password.length < 6) {
@@ -33,7 +23,6 @@ function validateStep1(form) {
   } else if (form.confirmPassword !== form.password) {
     errors.confirmPassword = 'Passwords do not match.';
   }
-  if (!form.securityAnswer.trim()) errors.securityAnswer = 'Security answer is required.';
   return errors;
 }
 
@@ -43,10 +32,8 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
   const { colors } = useTheme();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({
-    firstName: '', lastName: '', mobile: '', dateOfBirth: '',
+    firstName: '', mobile: '',
     password: '', confirmPassword: '',
-    securityQuestion: SECURITY_QUESTIONS[0], securityAnswer: '',
-    referralCode: '',
   });
   const [otp, setOtp] = useState('');
   const [maskedMobile, setMaskedMobile] = useState('');
@@ -108,13 +95,9 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
       const res = await fetch(`${API_BASE}/api/auth/signup`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          firstName: form.firstName, lastName: form.lastName,
+          firstName: form.firstName,
           mobile: form.mobile.replace(/\s/g, ''),
           password: form.password, otp: otp.trim(),
-          dateOfBirth: form.dateOfBirth,
-          securityQuestion: form.securityQuestion,
-          securityAnswer: form.securityAnswer,
-          referralCode: form.referralCode.trim(),
         }),
       });
       const data = await parseApiResponse(res);
@@ -143,19 +126,11 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
               <h2 style={{ ...S.heading, color: colors.text }}>{tr.createAccountTitle}</h2>
               {error && <div style={S.errorBox}>{error}</div>}
               <form onSubmit={handleSendOTP} style={S.form}>
-                <div style={S.row}>
-                  <Field label={tr.firstName} required error={showValidation ? fieldErrors.firstName : null} colors={colors} style={{ flex:1 }}>
-                    <input required style={{ ...S.input, color: colors.text, background: colors.surface, borderBottomColor: showValidation && fieldErrors.firstName ? '#FF6B6B' : undefined }} type="text" placeholder="First name" value={form.firstName} onChange={set('firstName')} />
-                  </Field>
-                  <Field label={tr.lastName} required error={showValidation ? fieldErrors.lastName : null} colors={colors} style={{ flex:1 }}>
-                    <input required style={{ ...S.input, color: colors.text, background: colors.surface, borderBottomColor: showValidation && fieldErrors.lastName ? '#FF6B6B' : undefined }} type="text" placeholder="Last name" value={form.lastName} onChange={set('lastName')} />
-                  </Field>
-                </div>
+                <Field label="Name" required error={showValidation ? fieldErrors.firstName : null} colors={colors}>
+                  <input required style={{ ...S.input, color: colors.text, background: colors.surface, borderBottomColor: showValidation && fieldErrors.firstName ? '#FF6B6B' : undefined }} type="text" placeholder="Name" value={form.firstName} onChange={set('firstName')} />
+                </Field>
                 <Field label={tr.mobileNumber} required error={showValidation ? fieldErrors.mobile : null} colors={colors}>
                   <input required style={{ ...S.input, color: colors.text, background: colors.surface, borderBottomColor: showValidation && fieldErrors.mobile ? '#FF6B6B' : undefined }} type="tel" placeholder="10-digit mobile number" value={form.mobile} onChange={set('mobile')} maxLength={10} />
-                </Field>
-                <Field label="Date of Birth" required error={showValidation ? fieldErrors.dateOfBirth : null} colors={colors}>
-                  <input required style={{ ...S.input, color: colors.text, background: colors.surface, borderBottomColor: showValidation && fieldErrors.dateOfBirth ? '#FF6B6B' : undefined }} type="date" value={form.dateOfBirth} onChange={set('dateOfBirth')} />
                 </Field>
                 <Field label={tr.createPassword} required error={showValidation ? fieldErrors.password : null} colors={colors}>
                   <div style={{ position:'relative' }}>
@@ -171,20 +146,6 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
                   <input required style={{ ...S.input, color: colors.text, background: colors.surface, borderBottomColor: showValidation && fieldErrors.confirmPassword ? '#FF6B6B' : undefined }}
                     type={showPass ? 'text' : 'password'} placeholder="Re-enter password"
                     value={form.confirmPassword} onChange={set('confirmPassword')} />
-                </Field>
-                <Field label="Security Question" required colors={colors}>
-                  <select style={{ ...S.input, color: colors.text, background: colors.surface }}
-                    value={form.securityQuestion} onChange={set('securityQuestion')}>
-                    {SECURITY_QUESTIONS.map((q) => <option key={q} value={q}>{q}</option>)}
-                  </select>
-                </Field>
-                <Field label="Security Answer" required error={showValidation ? fieldErrors.securityAnswer : null} colors={colors}>
-                  <input required style={{ ...S.input, color: colors.text, background: colors.surface, borderBottomColor: showValidation && fieldErrors.securityAnswer ? '#FF6B6B' : undefined }}
-                    type="text" placeholder="Your answer" value={form.securityAnswer} onChange={set('securityAnswer')} />
-                </Field>
-                <Field label="Employee / Referral Code" colors={colors}>
-                  <input style={{ ...S.input, color: colors.text, background: colors.surface }}
-                    type="text" placeholder="Optional" value={form.referralCode} onChange={set('referralCode')} />
                 </Field>
                 <button type="submit" disabled={loading} style={{ ...S.btn, ...(loading ? S.btnDisabled : {}) }}>
                   {loading ? 'Sending OTP...' : tr.sendOtp}

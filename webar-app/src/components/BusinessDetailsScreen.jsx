@@ -20,23 +20,25 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/;
 // Indian PIN codes are 6 digits — used to catch addresses missing one entirely.
 const PINCODE_RE = /\b\d{6}\b/;
 
+const FILL_PROPER = 'Fill Proper content';
+
 function validateAll(form) {
   const errors = {};
-  if (!form.businessName.trim()) errors.businessName = 'Business name is required.';
+  if (!form.businessName.trim()) errors.businessName = FILL_PROPER;
   if (!form.businessAddress.trim()) {
-    errors.businessAddress = 'Business address is required.';
+    errors.businessAddress = FILL_PROPER;
   } else if (!PINCODE_RE.test(form.businessAddress)) {
-    errors.businessAddress = 'Invalid address — please include a valid 6-digit PIN code.';
+    errors.businessAddress = FILL_PROPER;
   }
   if (!form.phone.trim()) {
-    errors.phone = 'Phone number is required.';
+    errors.phone = FILL_PROPER;
   } else if (!/^\d{10}$/.test(form.phone.replace(/\s/g, ''))) {
-    errors.phone = 'Invalid phone number — for India it must be exactly 10 digits.';
+    errors.phone = FILL_PROPER;
   }
   if (!form.email.trim()) {
-    errors.email = 'Email address is required.';
+    errors.email = FILL_PROPER;
   } else if (!EMAIL_RE.test(form.email.trim())) {
-    errors.email = 'Invalid email — enter a valid address with any real domain (.com, .org, .net, .in, etc.), e.g. name@gmail.com, name@yahoo.com, or your own business domain.';
+    errors.email = FILL_PROPER;
   }
   return errors;
 }
@@ -76,7 +78,7 @@ export default function BusinessDetailsScreen({ onContinue, onBack }) {
         </div>
 
         {showValidation && Object.keys(fieldErrors).length > 0 && (
-          <div style={s.errorBox}>Please fix the highlighted fields below.</div>
+          <div style={s.errorBox}>Fill Proper content</div>
         )}
 
         <div style={s.form}>

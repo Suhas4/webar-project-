@@ -4,6 +4,7 @@
 
 const http  = require('http');
 const fs    = require('fs');
+const os    = require('os');
 const path  = require('path');
 const { exec } = require('child_process');
 
@@ -82,9 +83,19 @@ const server = http.createServer((req, res) => {
   fs.createReadStream(filePath).pipe(res);
 });
 
-server.listen(PORT, '127.0.0.1', () => {
+server.listen(PORT, '0.0.0.0', () => {
   const url = `http://localhost:${PORT}`;
   console.log(`\n  ✅  Memoera is running at ${url}`);
+
+  // Print LAN URLs so a phone on the same Wi-Fi can open the app directly.
+  const nets = os.networkInterfaces();
+  for (const iface of Object.values(nets)) {
+    for (const net of iface || []) {
+      if (net.family === 'IPv4' && !net.internal) {
+        console.log(`  📱  On your phone (same Wi-Fi): http://${net.address}:${PORT}`);
+      }
+    }
+  }
   console.log('      Press Ctrl+C to stop.\n');
 
   // Open browser (Windows / macOS / Linux)
