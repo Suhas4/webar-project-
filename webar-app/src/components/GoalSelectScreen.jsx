@@ -11,6 +11,7 @@ export default function GoalSelectScreen({ onContinue, onBack }) {
 
   return (
     <div style={{ ...s.screen, background: colors.bg }}>
+      <button onClick={onBack} style={{ ...s.backBtn, color: colors.textMuted }}>← Back</button>
       <div style={s.container}>
         <p style={{ ...s.eyebrow, color: colors.textMuted }}>NEW MEMORY</p>
         <h1 style={{ ...s.title, color: colors.text }}>Select your goal</h1>
@@ -28,8 +29,6 @@ export default function GoalSelectScreen({ onContinue, onBack }) {
             <p style={{ ...s.goalHint, color: colors.textMuted }}>{tr.wizPublicHint || 'Anyone can scan and view this — it appears in public discovery.'}</p>
           </button>
         </div>
-
-        <button onClick={onBack} style={{ ...s.backBtn, color: colors.textMuted }}>← Back</button>
       </div>
     </div>
   );
@@ -37,7 +36,7 @@ export default function GoalSelectScreen({ onContinue, onBack }) {
 
 const s = {
   screen: { position: 'fixed', inset: 0, overflowY: 'auto', display: 'flex', justifyContent: 'center', padding: '48px 0' },
-  container: { width: '100%', maxWidth: 420, padding: '0 24px', display: 'flex', flexDirection: 'column', gap: 8 },
+  container: { width: '100%', maxWidth: 420, padding: '96px 24px 0', display: 'flex', flexDirection: 'column', gap: 8 },
   eyebrow: { fontSize: 12, fontWeight: 700, letterSpacing: '0.14em', fontFamily: FONT, margin: 0, textTransform: 'uppercase' },
   title: { fontSize: 26, fontWeight: 800, fontFamily: FONT, margin: '4px 0 4px' },
   subtitle: { fontSize: 13.5, fontFamily: FONT, margin: '0 0 20px', lineHeight: 1.6 },
@@ -46,5 +45,5 @@ const s = {
   goalIcon: { width: 44, height: 44, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 },
   goalTitle: { fontSize: 17, fontWeight: 700, fontFamily: FONT, margin: 0 },
   goalHint: { fontSize: 12.5, fontFamily: FONT, margin: 0, lineHeight: 1.5 },
-  backBtn: { background: 'transparent', border: 'none', fontSize: 14, fontFamily: FONT, cursor: 'pointer', marginTop: 12, padding: '4px 0', textAlign: 'left' },
+  backBtn: { position: 'fixed', top: 48, left: 16, background: 'transparent', border: 'none', fontSize: 14, fontWeight: 600, fontFamily: FONT, cursor: 'pointer', padding: '6px 4px', zIndex: 2 },
 };

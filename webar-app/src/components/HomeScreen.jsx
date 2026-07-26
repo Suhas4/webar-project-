@@ -24,7 +24,6 @@ const PROFILE_MENU_KEYS = [
   { key: 'account',       icon: '👤', section: 'account' },
   { key: 'notifications', icon: '🔔', section: 'notifications' },
   { key: 'ar',            icon: '🔭', section: 'ar' },
-  { key: 'posters',       icon: '🖼️', section: 'posters' },
   { key: 'theme',         icon: '🎨', section: 'theme' },
   { key: 'subscription',  icon: '💎', section: 'subscription' },
   { key: 'refer',         icon: '🎁', section: null },
@@ -34,10 +33,9 @@ const PROFILE_MENU_KEYS = [
 
 const PROMO_CARDS = [
   { key: 'streak',    eyebrow: 'Milestone', title: 'Keep your streak', body: null, variant: 'warm' },
-  { key: 'tip',       eyebrow: 'Tip', title: 'Steadier scans', body: 'Hold for 2 seconds for sharper 3D detail.', variant: 'violet' },
 ];
 
-export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium, onSignOut, onRefer, onStreak, onCollection, onAdmin, onScan, onSearch, onAnimation, user }) {
+export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium, onSignOut, onRefer, onStreak, onCollection, onLiked, onAdmin, onScan, onSearch, onAnimation, user }) {
   const { lang, setLang } = useLanguage();
   const { theme, toggleTheme, colors } = useTheme();
   const tr = { ...T.en, ...(T[lang] || {}) };
@@ -46,7 +44,7 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
 
   const PROFILE_MENU_LABELS = {
     account: tr.accountSection, notifications: tr.notificationsSection, ar: tr.arSettingsSection,
-    posters: tr.myPosters, theme: tr.themeSection, subscription: tr.subscriptionSection,
+    theme: tr.themeSection, subscription: tr.subscriptionSection,
     refer: tr.referAFriend, support: tr.supportSection, about: tr.aboutUsSection,
   };
 
@@ -54,6 +52,7 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
   const [storageDismissed, setStorageDismissed] = useState(false);
   const [storagePct,       setStoragePct]       = useState(null);
   const [notifOpen,  setNotifOpen]  = useState(false);
+  const [langMenuOpen, setLangMenuOpen] = useState(false);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [streakCount, setStreakCount] = useState(0);
   const [toastMsg, setToastMsg] = useState('');
@@ -317,9 +316,6 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
             <div style={{ ...styles.brandMark, background: colors.surfaceHigh, border: `1px solid ${colors.border}` }}>
               <img src="/logo-icon.png" alt="Memoera" style={styles.brandMarkImg} />
             </div>
-            <div>
-              <div style={{ ...styles.brandName, color: colors.text }}>MEMOERA</div>
-            </div>
           </div>
 
           <div style={styles.headerControls}>
@@ -328,13 +324,22 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
               {isDark ? <SunIcon size={16} color={colors.text} /> : <MoonIcon size={15} color={colors.text} />}
             </button>
 
-            <div style={{ ...styles.langPill, background: colors.surfaceHigh, border: `1px solid ${colors.border}` }}>
-              <select value={lang} onChange={(e) => setLang(e.target.value)}
-                style={{ ...styles.langSelect, color: colors.text }}>
-                {Object.entries(LANGUAGES).map(([k, v]) => (
-                  <option key={k} value={k} style={{ background: colors.bgSolid, color: colors.text }}>{v}</option>
-                ))}
-              </select>
+            <div style={{ position: 'relative' }}>
+              <button className="home-icon-btn" onClick={() => setLangMenuOpen(o => !o)} title="Language" aria-label="Language"
+                style={{ ...styles.iconBtn, background: colors.surfaceHigh, border: `1px solid ${colors.border}` }}>
+                <GlobeIcon size={16} color={colors.text} />
+              </button>
+              {langMenuOpen && (
+                <div style={{ ...styles.dropdown, width: 180, background: colors.bgSolid, border: `1px solid ${colors.border}` }}>
+                  {Object.entries(LANGUAGES).map(([k, v]) => (
+                    <button key={k} onClick={() => { setLang(k); setLangMenuOpen(false); }}
+                      style={{ ...styles.menuItem, color: k === lang ? colors.accent : colors.text,
+                        fontWeight: k === lang ? 700 : 600 }}>
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div style={{ position: 'relative' }}>
@@ -473,11 +478,16 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
           {onCollection && (
             <NavBtn className="home-feature" img="/nav-saved.png" label={tr.navSaved || 'Saved'} labelColor={colors.text} onClick={onCollection} />
           )}
+          {onLiked && (
+            <NavBtn className="home-feature" icon={<HeartIcon color="#fff" />} bg="linear-gradient(135deg,#ff3c5a,#ff7a90)" label="Liked" labelColor={colors.text} onClick={onLiked} />
+          )}
           <NavBtn className="home-feature" img="/nav-albums.png" label={tr.gallery || 'Albums'} labelColor={colors.text} onClick={onGallery} />
           {onStreak && (
             <NavBtn className="home-feature" img="/nav-streak.png" count={streakCount} label={tr.navStreak || 'Streak'} labelColor={colors.text} onClick={onStreak} />
           )}
-          <NavBtn className="home-feature" img="/nav-animation.png" label={tr.navAnimation || 'Animation'} labelColor={colors.text} onClick={() => onAnimation ? onAnimation() : onSettings('posters')} />
+          {onAnimation && (
+            <NavBtn className="home-feature" img="/nav-animation.png" label={tr.navAnimation || 'Animation'} labelColor={colors.text} onClick={onAnimation} />
+          )}
           <NavBtn className="home-feature" icon={<ShareIcon color="#fff" />} bg="linear-gradient(135deg,#00C9A7,#00E5CC)" label={tr.navShare || 'Share'} labelColor={colors.text} onClick={handleShare} />
         </div>
 
@@ -979,6 +989,8 @@ function MoonIcon({ size = 17, color = '#555' }) {
   );
 }
 function BellIcon({ size = 20, color = '#555' }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>; }
+function GlobeIcon({ size = 15, color = '#555' }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18Z"/></svg>; }
+function HeartIcon({ size = 20, color = '#555' }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill={color} stroke="none"><path d="M12 21s-7.5-4.8-10-9.3C.4 8.6 1.7 5 5.2 4.2c2-.5 4 .3 5.2 2 .3.4.9.4 1.2 0 1.2-1.7 3.2-2.5 5.2-2 3.5.8 4.8 4.4 3.2 7.5C19.5 16.2 12 21 12 21z"/></svg>; }
 function ProfileIcon({ size = 22, color = '#555' }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-3.6 3.1-6 8-6s8 2.4 8 6"/></svg>; }
 function ShareIcon({ color = '#555' }) {
   return (
@@ -1058,10 +1070,6 @@ const styles = {
   iconBtn: { width:36,height:36,borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',
     cursor:'pointer',position:'relative',boxShadow:'inset 0 1px 0 rgba(255,255,255,.1)' },
   badgeDot: { position:'absolute',top:5,right:5,width:7,height:7,borderRadius:'50%',background:DANGER },
-  langPill: { borderRadius:12,display:'flex',alignItems:'center',boxShadow:'inset 0 1px 0 rgba(255,255,255,.1)' },
-  langSelect: { border:'none',background:'transparent',fontSize:11,fontFamily:FONT,padding:'8px 6px',
-    cursor:'pointer',outline:'none',maxWidth:56 },
-
   dropdown: { position:'absolute',top:'calc(100% + 8px)',right:0,width:270,zIndex:30,
     borderRadius:16,boxShadow:'0 8px 32px rgba(0,0,0,0.35)',overflow:'hidden',overflowY:'auto',maxHeight:'70vh' },
   menuItem: { width:'100%',background:'transparent',border:'none',cursor:'pointer',

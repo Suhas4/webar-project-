@@ -259,6 +259,20 @@ func initDB(ctx context.Context) error {
 		)`)
 	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_content_reports_status ON content_reports(status) WHERE status = 'pending'`)
 
+	// Like/Save on scanned AR content — a viewer can like or save ANY target
+	// (their own or someone else's public one), so this is keyed by the
+	// viewer's user_id + the target's global id, not target ownership.
+	_, _ = db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS target_interactions (
+			id          BIGSERIAL PRIMARY KEY,
+			user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			target_id   BIGINT NOT NULL REFERENCES ar_targets(id) ON DELETE CASCADE,
+			kind        TEXT NOT NULL CHECK (kind IN ('like','save')),
+			created_at  TIMESTAMPTZ DEFAULT NOW(),
+			UNIQUE (user_id, target_id, kind)
+		)`)
+	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_target_interactions_user_kind ON target_interactions(user_id, kind)`)
+
 	// Real storage quota / plan / referral bonus tracking (server-authoritative —
 	// previously these were only simulated client-side in localStorage).
 	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS own_referral_code TEXT`)
@@ -1832,7 +1846,7 @@ func getTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := db.Query(r.Context(), `
-		SELECT target_index, label, plane_width, plane_height, plane_offset_y, image_key, video_key, mind_key,
+		SELECT id, target_index, label, plane_width, plane_height, plane_offset_y, image_key, video_key, mind_key,
 		       COALESCE(target_type, 'video'), COALESCE(url_link, ''), COALESCE(is_public, false),
 		       created_at, COALESCE(file_name, ''), COALESCE(preview_key, ''), COALESCE(animation_effect, 'popIn')
 		FROM ar_targets WHERE user_id=$1
@@ -1844,6 +1858,7 @@ func getTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 
 	type TargetResponse struct {
+		ID              int64     `json:"id"`
 		TargetIndex     int       `json:"targetIndex"`
 		Label           string    `json:"label"`
 		PlaneWidth      float64   `json:"planeWidth"`
@@ -1869,7 +1884,7 @@ func getTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var t TargetResponse
 		var imageKey, videoKey, mindKey, previewKey string
-		if err := rows.Scan(&t.TargetIndex, &t.Label, &t.PlaneWidth, &t.PlaneHeight, &t.PlaneOffsetY,
+		if err := rows.Scan(&t.ID, &t.TargetIndex, &t.Label, &t.PlaneWidth, &t.PlaneHeight, &t.PlaneOffsetY,
 			&imageKey, &videoKey, &mindKey, &t.TargetType, &t.URLLink, &t.IsPublic, &t.CreatedAt,
 			&t.FileName, &previewKey, &t.AnimationEffect); err != nil {
 			continue
@@ -1996,6 +2011,122 @@ func reportTargetHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "reported"})
+}
+
+// POST /api/targets/interaction — toggle a like or save on a target the
+// user just scanned/viewed. Works for any target (their own or someone
+// else's public one) since this records the viewer's own reaction, not
+// anything about the target's ownership.
+func toggleTargetInteractionHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	var req struct {
+		TargetID int64  `json:"targetId"`
+		Kind     string `json:"kind"`
+		Active   bool   `json:"active"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TargetID == 0 {
+		writeError(w, http.StatusBadRequest, "targetId is required")
+		return
+	}
+	if req.Kind != "like" && req.Kind != "save" {
+		writeError(w, http.StatusBadRequest, "kind must be 'like' or 'save'")
+		return
+	}
+
+	var exists bool
+	_ = db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM ar_targets WHERE id=$1)`, req.TargetID).Scan(&exists)
+	if !exists {
+		writeError(w, http.StatusNotFound, "target not found")
+		return
+	}
+
+	if req.Active {
+		_, err = db.Exec(r.Context(),
+			`INSERT INTO target_interactions (user_id, target_id, kind) VALUES ($1,$2,$3)
+			 ON CONFLICT (user_id, target_id, kind) DO NOTHING`, userID, req.TargetID, req.Kind)
+	} else {
+		_, err = db.Exec(r.Context(),
+			`DELETE FROM target_interactions WHERE user_id=$1 AND target_id=$2 AND kind=$3`, userID, req.TargetID, req.Kind)
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update "+req.Kind)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"targetId": req.TargetID, "kind": req.Kind, "active": req.Active})
+}
+
+// GET /api/targets/interactions?kind=like|save — the signed-in user's liked
+// or saved targets, most recent first, with public R2 URLs ready to render.
+func listTargetInteractionsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	kind := r.URL.Query().Get("kind")
+	if kind != "like" && kind != "save" {
+		writeError(w, http.StatusBadRequest, "kind must be 'like' or 'save'")
+		return
+	}
+
+	rows, err := db.Query(r.Context(), `
+		SELECT t.id, t.label, COALESCE(t.image_key,''), COALESCE(t.video_key,''),
+		       COALESCE(t.target_type,'video'), COALESCE(t.url_link,''), COALESCE(t.preview_key,''),
+		       ti.created_at
+		FROM target_interactions ti
+		JOIN ar_targets t ON t.id = ti.target_id
+		WHERE ti.user_id = $1 AND ti.kind = $2
+		ORDER BY ti.created_at DESC
+		LIMIT 200`, userID, kind)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to fetch "+kind+"d targets")
+		return
+	}
+	defer rows.Close()
+
+	type InteractedTarget struct {
+		ID         int64     `json:"id"`
+		Label      string    `json:"label"`
+		ImageURL   string    `json:"imageUrl"`
+		VideoURL   string    `json:"videoUrl"`
+		TargetType string    `json:"targetType"`
+		URLLink    string    `json:"urlLink"`
+		PreviewURL string    `json:"previewUrl"`
+		CreatedAt  time.Time `json:"createdAt"`
+	}
+
+	var out []InteractedTarget
+	for rows.Next() {
+		var t InteractedTarget
+		var imageKey, videoKey, previewKey string
+		if err := rows.Scan(&t.ID, &t.Label, &imageKey, &videoKey, &t.TargetType, &t.URLLink, &previewKey, &t.CreatedAt); err != nil {
+			continue
+		}
+		t.ImageURL = fileURL(imageKey)
+		t.VideoURL = fileURL(videoKey)
+		t.PreviewURL = fileURL(previewKey)
+		out = append(out, t)
+	}
+	if out == nil {
+		out = []InteractedTarget{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"targets": out})
 }
 
 // GET /api/admin/reports — pending reports with enough target context for an
@@ -3329,6 +3460,8 @@ func main() {
 	mux.HandleFunc("/api/targets", getTargetsHandler)
 	mux.HandleFunc("/api/targets/delete", deleteTargetsHandler)
 	mux.HandleFunc("/api/targets/report", reportTargetHandler)
+	mux.HandleFunc("/api/targets/interaction", toggleTargetInteractionHandler)
+	mux.HandleFunc("/api/targets/interactions", listTargetInteractionsHandler)
 
 	// Content moderation (admin)
 	mux.HandleFunc("/api/admin/reports", adminListReportsHandler)

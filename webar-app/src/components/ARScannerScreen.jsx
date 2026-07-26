@@ -30,7 +30,7 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
   const [spaceGlbUrl, setSpaceGlbUrl] = useState(null);
   const [spaceGlbEffect, setSpaceGlbEffect] = useState('popIn');
   const [animOverlay, setAnimOverlay] = useState(null); // { title, frames }
-  const [reportToast, setReportToast] = useState(null); // brief confirmation text after reporting content
+  const [reportToast, setReportToast] = useState(null); // brief confirmation text — reporting, liking/saving, or sharing content
   const iframeRef      = useRef(null);
   const bufferRef      = useRef(null);
   const targetsRef     = useRef(targets);
@@ -110,6 +110,37 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
           .catch(() => setReportToast("Couldn't submit report. Please try again."));
         setTimeout(() => setReportToast(null), 3500);
       }
+      if ((e.data?.type === 'ar-like-target' || e.data?.type === 'ar-save-target') && e.data?.targetId) {
+        const kind = e.data.type === 'ar-like-target' ? 'like' : 'save';
+        const token = localStorage.getItem('memoera_token');
+        if (!token) {
+          setReportToast('Sign in to ' + kind + ' this.');
+          setTimeout(() => setReportToast(null), 3500);
+          return;
+        }
+        fetch(`${API_BASE}/api/targets/interaction`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify({ targetId: e.data.targetId, kind, active: !!e.data.active }),
+        }).catch(() => {}); // best-effort — the button already reflects the tap optimistically
+      }
+      if (e.data?.type === 'ar-share-target') {
+        const label = e.data.label || 'this memory';
+        const text  = `Check out "${label}" on Memoera!`;
+        const url   = 'https://memoera.in';
+        (async () => {
+          if (navigator.share) {
+            try { await navigator.share({ title: 'Memoera', text, url }); return; } catch { /* user cancelled or unsupported — fall through */ }
+          }
+          try {
+            await navigator.clipboard.writeText(`${text} ${url}`);
+            setReportToast('Link copied!');
+          } catch {
+            setReportToast("Couldn't share — please try again.");
+          }
+          setTimeout(() => setReportToast(null), 3500);
+        })();
+      }
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
@@ -119,6 +150,11 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
     return (
       <div style={{ position:'fixed', inset:0, background:'#040D0B', zIndex:200,
         display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16, padding:32 }}>
+        <button onClick={onBack} style={{ position:'fixed', top:48, left:16, background:'transparent',
+          border:'none', color:'rgba(255,255,255,0.7)', fontSize:14, fontWeight:600, fontFamily:FONT,
+          cursor:'pointer', padding:'6px 4px', zIndex:2 }}>
+          ← Back
+        </button>
         <div style={{ fontSize:40 }}>⚠️</div>
         <p style={{ color:'#fff', fontFamily:FONT, fontSize:15, textAlign:'center' }}>{error}</p>
         <button onClick={onBack} style={{ background:TEAL, border:'none', borderRadius:50,

@@ -440,7 +440,7 @@ const s = {
   count:    { fontSize: 13, fontFamily: FONT },
   deleteAllBtn: { background: "rgba(220,50,50,0.12)", border: "1px solid rgba(220,50,50,0.35)", borderRadius: 20, color: "#FF6B6B", fontSize: 12, fontWeight: 600, fontFamily: FONT, padding: "6px 14px", cursor: "pointer" },
   empty:    { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontFamily: FONT, padding: 40 },
-  list:     { flex: 1, overflowY: "auto", padding: "0 16px 20px", display: "flex", flexDirection: "column", gap: 12 },
+  list:     { flex: 1, overflowY: "auto", padding: "0 16px 160px", display: "flex", flexDirection: "column", gap: 12 },
 
   card:     { borderRadius: 18, overflow: "hidden", display: "flex", alignItems: "center", gap: 12, padding: "14px 16px",
               boxShadow: "0 2px 10px rgba(0,0,0,0.10)" },

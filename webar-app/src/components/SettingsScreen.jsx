@@ -41,11 +41,6 @@ export default function SettingsScreen({ onBack, onProfile, initialSection }) {
   const [showPrivacy, setShowPrivacy]       = useState(false);
   const [showTerms, setShowTerms]           = useState(false);
 
-  // Poster history
-  const [posterHistory, setPosterHistory]               = useState(null);
-  const [posterHistoryLoading, setPosterHistoryLoading] = useState(false);
-  const [viewPoster, setViewPoster]                     = useState(null);
-
   // Notification prefs
   const [smsAlerts,   setSmsAlerts]   = useState(() => readPref('memoera_sms_alerts'));
   const [pushNotif,   setPushNotif]   = useState(() => readPref('memoera_push_notif', true));
@@ -82,28 +77,16 @@ export default function SettingsScreen({ onBack, onProfile, initialSection }) {
       .finally(() => setStorageLoading(false));
   };
 
-  const fetchPosterHistory = () => {
-    setPosterHistoryLoading(true);
-    const token = localStorage.getItem('memoera_token') || '';
-    fetch(API_BASE + '/api/poster/history', { headers: { Authorization: 'Bearer ' + token } })
-      .then(r => r.json())
-      .then(d => setPosterHistory(d.posters || []))
-      .catch(() => setPosterHistory([]))
-      .finally(() => setPosterHistoryLoading(false));
-  };
-
   const toggleSection = (name) => {
     const next = openSection === name ? null : name;
     setOpenSection(next);
     if (next === 'account' && !storage) fetchStorage();
-    if (next === 'posters' && !posterHistory) fetchPosterHistory();
   };
 
   // Deep-linked straight into a section (e.g. from the Home profile menu) —
   // fetch whatever that section needs, same as if the user had tapped it.
   useEffect(() => {
     if (initialSection === 'account' && !storage) fetchStorage();
-    if (initialSection === 'posters' && !posterHistory) fetchPosterHistory();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -113,7 +96,7 @@ export default function SettingsScreen({ onBack, onProfile, initialSection }) {
 
   const SECTION_TITLES = {
     account: tr.accountSection, notifications: tr.notificationsSection, ar: tr.arSettingsSection,
-    posters: tr.myPosters, theme: tr.themeSection, subscription: tr.subscriptionSection,
+    theme: tr.themeSection, subscription: tr.subscriptionSection,
     support: tr.supportSection, about: tr.aboutUsSection,
   };
 
@@ -223,53 +206,6 @@ export default function SettingsScreen({ onBack, onProfile, initialSection }) {
             <div style={{ fontSize: 10, color: colors.textMuted, marginTop: 6 }}>
               Forces a fresh scan-data rebuild next time a guest scans your public content.
             </div>
-          </div>
-        </AccordionCard>
-        )}
-
-        {/* ── My Posters (history) ── */}
-        {(!isFocused || initialSection === 'posters') && (
-        <AccordionCard
-          label="My Posters" icon="🖼️"
-          open={openSection === 'posters'}
-          onToggle={() => toggleSection('posters')}
-          colors={colors}
-        >
-          <div style={{ padding: '12px 0' }}>
-            {posterHistoryLoading ? (
-              <p style={{ ...s.hint, color: colors.textMuted }}>Loading...</p>
-            ) : !posterHistory || posterHistory.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '14px 6px' }}>
-                <div style={{ fontSize: 28, marginBottom: 8 }}>🎨</div>
-                <p style={{ ...s.hint, color: colors.textMuted, margin: 0 }}>
-                  No posters yet. Create one from the chat assistant's "🎨 Create Poster" tab —
-                  it'll show up here automatically.
-                </p>
-              </div>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, paddingBottom: 6 }}>
-                {posterHistory.map(p => (
-                  <button key={p.id} onClick={() => setViewPoster(p)} style={{
-                    position: 'relative', borderRadius: 14, overflow: 'hidden', cursor: 'pointer', border: 'none',
-                    aspectRatio: '3 / 4', background: p.colors?.bg || '#0a1628',
-                    boxShadow: `0 3px 14px ${p.colors?.primary || TEAL}33`,
-                  }}>
-                    {p.imageUrl && (
-                      <img src={p.imageUrl} alt="" style={{
-                        position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
-                      }} />
-                    )}
-                    <div style={{
-                      position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 1,
-                      background: 'linear-gradient(0deg, rgba(0,0,0,0.75), transparent)',
-                      padding: '16px 8px 6px', fontSize: 9, fontFamily: FONT, color: 'rgba(255,255,255,0.7)',
-                    }}>
-                      {new Date(p.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
         </AccordionCard>
         )}
@@ -409,59 +345,6 @@ export default function SettingsScreen({ onBack, onProfile, initialSection }) {
       {showSubscribe  && <SubscribeModal         onClose={() => setShowSubscribe(false)}  colors={colors} />}
       {showPrivacy    && <PrivacyPolicyModal     onClose={() => setShowPrivacy(false)}    colors={colors} />}
       {showTerms      && <TermsModal             onClose={() => setShowTerms(false)}      colors={colors} />}
-      {viewPoster     && <PosterViewModal poster={viewPoster} onClose={() => setViewPoster(null)} />}
-    </div>
-  );
-}
-
-// ── Poster history full view ──────────────────────────────────────────────────
-
-function PosterViewModal({ poster, onClose }) {
-  const handleDownload = async () => {
-    try {
-      const resp = await fetch(poster.imageUrl);
-      const blob = await resp.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `memoera-poster-${poster.id || Date.now()}.png`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch {
-      // Fall back to opening it directly so the user can save it manually.
-      window.open(poster.imageUrl, '_blank');
-    }
-  };
-
-  return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 9999,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'rgba(0,0,0,0.85)', padding: 16,
-    }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{
-        position: 'relative', width: '100%', maxWidth: 340, borderRadius: 24, overflow: 'hidden',
-        background: poster.colors?.bg || '#0a1628',
-        boxShadow: `0 0 60px ${poster.colors?.primary || TEAL}55`,
-      }}>
-        {poster.imageUrl && (
-          <img src={poster.imageUrl} alt="" style={{ width: '100%', display: 'block' }} />
-        )}
-        <div style={{ background: 'rgba(0,0,0,0.4)', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <button onClick={handleDownload} style={{
-            background: `linear-gradient(135deg,${TEAL},#00E5CC)`, border: 'none',
-            borderRadius: 20, color: '#040D0B', fontSize: 11, fontWeight: 700, fontFamily: FONT,
-            padding: '6px 14px', cursor: 'pointer',
-          }}>⬇ Download</button>
-          <button onClick={onClose} style={{
-            background: 'transparent', border: '1px solid rgba(255,255,255,0.2)',
-            borderRadius: 20, color: '#fff', fontSize: 11, fontFamily: FONT,
-            padding: '6px 14px', cursor: 'pointer',
-          }}>✕ Close</button>
-        </div>
-      </div>
     </div>
   );
 }

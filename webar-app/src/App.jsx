@@ -12,6 +12,7 @@ const BACK_MAP = {
   'settings':    'home',
   'gallery':     'home',
   'collection':  'gallery',
+  'liked':       'home',
   'premium':     'home',
   'refer':       'home',
   'streak':      'home',
@@ -19,7 +20,7 @@ const BACK_MAP = {
   'setup':       'image-upload',
   'url-setup':   'image-upload',
   'model-setup': 'image-upload',
-  'anim-setup':  'image-upload',
+  'anim-setup':  'home',
   'doc-setup':   'image-upload',
   'admin':       'home',
   // Onboarding (account type → category → details → complete) now has an
@@ -55,6 +56,7 @@ const Model3DSetupScreen       = lazy(() => import('./components/Model3DSetupScr
 const DocumentSetupScreen      = lazy(() => import('./components/DocumentSetupScreen.jsx'));
 const PhotoAnimationSetupScreen = lazy(() => import('./components/PhotoAnimationSetupScreen.jsx'));
 const CollectionScreen         = lazy(() => import('./components/CollectionScreen.jsx'));
+const LikedSavedScreen         = lazy(() => import('./components/LikedSavedScreen.jsx'));
 const SetupScreen              = lazy(() => import('./components/SetupScreen.jsx'));
 const SignInScreen             = lazy(() => import('./components/SignInScreen.jsx'));
 const SignUpScreen             = lazy(() => import('./components/SignUpScreen.jsx'));
@@ -105,10 +107,11 @@ export default function App() {
   const [scanHint,      setScanHint]      = useState(false);
   const [pendingAR,     setPendingAR]     = useState(null);
   const [guestScanError, setGuestScanError] = useState('');
-  // Session-only Terms & Conditions demo gate — 'scan' before the camera
-  // opens, 'signup' right after account creation. No persistence by design.
+  // Terms & Conditions gate — 'scan' before the camera opens, 'signup' right
+  // after account creation. Agreement is persisted so a user only has to
+  // accept once, ever, on this device — not on every scan/signup.
   const [pendingTermsGate, setPendingTermsGate] = useState(null);
-  const termsAgreedRef           = useRef(false);
+  const termsAgreedRef           = useRef(localStorage.getItem('memoera_terms_agreed') === 'true');
   const pendingARRef             = useRef(null);
   const activeBlobUrlsRef        = useRef([]);
   // Tracks which screen a scan was launched from ('home' or 'hello') so the
@@ -145,7 +148,7 @@ export default function App() {
   // video doesn't compete with the initial app load/interactivity.
   useEffect(() => {
     const preload = () => {
-      const VIDEOS = ['/right-mark.mp4', '/x-mark.mp4', '/wings-to-memories.mp4', '/welcome-hand.mp4', '/review-our-album.mp4'];
+      const VIDEOS = ['/right-mark.mp4', '/x-mark.mp4', '/wings-to-memories.mp4', '/welcome-hand.mp4'];
       VIDEOS.forEach((src) => {
         const v = document.createElement('video');
         v.src = src; v.preload = 'auto'; v.muted = true; v.load();
@@ -381,7 +384,11 @@ export default function App() {
   const handleSignUp  = useCallback((user) => {
     setCurrentUser(user);
     registerUserForGreetings(user);
-    setPendingTermsGate('signup');
+    if (termsAgreedRef.current) {
+      setAppView('account-type');
+    } else {
+      setPendingTermsGate('signup');
+    }
   }, [registerUserForGreetings]);
   const handleOtpFail = useCallback(() => { setVideoOverlay({ src: '/x-mark.mp4', next: 'signup' }); }, []);
 
@@ -502,6 +509,7 @@ export default function App() {
 
   const handleTermsAgree = useCallback(() => {
     termsAgreedRef.current = true;
+    localStorage.setItem('memoera_terms_agreed', 'true');
     const gate = pendingTermsGate;
     setPendingTermsGate(null);
     if (gate === 'scan') {
@@ -577,6 +585,8 @@ export default function App() {
     mainScreen = <GalleryScreen onBack={() => setAppView('home')} onCollection={() => setAppView('collection')} initialQuery={galleryQuery} />;
   } else if (appView === 'collection') {
     mainScreen = <CollectionScreen onBack={() => setAppView('gallery')} />;
+  } else if (appView === 'liked') {
+    mainScreen = <LikedSavedScreen kind="like" onBack={() => setAppView('home')} />;
   } else if (appView === 'settings') {
     mainScreen = <SettingsScreen onBack={() => setAppView('home')} onProfile={() => setAppView('profile')} initialSection={settingsInitialSection} />;
   } else if (appView === 'premium') {
@@ -605,7 +615,7 @@ export default function App() {
     mainScreen = (
       <PhotoAnimationSetupScreen
         onStart={handleStart}
-        onBack={() => setAppView('image-upload')}
+        onBack={() => setAppView('home')}
         isPublic={selectedVisibility === 'public'}
         sharedImageFile={sharedImageFile}
         sharedImagePreviewUrl={sharedImagePreviewUrl}
@@ -640,17 +650,27 @@ export default function App() {
       <>
         <HomeScreen
           onUpload={() => { setForcedContentType(null); setAppView('goal-select'); }}
-          onGallery={() => { setGalleryQuery(''); setVideoOverlay({ src: '/review-our-album.mp4', next: 'gallery' }); }}
-          onSearch={(q) => { setGalleryQuery(q); setVideoOverlay({ src: '/review-our-album.mp4', next: 'gallery' }); }}
+          onGallery={() => { setGalleryQuery(''); setAppView('gallery'); }}
+          onSearch={(q) => { setGalleryQuery(q); setAppView('gallery'); }}
           onSettings={(section) => { setSettingsInitialSection(section || null); setAppView('settings'); }}
           onPremium={() => setAppView('premium')}
           onRefer={() => setAppView('refer')}
           onStreak={() => setAppView('streak')}
           onCollection={() => setAppView('collection')}
+          onLiked={() => setAppView('liked')}
           onAdmin={() => setAppView('admin')}
           onSignOut={handleSignOut}
           onScan={() => triggerScan('home')}
-          onAnimation={() => { setForcedContentType('animation'); setAppView('goal-select'); }}
+          onAnimation={() => {
+            // Photo Animation already has its own built-in marker-image
+            // upload, so it doesn't need the goal-select/image-upload wizard
+            // in front of it — jump straight to it from Home.
+            setSelectedVisibility('private');
+            setSharedImageFile(null);
+            setSharedImagePreviewUrl(null);
+            setSharedLabel('');
+            setAppView('anim-setup');
+          }}
           user={currentUser}
         />
         <Suspense fallback={null}>
