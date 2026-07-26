@@ -117,6 +117,7 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
 
   return (
     <div style={{ ...S.screen, background: colors.bg }}>
+      <button onClick={step === 2 ? () => setStep(1) : onBack} style={{ ...S.backBtn, color: colors.textMuted }}>← Back</button>
       <div style={S.orb1}/><div style={S.orb2}/>
       <div style={S.container}>
         <img src="/logo.png" alt="Memoera" style={S.logo} />
@@ -169,7 +170,6 @@ export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
             </>
           )}
         </div>
-        <button onClick={step === 2 ? () => setStep(1) : onBack} style={{ ...S.backBtn, color: colors.textMuted }}>← Back</button>
       </div>
     </div>
   );
@@ -190,7 +190,7 @@ const TEAL = '#00C9A7';
 const S = {
   screen: { position:'fixed', inset:0,
     background:'radial-gradient(ellipse at 20% 20%, rgba(0,201,167,0.15) 0%, transparent 55%), radial-gradient(ellipse at 80% 80%, rgba(0,229,204,0.1) 0%, transparent 55%), #080C18',
-    overflowY:'auto', WebkitOverflowScrolling:'touch', display:'flex', justifyContent:'center', padding:'32px 0 40px' },
+    overflowY:'auto', WebkitOverflowScrolling:'touch', display:'flex', justifyContent:'center', padding:'96px 0 40px' },
   orb1: { position:'fixed', top:'-10%', left:'-10%', width:'55vw', height:'55vw', maxWidth:350, maxHeight:350,
     borderRadius:'50%', background:'radial-gradient(circle, rgba(0,201,167,0.2) 0%, transparent 70%)', pointerEvents:'none' },
   orb2: { position:'fixed', bottom:'-10%', right:'-10%', width:'50vw', height:'50vw', maxWidth:320, maxHeight:320,
@@ -220,7 +220,7 @@ const S = {
   btnDisabled: { opacity:0.65, cursor:'not-allowed', boxShadow:'none' },
   resendBtn: { background:'transparent', border:'none', color:'rgba(255,255,255,0.35)',
     fontSize:13, fontFamily:FONT, cursor:'pointer', textAlign:'center', textDecoration:'underline' },
-  backBtn: { background:'transparent', border:'none', color:'rgba(255,255,255,0.4)',
-    fontSize:14, fontFamily:FONT, cursor:'pointer', marginTop:20, padding:'4px 0' },
+  backBtn: { position:'fixed', top:48, left:16, background:'transparent', border:'none', color:'rgba(255,255,255,0.4)',
+    fontSize:14, fontWeight:600, fontFamily:FONT, cursor:'pointer', padding:'6px 4px', zIndex:2 },
 };
 

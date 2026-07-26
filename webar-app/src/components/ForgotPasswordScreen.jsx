@@ -97,6 +97,7 @@ export default function ForgotPasswordScreen({ onBack, onSuccess }) {
 
   return (
     <div style={{ ...S.screen, background: colors.bg }}>
+      <button onClick={onBack} style={{ ...S.backBtn, color: colors.textMuted }}>← Back</button>
       <div style={S.orb1}/><div style={S.orb2}/>
       <div style={S.container}>
         <img src="/logo.png" alt="Memoera" style={S.logo} />
@@ -148,7 +149,6 @@ export default function ForgotPasswordScreen({ onBack, onSuccess }) {
             </form>
           )}
         </div>
-        <button onClick={onBack} style={{ ...S.backBtn, color: colors.textMuted }}>← Back</button>
       </div>
     </div>
   );
@@ -179,5 +179,5 @@ const S = {
   btnDisabled:{opacity:0.65,cursor:"not-allowed",boxShadow:"none"},
   resendBtn:{background:"transparent",border:"none",color:"rgba(255,255,255,0.35)",fontSize:13,fontFamily:FONT,cursor:"pointer",textAlign:"center",textDecoration:"underline"},
   eyeBtn:{position:"absolute",right:10,top:"50%",transform:"translateY(-50%)",background:"transparent",border:"none",cursor:"pointer",fontSize:12,color:TEAL,fontFamily:FONT},
-  backBtn:{background:"transparent",border:"none",color:"rgba(255,255,255,0.4)",fontSize:14,fontFamily:FONT,cursor:"pointer",marginTop:20},
+  backBtn:{position:"fixed",top:48,left:16,background:"transparent",border:"none",color:"rgba(255,255,255,0.4)",fontSize:14,fontWeight:600,fontFamily:FONT,cursor:"pointer",padding:"6px 4px",zIndex:2},
 };

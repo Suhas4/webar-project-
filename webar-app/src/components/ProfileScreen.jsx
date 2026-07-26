@@ -568,12 +568,12 @@ const styles = {
     position: "fixed", inset: 0,
     background: "linear-gradient(160deg, #061A1F 0%, #0A2229 50%, #061820 100%)",
     display: "flex", flexDirection: "column", alignItems: "center",
-    fontFamily: FONT, padding: "24px 20px 40px", overflowY: "auto",
+    fontFamily: FONT, padding: "96px 20px 40px", overflowY: "auto",
   },
   backBtn: {
-    alignSelf: "flex-start", background: "transparent", border: "none",
-    color: "rgba(255,255,255,0.6)", fontSize: 14, fontFamily: FONT,
-    cursor: "pointer", marginBottom: 16,
+    position: "fixed", top: 48, left: 16, background: "transparent", border: "none",
+    color: "rgba(255,255,255,0.6)", fontSize: 14, fontWeight: 600, fontFamily: FONT,
+    cursor: "pointer", padding: "6px 4px", zIndex: 2,
   },
   avatarWrap: { marginBottom: 12, cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center" },
   hexOuter: {

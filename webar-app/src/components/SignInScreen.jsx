@@ -63,6 +63,7 @@ export default function SignInScreen({ onSuccess, onGoForgotPassword, onBack, su
 
   return (
     <div style={{ ...styles.screen, background: colors.bg }}>
+      {onBack && <button onClick={onBack} style={{ ...styles.backBtn, color: colors.textMuted }}>← Back</button>}
       <div style={styles.orb1}/><div style={styles.orb2}/>
       <div style={styles.container}>
         <img src="/logo.png" alt="Memoera" style={styles.logo} />
@@ -97,7 +98,6 @@ export default function SignInScreen({ onSuccess, onGoForgotPassword, onBack, su
             </button>
           </form>
         </div>
-        {onBack && <button onClick={onBack} style={{ ...styles.backBtn, color: colors.textMuted }}>← Back</button>}
       </div>
     </div>
   );
@@ -145,6 +145,6 @@ const styles = {
     fontSize:16,fontWeight:700,fontFamily:FONT,padding:"15px 24px",cursor:"pointer",letterSpacing:"0.05em",
     boxShadow:"0 4px 24px rgba(0,201,167,0.35)",marginTop:4 },
   submitBtnDisabled: { opacity:0.65,cursor:"not-allowed",boxShadow:"none" },
-  backBtn: { background:"transparent",border:"none",color:"rgba(255,255,255,0.4)",
-    fontSize:14,fontFamily:FONT,cursor:"pointer",marginTop:20,padding:"4px 0" },
+  backBtn: { position:"fixed",top:48,left:16,background:"transparent",border:"none",color:"rgba(255,255,255,0.4)",
+    fontSize:14,fontWeight:600,fontFamily:FONT,cursor:"pointer",padding:"6px 4px",zIndex:2 },
 };

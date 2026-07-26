@@ -96,6 +96,10 @@ export default function Model3DSetupScreen({ onStart, onBack, onSignOut, isPubli
     setCards((prev) => prev.map((card, i) => i === index ? { ...card, animationEffect: effectId } : card));
   }, []);
 
+  const handleLabelChange = useCallback((index, value) => {
+    setCards((prev) => prev.map((card, i) => i === index ? { ...card, label: value.trim() ? value : `Target ${startIndex + i + 1}` } : card));
+  }, [startIndex]);
+
   const handleAddCard = useCallback(() => {
     setCards((prev) => [...prev, emptyCard(startIndex + prev.length + 1)]);
   }, [startIndex]);
@@ -242,6 +246,7 @@ export default function Model3DSetupScreen({ onStart, onBack, onSignOut, isPubli
             onGlbFile={(f) => handleGlbFile(index, f)}
             onRemove={() => handleRemoveCard(index)}
             onSetAnimation={(effectId) => handleSetAnimation(index, effectId)}
+            onLabelChange={(v) => handleLabelChange(index, v)}
           />
         ))}
         <button onClick={handleAddCard} disabled={isCompiling}
@@ -270,7 +275,7 @@ export default function Model3DSetupScreen({ onStart, onBack, onSignOut, isPubli
   );
 }
 
-function ModelTargetCard({ index, card, showValidation, onImageFile, onGlbFile, onRemove, onSetAnimation }) {
+function ModelTargetCard({ index, card, showValidation, onImageFile, onGlbFile, onRemove, onSetAnimation, onLabelChange }) {
   const imageMissing = showValidation && !card.imageFile;
   const glbMissing = showValidation && !card.glbFile;
   const [showPicker, setShowPicker] = useState(false);
@@ -371,6 +376,15 @@ function ModelTargetCard({ index, card, showValidation, onImageFile, onGlbFile, 
           </div>
         </>
       )}
+
+      <p style={{ ...card_s.label, marginTop: 16 }}>Title</p>
+      <input
+        value={/^Target \d+$/.test(card.label) ? '' : card.label}
+        onChange={(e) => onLabelChange(e.target.value)}
+        placeholder={`Target ${index + 1}`}
+        maxLength={60}
+        style={card_s.titleInput}
+      />
     </div>
   );
 }
@@ -489,6 +503,7 @@ const card_s = {
   fileName: { fontSize: 13, color: 'rgba(255,255,255,0.7)', fontFamily: FONT },
   changeLink: { fontSize: 12, color: TEAL, fontFamily: FONT },
   fieldError: { fontSize: 12, color: '#FF6B6B', fontFamily: FONT, margin: '4px 0 0' },
+  titleInput: { width: '100%', boxSizing: 'border-box', background: 'rgba(0,201,167,0.05)', border: `1.5px solid ${BORDER}`, borderRadius: 12, color: '#ffffff', fontSize: 14, fontFamily: FONT, padding: '14px 16px', outline: 'none' },
   animGrid: { display: 'flex', flexWrap: 'wrap', gap: 8 },
   animChip: {
     display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',

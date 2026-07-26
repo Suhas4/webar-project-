@@ -109,21 +109,29 @@ export default function PremiumScreen({ onBack, user }) {
     }, 5000);
   }, [adCooldownSeconds]);
 
-  // Load the Razorpay Standard Checkout script once, on demand.
+  // Load the Razorpay Standard Checkout script once, on demand. A prior
+  // failed attempt leaves a <script> tag in the DOM whose load/error event
+  // already fired — reusing it via addEventListener would wait forever for
+  // an event that will never come again, so a failed tag is removed and a
+  // fresh one is created on each retry. A timeout guards against a request
+  // that never fires either event (rare, but leaves "Processing…" stuck
+  // forever otherwise).
   const loadRazorpayScript = useCallback(() => new Promise((resolve) => {
     if (window.Razorpay) { resolve(true); return; }
     const existing = document.getElementById('razorpay-checkout-js');
-    if (existing) {
-      existing.addEventListener('load', () => resolve(true));
-      existing.addEventListener('error', () => resolve(false));
-      return;
-    }
+    if (existing) existing.remove();
+
+    let settled = false;
+    const settle = (ok) => { if (settled) return; settled = true; resolve(ok); };
+
     const script = document.createElement('script');
     script.id = 'razorpay-checkout-js';
     script.src = 'https://checkout.razorpay.com/v1/checkout.js';
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
+    script.onload = () => settle(true);
+    script.onerror = () => settle(false);
     document.body.appendChild(script);
+
+    setTimeout(() => settle(false), 10000);
   }), []);
 
   const handleRazorpay = useCallback(async () => {
@@ -429,7 +437,7 @@ const s = {
   scroll: { flex:1,overflowY:'auto',paddingBottom:80 },
 
   /* Hero header (no image) */
-  heroWrap: { padding:'72px 20px 20px',display:'flex',flexDirection:'column',alignItems:'center',
+  heroWrap: { padding:'96px 20px 20px',display:'flex',flexDirection:'column',alignItems:'center',
     gap:8,background:`linear-gradient(160deg, #071C22 0%, #0a2229 60%, #061820 100%)`,
     borderBottom:`1px solid ${TEAL}33` },
   premiumBadge: { display:'inline-block',background:GOLD,color:'#000',fontSize:10,

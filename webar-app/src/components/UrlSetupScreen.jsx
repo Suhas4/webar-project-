@@ -65,6 +65,10 @@ export default function UrlSetupScreen({ onStart, onBack, onSignOut, isPublic, s
     setCards((prev) => prev.map((card, i) => i === index ? { ...card, urlLink: value } : card));
   }, []);
 
+  const handleLabelChange = useCallback((index, value) => {
+    setCards((prev) => prev.map((card, i) => i === index ? { ...card, label: value.trim() ? value : `Target ${startIndex + i + 1}` } : card));
+  }, [startIndex]);
+
   const handleAddCard = useCallback(() => {
     setCards((prev) => [...prev, emptyCard(startIndex + prev.length + 1)]);
   }, [startIndex]);
@@ -161,7 +165,7 @@ export default function UrlSetupScreen({ onStart, onBack, onSignOut, isPublic, s
       onStart({ targets: arTargets, mindFileUrl: localMindUrl });
 
       if (isPublic) rebuildPublicMindInBackground();
-    } catch {
+    } catch (err) {
       setCompileState('error');
       setCompileError(err.message || 'Upload failed. Please try again.');
     }
@@ -199,6 +203,7 @@ export default function UrlSetupScreen({ onStart, onBack, onSignOut, isPublic, s
             showValidation={showValidation}
             onImageFile={(f) => handleImageFile(index, f)}
             onUrlChange={(v) => handleUrlChange(index, v)}
+            onLabelChange={(v) => handleLabelChange(index, v)}
             onRemove={() => handleRemoveCard(index)}
           />
         ))}
@@ -228,7 +233,7 @@ export default function UrlSetupScreen({ onStart, onBack, onSignOut, isPublic, s
   );
 }
 
-function UrlTargetCard({ index, card, showValidation, onImageFile, onUrlChange, onRemove }) {
+function UrlTargetCard({ index, card, showValidation, onImageFile, onUrlChange, onLabelChange, onRemove }) {
   const imageMissing = showValidation && !card.imageFile;
   const urlMissing = showValidation && !card.urlLink.trim();
   const [showPicker, setShowPicker] = useState(false);
@@ -268,6 +273,15 @@ function UrlTargetCard({ index, card, showValidation, onImageFile, onUrlChange, 
         style={{ ...card_s.urlInput, ...(urlMissing ? card_s.urlInputError : {}) }}
       />
       {urlMissing && <p style={card_s.fieldError}>URL is required</p>}
+
+      <p style={{ ...card_s.label, marginTop: 16 }}>Title</p>
+      <input
+        value={/^Target \d+$/.test(card.label) ? '' : card.label}
+        onChange={(e) => onLabelChange(e.target.value)}
+        placeholder={`Target ${index + 1}`}
+        maxLength={60}
+        style={card_s.urlInput}
+      />
     </div>
   );
 }

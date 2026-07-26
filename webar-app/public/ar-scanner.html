@@ -157,6 +157,23 @@
     }
     #fs-report-btn:disabled { opacity: 0.6; cursor: default; }
 
+    /* Like / Save / Share — vertical rail, middle-right of the video overlay */
+    #fs-action-rail {
+      position: absolute; top: 50%; right: 14px; z-index: 10000;
+      transform: translateY(-50%);
+      display: flex; flex-direction: column; gap: 16px; align-items: center;
+    }
+    .fs-action-btn {
+      width: 48px; height: 48px; border-radius: 50%;
+      background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.25);
+      color: #ffffff; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+      transition: transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+    }
+    .fs-action-btn:active { transform: scale(0.9); }
+    .fs-action-btn.liked   { background: rgba(255,60,90,0.25);  border-color: #ff3c5a; color: #ff3c5a; }
+    .fs-action-btn.saved   { background: rgba(201,168,76,0.25); border-color: #C9A84C; color: #C9A84C; }
+
     /* Video loader spinner */
     #fs-loader {
       position: absolute; inset: 0; z-index: 10002;
@@ -265,6 +282,17 @@
   <div id="fs-overlay">
     <button id="fs-close-btn" onclick="closeFullscreen()">← Scan Again</button>
     <button id="fs-report-btn" onclick="reportCurrentVideoTarget()">🚩 Report</button>
+    <div id="fs-action-rail">
+      <button id="fs-like-btn" class="fs-action-btn" onclick="toggleLike()" title="Like">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 21s-7.5-4.8-10-9.3C.4 8.6 1.7 5 5.2 4.2c2-.5 4 .3 5.2 2 .3.4.9.4 1.2 0 1.2-1.7 3.2-2.5 5.2-2 3.5.8 4.8 4.4 3.2 7.5C19.5 16.2 12 21 12 21z" opacity="0.18"/><path d="M12 21s-7.5-4.8-10-9.3C.4 8.6 1.7 5 5.2 4.2c2-.5 4 .3 5.2 2 .3.4.9.4 1.2 0 1.2-1.7 3.2-2.5 5.2-2 3.5.8 4.8 4.4 3.2 7.5C19.5 16.2 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button id="fs-save-btn" class="fs-action-btn" onclick="toggleSave()" title="Save">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12a1 1 0 0 1 1 1v16l-7-4-7 4V4a1 1 0 0 1 1-1Z"/></svg>
+      </button>
+      <button id="fs-share-btn" class="fs-action-btn" onclick="shareCurrentVideoTarget()" title="Share">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="10.6" x2="15.4" y2="6.4"/><line x1="8.6" y1="13.4" x2="15.4" y2="17.6"/></svg>
+      </button>
+    </div>
     <video id="fs-video" playsinline webkit-playsinline style="visibility:hidden"></video>
     <div id="fs-loader">
       <div id="fs-loader-ring"></div>
@@ -315,6 +343,7 @@
     var sceneRenderStarted = false;
     var arHasStarted      = false;
     var arRetried         = false;
+    var videoFailRetryPending = false; // true while an arError→VIDEO_FAIL retry's own getUserMedia call may still be in flight
     var lastMindSrc        = null;
     var fsOpen            = false;
     var pendingUrl        = null;
@@ -325,7 +354,9 @@
     var needTargetLost    = false; // true after reload: require camera to leave target first
     var videoLandscape    = false; // tracks the forced orientation state
     var foundTargets      = {};    // targetIndex -> target data, while currently detected
-    var currentVideoTarget = null; // { id, label } of the target whose video is currently in the fullscreen overlay — used by the Report button
+    var currentVideoTarget = null; // { id, label } of the target whose video is currently in the fullscreen overlay — used by the Report/Like/Save/Share buttons
+    var likedState = false; // whether the CURRENT video is liked — reset each time a new one opens (see openFullscreen)
+    var savedState = false; // ditto, for saved
     var diag               = {};   // diagnostic state surfaced on the error screen
 
     // ── Track the scene's 'renderstart' event from the EARLIEST possible
@@ -578,14 +609,25 @@
       // before bothering the user with an error screen.
       if (reason === 'VIDEO_FAIL' && !arRetried && lastMindSrc) {
         arRetried = true;
+        // Mark a retry attempt as in-flight so the diagnostic probe (which
+        // also calls getUserMedia) doesn't fire a concurrent request against
+        // this one — see the note on probeCamera: two overlapping
+        // getUserMedia calls make BOTH hang/fail with "camera busy", which is
+        // exactly what happened here (probe never resolved or rejected).
+        videoFailRetryPending = true;
         setTimeout(function() {
-          if (arHasStarted) return; // succeeded on its own in the meantime
+          if (arHasStarted) { videoFailRetryPending = false; return; } // succeeded on its own in the meantime
           try {
             scene.removeAttribute('mindar-image');
             setMindArAttribute(lastMindSrc);
           } catch (retryErr) {
+            videoFailRetryPending = false;
             showArError('Camera unavailable. Please check your device settings and try again.');
+            return;
           }
+          // Give this retried attempt its own window to settle before the
+          // probe is allowed to run.
+          setTimeout(function() { videoFailRetryPending = false; }, 2000);
         }, 600);
         return;
       }
@@ -640,6 +682,8 @@
 
       var reportBtn = document.getElementById('fs-report-btn');
       if (reportBtn) { reportBtn.disabled = false; reportBtn.textContent = '🚩 Report'; }
+      likedState = false; savedState = false;
+      updateActionButtonsUI();
 
       backBtn.style.display  = 'none';
       torchBtn.style.display = 'none';
@@ -785,6 +829,42 @@
       );
     }
 
+    function updateActionButtonsUI() {
+      var likeBtn = document.getElementById('fs-like-btn');
+      var saveBtn = document.getElementById('fs-save-btn');
+      if (likeBtn) likeBtn.classList.toggle('liked', likedState);
+      if (saveBtn) saveBtn.classList.toggle('saved', savedState);
+    }
+
+    // Like/Save need the viewer's own auth token, which this static iframe
+    // has no way to fetch on its own — delegated to the parent React app,
+    // same pattern as Report/openDocument above.
+    function toggleLike() {
+      if (!currentVideoTarget || !currentVideoTarget.id) return;
+      likedState = !likedState;
+      updateActionButtonsUI();
+      window.parent.postMessage(
+        { type: 'ar-like-target', targetId: currentVideoTarget.id, active: likedState },
+        '*'
+      );
+    }
+    function toggleSave() {
+      if (!currentVideoTarget || !currentVideoTarget.id) return;
+      savedState = !savedState;
+      updateActionButtonsUI();
+      window.parent.postMessage(
+        { type: 'ar-save-target', targetId: currentVideoTarget.id, active: savedState },
+        '*'
+      );
+    }
+    function shareCurrentVideoTarget() {
+      if (!currentVideoTarget) return;
+      window.parent.postMessage(
+        { type: 'ar-share-target', targetId: currentVideoTarget.id, label: currentVideoTarget.label || '' },
+        '*'
+      );
+    }
+
     // ── Document type → open strategy ───────────────────────────────────────
     // All formats now open immediately on detection, same as video/animation
     // targets — no tap-to-view step. Office formats still route through
@@ -885,11 +965,18 @@
 
       // Camera access begins now. Give MindAR's own attempt 1.5 s to succeed
       // or fail on its own; only then run the diagnostic probe (never in
-      // parallel — see note on probeCamera above). Final 7 s fallback covers
-      // the rare case where neither path resolves.
-      setTimeout(function() {
-        if (!arHasStarted) probeCamera();
-      }, 1500);
+      // parallel — see note on probeCamera above). If an arError→VIDEO_FAIL
+      // retry is using its own getUserMedia call around this time, keep
+      // deferring the probe until that window clears instead of firing a
+      // second concurrent request (which would make both hang/fail). Final
+      // 7 s fallback covers the rare case where neither path resolves.
+      (function scheduleProbe() {
+        setTimeout(function() {
+          if (arHasStarted) return;
+          if (videoFailRetryPending) { scheduleProbe(); return; }
+          probeCamera();
+        }, 1500);
+      })();
       setTimeout(function() {
         if (!arHasStarted) {
           showArError('Camera is taking too long to start. Please check camera permissions and try again.');

@@ -296,6 +296,16 @@ export default function TargetCard({ index, data, onChange, onRemove, showValida
         onDragLeave={() => setVideoDragOver(false)}
         onDrop={handleVideoDrop}
       />
+
+      {/* Title */}
+      <p style={{ ...styles.fieldLabel, marginTop: 16 }}>Title</p>
+      <input
+        value={/^Target \d+$/.test(data.label) ? '' : data.label}
+        onChange={(e) => onChange({ label: e.target.value.trim() ? e.target.value : `Target ${index + 1}` })}
+        placeholder={`Target ${index + 1}`}
+        maxLength={60}
+        style={styles.titleInput}
+      />
     </div>
   );
 }
@@ -394,6 +404,9 @@ const styles = {
     display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: FONT,
   },
   fieldLabel: { fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.55)', fontFamily: FONT, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.06em' },
+  titleInput: { width: '100%', boxSizing: 'border-box', background: 'rgba(255,255,255,0.05)',
+    border: `1px solid ${BORDER}`, borderRadius: 12, padding: '12px 14px', fontSize: 14,
+    fontFamily: FONT, color: '#ffffff', outline: 'none' },
   fieldHint: { fontSize: 11, fontWeight: 400, color: 'rgba(255,255,255,0.28)', fontFamily: FONT, textTransform: 'none', letterSpacing: 0 },
   dropZone: {
     border: `1.5px dashed ${BORDER}`, borderRadius: 12,

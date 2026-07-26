@@ -1,4 +1,4 @@
-﻿import { useState, useCallback, useEffect, useRef } from 'react';
+﻿import { useState, useCallback, useEffect } from 'react';
 import { COMPILER_URL } from '../hooks/loadMindARCompiler.js';
 import TargetCard from './TargetCard.jsx';
 import UploadProgressOverlay from './UploadProgressOverlay.jsx';
@@ -50,7 +50,6 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onBa
 
   const isCompiling = compileState === 'checking' || compileState === 'compiling' || compileState === 'saving' || compileState === 'uploading' || compileState === 'finalizing' || compileState === 'done';
   const canStart = cards.length > 0 && cards.every((c) => c.imageFile && c.videoFile);
-  const prevCanStart = useRef(false);
 
   const handleCardChange = useCallback((index, patch) => {
     setCards((prev) => prev.map((card, i) => (i === index ? { ...card, ...patch } : card)));
@@ -226,14 +225,6 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onBa
         : (err.message || 'Compilation failed. Please try again.'));
     }
   }, [cards, canStart, onStart, isPublic, user, confirmIfFlagged]);
-
-  // Auto-start upload the moment all cards have both image + video
-  useEffect(() => {
-    if (canStart && !prevCanStart.current && compileState === 'idle') {
-      handleStart();
-    }
-    prevCanStart.current = canStart;
-  }, [canStart, compileState, handleStart]);
 
   return (
     <div style={{ ...styles.screen, background: colors.bg }}>

@@ -3,6 +3,7 @@ import FrameViewer        from './FrameViewer.jsx';
 import CarFrameViewer     from './CarFrameViewer.jsx';
 import UserAnimationViewer from './UserAnimationViewer.jsx';
 import { saveAnimation, loadAnimations, deleteAnimation } from '../hooks/usePhotoAnimations.js';
+import { API_BASE } from '../config/api.js';
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const TEAL = "#00C9A7";
@@ -93,6 +94,7 @@ export default function CollectionScreen({ onBack }) {
   const [uploadMsg,   setUploadMsg]   = useState('');
   const [namePrompt,  setNamePrompt]  = useState(null); // { files }
   const [customName,  setCustomName]  = useState('');
+  const [savedVideos, setSavedVideos] = useState(null); // null = loading
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -100,6 +102,22 @@ export default function CollectionScreen({ onBack }) {
       .then((anims) => setUserAnims(anims.reverse()))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const token = localStorage.getItem('memoera_token') || '';
+    fetch(`${API_BASE}/api/targets/interactions?kind=save`, { headers: { Authorization: 'Bearer ' + token } })
+      .then((r) => r.json())
+      .then((d) => setSavedVideos(d.targets || []))
+      .catch(() => setSavedVideos([]));
+  }, []);
+
+  function handleOpenSaved(t) {
+    if (t.targetType === 'video' && t.videoUrl) {
+      setActive({ kind: 'saved-video', id: t.id, title: t.label, videoUrl: t.videoUrl });
+      return;
+    }
+    if (t.urlLink) window.open(t.urlLink, '_blank', 'noopener');
+  }
 
   const handleFilePick = (e) => {
     const files = Array.from(e.target.files || []);
@@ -135,6 +153,9 @@ export default function CollectionScreen({ onBack }) {
   };
 
   // ── Active viewer ──
+  if (active?.kind === 'saved-video') return (
+    <VideoSampleViewer title={active.title} videoUrl={active.videoUrl} onBack={() => setActive(null)} />
+  );
   if (active?.kind === 'car')    return <CarFrameViewer onBack={() => setActive(null)} />;
   if (active?.kind === 'sample') return (
     <FrameViewer title={active.title} framesPath={active.framesPath}
@@ -299,6 +320,53 @@ export default function CollectionScreen({ onBack }) {
             <div style={{ textAlign:'center', padding:'24px 0 8px',
               fontSize:12, color:'#aaa', fontFamily:FONT, lineHeight:1.6 }}>
               No animations yet.{'\n'}Tap <strong style={{ color:TEAL }}>+ Upload</strong> to create one from your photos.
+            </div>
+          )}
+        </div>
+
+        {/* SAVED VIDEOS — content saved via the 🔖 button while scanning */}
+        <div style={{ marginBottom:24 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:'#888', letterSpacing:'0.1em',
+            textTransform:'uppercase', marginBottom:12, fontFamily:FONT }}>
+            Saved Videos
+          </div>
+
+          {savedVideos === null ? (
+            <div style={{ textAlign:'center', padding:'12px 0', fontSize:12, color:'#aaa', fontFamily:FONT }}>
+              Loading…
+            </div>
+          ) : savedVideos.length === 0 ? (
+            <div style={{ textAlign:'center', padding:'12px 0 8px',
+              fontSize:12, color:'#aaa', fontFamily:FONT, lineHeight:1.6 }}>
+              Nothing saved yet.{'\n'}Tap 🔖 on a scanned memory's video to save it here.
+            </div>
+          ) : (
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              {savedVideos.map((t) => (
+                <div key={t.id} onClick={() => handleOpenSaved(t)}
+                  style={{ cursor:'pointer', borderRadius:16, overflow:'hidden',
+                    border:'1px solid rgba(0,0,0,0.08)', background:'#fff',
+                    boxShadow:'0 2px 10px rgba(0,0,0,0.06)' }}>
+                  <div style={{ position:'relative', aspectRatio:'4/3', overflow:'hidden', background:'#F0F0F0' }}>
+                    {t.imageUrl
+                      ? <img src={t.imageUrl} alt={t.label} loading="lazy" decoding="async"
+                          style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
+                      : <div style={{ width:'100%', height:'100%', display:'flex', alignItems:'center',
+                          justifyContent:'center', fontSize:28 }}>🖼️</div>}
+                    {t.targetType === 'video' && (
+                      <div style={{ position:'absolute', bottom:6, right:8,
+                        background:'rgba(0,0,0,0.55)', borderRadius:'50%', width:26, height:26,
+                        display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, color:'#fff' }}>▶</div>
+                    )}
+                  </div>
+                  <div style={{ padding:'8px 10px' }}>
+                    <div style={{ fontSize:12, fontWeight:700, color:'#1A1A2E', fontFamily:FONT,
+                      overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {t.label}
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
