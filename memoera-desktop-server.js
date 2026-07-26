@@ -3,13 +3,22 @@
 // Run: node memoera-desktop-server.js
 
 const http  = require('http');
+const https = require('https');
 const fs    = require('fs');
 const os    = require('os');
 const path  = require('path');
 const { exec } = require('child_process');
 
-const PORT    = 3456;
-const DIST    = path.join(__dirname, 'webar-app', 'dist');
+const PORT       = 3456;
+const HTTPS_PORT = 3457;
+const DIST       = path.join(__dirname, 'webar-app', 'dist');
+const CERT_KEY   = path.join(__dirname, 'certs', 'key.pem');
+const CERT_CRT   = path.join(__dirname, 'certs', 'cert.pem');
+// Camera access (getUserMedia) is blocked by mobile browsers on any origin
+// that isn't localhost or HTTPS — a phone hitting the plain http://<lan-ip>
+// address below can load the app fine but the AR scanner's camera silently
+// never starts. The self-signed HTTPS server on HTTPS_PORT is the one to use
+// from a phone; accept the one-time "not private" warning on first visit.
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -29,7 +38,7 @@ const MIME = {
   '.wasm': 'application/wasm',
 };
 
-const server = http.createServer((req, res) => {
+function handleRequest(req, res) {
   // Strip query string
   let urlPath = req.url.split('?')[0];
 
@@ -86,22 +95,55 @@ const server = http.createServer((req, res) => {
     'Pragma':         'no-cache',
   });
   fs.createReadStream(filePath).pipe(res);
-});
+}
+
+const server = http.createServer(handleRequest);
+
+const hasCert = fs.existsSync(CERT_KEY) && fs.existsSync(CERT_CRT);
+const httpsServer = hasCert
+  ? https.createServer({ key: fs.readFileSync(CERT_KEY), cert: fs.readFileSync(CERT_CRT) }, handleRequest)
+  : null;
+
+function onError(label, port) {
+  return (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n  ❌  Port ${port} (${label}) is already in use. Close the other instance and try again.\n`);
+    } else {
+      console.error(err);
+    }
+    process.exit(1);
+  };
+}
 
 server.listen(PORT, '0.0.0.0', () => {
   const url = `http://localhost:${PORT}`;
-  console.log(`\n  ✅  Memoera is running at ${url}`);
+  console.log(`\n  ✅  Memoera (HTTP) is running at ${url}`);
 
-  // Print LAN URLs so a phone on the same Wi-Fi can open the app directly.
   const nets = os.networkInterfaces();
+  const lanIPs = [];
   for (const iface of Object.values(nets)) {
     for (const net of iface || []) {
-      if (net.family === 'IPv4' && !net.internal) {
-        console.log(`  📱  On your phone (same Wi-Fi): http://${net.address}:${PORT}`);
-      }
+      if (net.family === 'IPv4' && !net.internal) lanIPs.push(net.address);
     }
   }
-  console.log('      Press Ctrl+C to stop.\n');
+  for (const ip of lanIPs) {
+    console.log(`  📱  On your phone (same Wi-Fi, no camera): http://${ip}:${PORT}`);
+  }
+
+  if (httpsServer) {
+    httpsServer.listen(HTTPS_PORT, '0.0.0.0', () => {
+      console.log(`  🔒  Memoera (HTTPS) is running at https://localhost:${HTTPS_PORT}`);
+      for (const ip of lanIPs) {
+        console.log(`  📷  On your phone (same Wi-Fi, camera works): https://${ip}:${HTTPS_PORT}`);
+      }
+      console.log('      (Self-signed cert — accept the browser warning once on first visit.)');
+      console.log('      Press Ctrl+C to stop.\n');
+    });
+    httpsServer.on('error', onError('HTTPS', HTTPS_PORT));
+  } else {
+    console.log('      No certs/key.pem + certs/cert.pem found — HTTPS server skipped (camera will not work over the LAN link).');
+    console.log('      Press Ctrl+C to stop.\n');
+  }
 
   // Open browser (Windows / macOS / Linux)
   const cmd = process.platform === 'win32' ? `start "" "${url}"`
@@ -110,11 +152,4 @@ server.listen(PORT, '0.0.0.0', () => {
   exec(cmd);
 });
 
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`\n  ❌  Port ${PORT} is already in use. Close the other instance and try again.\n`);
-  } else {
-    console.error(err);
-  }
-  process.exit(1);
-});
+server.on('error', onError('HTTP', PORT));

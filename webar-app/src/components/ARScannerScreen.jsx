@@ -3,7 +3,9 @@ import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import ARGlbScreen from './ARGlbScreen.jsx';
 import AnimationArOverlay from './AnimationArOverlay.jsx';
+import CatalogArOverlay from './CatalogArOverlay.jsx';
 import { loadAnimationById } from '../hooks/usePhotoAnimations.js';
+import { loadCatalog } from '../hooks/useCatalog.js';
 import { API_BASE } from '../config/api.js';
 
 // The AR scanner runs inside an iframe backed by a plain WebView with no
@@ -30,6 +32,7 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
   const [spaceGlbUrl, setSpaceGlbUrl] = useState(null);
   const [spaceGlbEffect, setSpaceGlbEffect] = useState('popIn');
   const [animOverlay, setAnimOverlay] = useState(null); // { title, frames }
+  const [catalogOverlay, setCatalogOverlay] = useState(null); // { title, items }
   const [reportToast, setReportToast] = useState(null); // brief confirmation text — reporting, liking/saving, or sharing content
   const iframeRef      = useRef(null);
   const bufferRef      = useRef(null);
@@ -81,6 +84,7 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
       if (e.data?.type === 'ar-scan-again') {
         lastCloseRef.current = Date.now(); // remember when the user closed
         setAnimOverlay(null);
+        setCatalogOverlay(null);
         setIframeKey(k => k + 1);
       }
       if (e.data?.type === 'ar-view-in-space' && e.data?.glbUrl) {
@@ -95,6 +99,13 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
         const label  = e.data.label || '';
         loadAnimationById(animId).then((anim) => {
           if (anim?.frames?.length) setAnimOverlay({ title: anim.name || label, frames: anim.frames });
+        }).catch(() => {});
+      }
+      if (e.data?.type === 'ar-catalog-triggered' && e.data?.catalogId) {
+        const catalogId = e.data.catalogId;
+        const label     = e.data.label || '';
+        loadCatalog(catalogId).then((catalog) => {
+          setCatalogOverlay({ title: catalog.name || label, items: catalog.items || [] });
         }).catch(() => {});
       }
       if (e.data?.type === 'ar-animation-lost') {
@@ -207,6 +218,17 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
           frames={animOverlay.frames}
           onClose={() => {
             setAnimOverlay(null);
+            lastCloseRef.current = Date.now();
+            setIframeKey(k => k + 1);
+          }}
+        />
+      )}
+      {catalogOverlay && (
+        <CatalogArOverlay
+          title={catalogOverlay.title}
+          items={catalogOverlay.items}
+          onClose={() => {
+            setCatalogOverlay(null);
             lastCloseRef.current = Date.now();
             setIframeKey(k => k + 1);
           }}
