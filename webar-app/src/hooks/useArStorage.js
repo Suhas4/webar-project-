@@ -222,7 +222,7 @@ export async function loadPublicTargets() {
     if (!res.ok) return [];
     const data = await res.json();
     if (!data.targets?.length) return [];
-    return data.targets.map((t) => ({ label:t.label, planeWidth:t.planeWidth, planeHeight:t.planeHeight, planeOffsetY:t.planeOffsetY, imageUrl:t.imageUrl, videoUrl:t.videoUrl, targetType:t.targetType||"video", urlLink:t.urlLink||"", animationEffect:t.animationEffect||"popIn", fileName:t.fileName||"", previewUrl:t.previewUrl||"" }));
+    return data.targets.map((t) => ({ id:t.id, label:t.label, planeWidth:t.planeWidth, planeHeight:t.planeHeight, planeOffsetY:t.planeOffsetY, imageUrl:t.imageUrl, videoUrl:t.videoUrl, targetType:t.targetType||"video", urlLink:t.urlLink||"", animationEffect:t.animationEffect||"popIn", fileName:t.fileName||"", previewUrl:t.previewUrl||"" }));
   } catch { return []; }
 }
 

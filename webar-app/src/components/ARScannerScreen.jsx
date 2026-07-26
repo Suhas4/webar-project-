@@ -118,11 +118,20 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
           setTimeout(() => setReportToast(null), 3500);
           return;
         }
+        const active = !!e.data.active;
         fetch(`${API_BASE}/api/targets/interaction`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-          body: JSON.stringify({ targetId: e.data.targetId, kind, active: !!e.data.active }),
-        }).catch(() => {}); // best-effort — the button already reflects the tap optimistically
+          body: JSON.stringify({ targetId: e.data.targetId, kind, active }),
+        })
+          .then((res) => {
+            if (!res.ok) { setReportToast("Couldn't " + kind + " this — please try again."); setTimeout(() => setReportToast(null), 3500); return; }
+            if (active) {
+              setReportToast(kind === 'save' ? 'Saved! Find it under Saved on Home.' : 'Liked! Find it under Liked on Home.');
+              setTimeout(() => setReportToast(null), 3500);
+            }
+          })
+          .catch(() => { setReportToast("Couldn't " + kind + " this — please try again."); setTimeout(() => setReportToast(null), 3500); });
       }
       if (e.data?.type === 'ar-share-target') {
         const label = e.data.label || 'this memory';
@@ -168,7 +177,16 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
   // MindAR is the only scan engine now — the experimental capture-then-match
   // ('capture') and legacy ('jsfeat') engines were retired since they never
   // reliably matched targets. See the migration in SettingsScreen.jsx.
-  const scannerSrc = '/ar-scanner.html';
+  // ar-scanner.html is a static asset the desktop/mobile browser cache can
+  // hold onto indefinitely (no ETag/Last-Modified from the dev server, so
+  // there's nothing for it to revalidate against) — a bare '/ar-scanner.html'
+  // src risks silently serving a stale, already-fixed-in-source copy of this
+  // file forever. Cache-bust with the same build stamp shown at the bottom
+  // of the file's own error screen so "is this actually the new build?" is
+  // answerable from a screenshot alone. Bump SCANNER_BUILD (and the matching
+  // stamp in ar-scanner.html) whenever that file changes.
+  const SCANNER_BUILD = '2026-07-26-1';
+  const scannerSrc = `/ar-scanner.html?v=${SCANNER_BUILD}`;
 
   return (
     <div style={{ position:'fixed', inset:0, background:'#000', zIndex:200 }}>
