@@ -257,27 +257,21 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
           0%,100% { transform: translate(0,0) scale(1); opacity: 0.4; }
           50%     { transform: translate(-30px,-20px) scale(1.2); opacity: 0.7; }
         }
-        @keyframes homeShimmer {
-          0%   { transform: translateX(-120%) rotate(20deg); }
-          100% { transform: translateX(220%) rotate(20deg); }
-        }
         @keyframes homePulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
         @keyframes ptr-spin { to { transform: rotate(360deg); } }
         @keyframes hg-ring { 0%{transform:scale(.9);opacity:.6} 100%{transform:scale(1.5);opacity:0} }
 
-        .home-shimmer-wrap { position: relative; overflow: hidden; }
-        .home-shimmer-wrap::after {
-          content: ''; position: absolute; top: -50%; left: 0; width: 30%; height: 200%;
-          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
-          animation: homeShimmer 3.2s ease-in-out infinite;
-          pointer-events: none;
-        }
         .home-icon-btn { transition: transform .14s ease, box-shadow .14s ease; }
         .home-icon-btn:hover { transform: translateY(-2px); }
         .home-icon-btn:active { transform: translateY(1px) scale(.94); }
 
         .home-feature { transition: transform .18s ease; }
-        .home-feature-badge { transition: transform .18s ease, box-shadow .18s ease; transform-style: preserve-3d; }
+        /* No transform-style:preserve-3d here — it forces a persistent 3D
+           compositing layer on every badge even at rest, which combined with
+           overflow:hidden + border-radius renders a thin seam/hairline at the
+           rounded corners in Chromium (looked like a "white line/gap" on the
+           icons regardless of the artwork itself). */
+        .home-feature-badge { transition: transform .18s ease, box-shadow .18s ease; }
         .home-feature:hover .home-feature-badge { transform: translateY(-5px); box-shadow: 0 20px 34px -14px rgba(0,0,0,.5); }
         .home-feature:active .home-feature-badge { transform: translateY(1px) scale(.95) !important; }
 
@@ -471,24 +465,29 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
         {/* ── Feature row — horizontally scrollable, swipe sideways for more ── */}
         <div className="memoera-nav-bar" ref={navScrollRef} style={styles.navBar}>
           {onScan && (
-            <NavBtn className="home-feature" img="/nav-scan.png" label={tr.scan || 'Scan'} labelColor={colors.text}
+            <NavBtn className="home-feature" img="/nav-scan.png" bg="#775EE9" label={tr.scan || 'Scan'} labelColor={colors.text}
               onClick={() => { playScanFeedback(); onScan(); }} />
           )}
-          <NavBtn className="home-feature" img="/nav-create.png" label={tr.upload || 'Create'} labelColor={colors.text} onClick={onUpload} />
+          <NavBtn className="home-feature" img="/nav-create.png" bg="#F970B4" label={tr.upload || 'Create'} labelColor={colors.text} onClick={onUpload} />
+          {onScan && (
+            <NavBtn className="home-feature" icon={<NfcNavIcon size={37} color="#fff" />}
+              bg="linear-gradient(135deg,#00C9A7,#00E5CC)" label="NFC" labelColor={colors.text}
+              onClick={() => { playScanFeedback(); onScan(); }} />
+          )}
           {onCollection && (
-            <NavBtn className="home-feature" img="/nav-saved.png" label={tr.navSaved || 'Saved'} labelColor={colors.text} onClick={onCollection} />
+            <NavBtn className="home-feature" icon={<SavedNavIcon size={39} color="#fff" />} bg="linear-gradient(135deg,#FEAE3B,#FFC768)" label={tr.navSaved || 'Saved'} labelColor={colors.text} onClick={onCollection} />
           )}
           {onLiked && (
-            <NavBtn className="home-feature" icon={<HeartIcon color="#fff" />} bg="linear-gradient(135deg,#ff3c5a,#ff7a90)" label="Liked" labelColor={colors.text} onClick={onLiked} />
+            <NavBtn className="home-feature" icon={<HeartIcon size={48} color="#fff" />} bg="linear-gradient(135deg,#ff3c5a,#ff7a90)" label="Liked" labelColor={colors.text} onClick={onLiked} />
           )}
-          <NavBtn className="home-feature" img="/nav-albums.png" label={tr.gallery || 'Albums'} labelColor={colors.text} onClick={onGallery} />
+          <NavBtn className="home-feature" img="/nav-albums.png" bg="#7DD784" label={tr.gallery || 'Albums'} labelColor={colors.text} onClick={onGallery} />
           {onStreak && (
-            <NavBtn className="home-feature" img="/nav-streak.png" count={streakCount} label={tr.navStreak || 'Streak'} labelColor={colors.text} onClick={onStreak} />
+            <NavBtn className="home-feature" img="/nav-streak.png" bg="#588EFD" count={streakCount} label={tr.navStreak || 'Streak'} labelColor={colors.text} onClick={onStreak} />
           )}
           {onAnimation && (
-            <NavBtn className="home-feature" img="/nav-animation.png" label={tr.navAnimation || 'Animation'} labelColor={colors.text} onClick={onAnimation} />
+            <NavBtn className="home-feature" img="/nav-animation.png" bg="#CA8540" label={tr.navAnimation || 'Animation'} labelColor={colors.text} onClick={onAnimation} />
           )}
-          <NavBtn className="home-feature" icon={<ShareIcon color="#fff" />} bg="linear-gradient(135deg,#00C9A7,#00E5CC)" label={tr.navShare || 'Share'} labelColor={colors.text} onClick={handleShare} />
+          <NavBtn className="home-feature" icon={<ShareIcon size={48} color="#fff" />} bg="linear-gradient(135deg,#00C9A7,#00E5CC)" label={tr.navShare || 'Share'} labelColor={colors.text} onClick={handleShare} />
         </div>
 
         <div style={styles.navDots}>
@@ -927,7 +926,11 @@ function HappyCustomersCard({ colors, isDark, user }) {
 function NavBtn({ icon, img, count, label, sublabel, bg, onClick, labelColor, subColor, className }) {
   return (
     <button onClick={onClick} title={label} className={`nav-tile-hover home-feature ${className || ''}`} style={styles.navBtn}>
-      <span className={`nav-tile-badge home-feature-badge${img ? '' : ' home-shimmer-wrap'}`} style={{ ...styles.navTileBadge, background: img ? 'transparent' : bg, boxShadow: img ? 'none' : styles.navTileBadge.boxShadow }}>
+      {/* Solid `bg` behind the icon even for `img` badges — the PNG artwork has a
+          softly anti-aliased edge, so a transparent backdrop let the page
+          background show through as a pale rim ("incomplete fill"). A solid
+          backdrop matching the icon's own color makes that edge blend away. */}
+      <span className="nav-tile-badge home-feature-badge" style={{ ...styles.navTileBadge, overflow: 'hidden', background: bg || '#333' }}>
         {img ? <img src={img} alt="" style={styles.navTileImg} /> : icon}
         {count > 0 && <span style={styles.navTileCount}>{count}</span>}
       </span>
@@ -991,12 +994,30 @@ function MoonIcon({ size = 17, color = '#555' }) {
 function BellIcon({ size = 20, color = '#555' }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>; }
 function GlobeIcon({ size = 15, color = '#555' }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18Z"/></svg>; }
 function HeartIcon({ size = 20, color = '#555' }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill={color} stroke="none"><path d="M12 21s-7.5-4.8-10-9.3C.4 8.6 1.7 5 5.2 4.2c2-.5 4 .3 5.2 2 .3.4.9.4 1.2 0 1.2-1.7 3.2-2.5 5.2-2 3.5.8 4.8 4.4 3.2 7.5C19.5 16.2 12 21 12 21z"/></svg>; }
-function ProfileIcon({ size = 22, color = '#555' }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-3.6 3.1-6 8-6s8 2.4 8 6"/></svg>; }
-function ShareIcon({ color = '#555' }) {
+function NfcNavIcon({ size = 32, color = '#fff' }) {
   return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
-      <line x1="8.6" y1="10.6" x2="15.4" y2="6.4" /><line x1="8.6" y1="13.4" x2="15.4" y2="17.6" />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} stroke="none">
+      <rect x="2.5"  y="13.5" width="4.5" height="7.5" rx="1.8" />
+      <rect x="9.75" y="8.5"  width="4.5" height="12.5" rx="1.8" />
+      <rect x="17"   y="3.5"  width="4.5" height="17.5" rx="1.8" />
+    </svg>
+  );
+}
+function SavedNavIcon({ size = 34, color = '#fff' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} stroke="none">
+      <path d="M6 3.5h12a1 1 0 0 1 1 1v16a.5.5 0 0 1-.77.42L12 16.3l-6.23 4.62A.5.5 0 0 1 5 20.5v-16a1 1 0 0 1 1-1z" />
+    </svg>
+  );
+}
+function ProfileIcon({ size = 22, color = '#555' }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-3.6 3.1-6 8-6s8 2.4 8 6"/></svg>; }
+// Fully filled — zero stroke — a solid arrow-into-tray glyph, no disconnected
+// outline segments or visible gaps to the badge background behind it.
+function ShareIcon({ size = 32, color = '#555' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} stroke="none">
+      <path d="M12 2.5 L17 8.5 H13.6 V15.5 H10.4 V8.5 H7 Z" />
+      <path d="M4.5 15.5 H7 V19.5 H17 V15.5 H19.5 V19.5 A2 2 0 0 1 17.5 21.5 H6.5 A2 2 0 0 1 4.5 19.5 Z" />
     </svg>
   );
 }
@@ -1089,9 +1110,10 @@ const styles = {
     touchAction:'pan-x',scrollSnapType:'x mandatory' },
   navBtn: { background:'transparent',border:'none',padding:0,
     cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'flex-start',
-    gap:6,width:80,flexShrink:0,scrollSnapAlign:'start' },
-  navTileBadge: { width:56,height:56,borderRadius:20,display:'flex',alignItems:'center',justifyContent:'center',
-    boxShadow:'0 4px 14px rgba(0,0,0,0.25)',flexShrink:0,position:'relative' },
+    gap:6,width:94,flexShrink:0,scrollSnapAlign:'start' },
+  navTileBadge: { width:72,height:72,borderRadius:24,display:'flex',alignItems:'center',justifyContent:'center',
+    boxShadow:'0 4px 14px rgba(0,0,0,0.25)',flexShrink:0,position:'relative',
+    backfaceVisibility:'hidden',WebkitBackfaceVisibility:'hidden' },
   navTileImg: { width:'100%',height:'100%',objectFit:'cover',display:'block' },
   navTileCount: { position:'absolute',top:-6,right:-8,minWidth:15,height:15,borderRadius:8,
     background:DANGER,color:'#fff',fontSize:9,fontWeight:700,

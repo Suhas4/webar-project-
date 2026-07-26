@@ -78,7 +78,12 @@ const server = http.createServer((req, res) => {
   res.writeHead(200, {
     'Content-Type':   mime,
     'Content-Length': stat.size,
-    'Cache-Control':  'no-cache',
+    // A dev tool should never let the browser reuse a stale copy of a file
+    // that's actively being edited — 'no-cache' alone can still get served
+    // from cache on some mobile WebViews when there's no ETag/Last-Modified
+    // to revalidate against, so force a real re-fetch every time.
+    'Cache-Control':  'no-store, no-cache, must-revalidate',
+    'Pragma':         'no-cache',
   });
   fs.createReadStream(filePath).pipe(res);
 });

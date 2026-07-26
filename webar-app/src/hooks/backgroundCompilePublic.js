@@ -1,7 +1,7 @@
 // Pre-compiles (or pre-downloads) the public/guest AR mind file in the
 // background while the user is on the Hello/welcome screen, so GuestScanScreen
 // opens instantly with zero wait when they tap "Tap to Scan".
-import { loadPublicTargets } from './useArStorage.js';
+import { loadPublicTargets, uploadPublicCombinedMind } from './useArStorage.js';
 import { getCachedPublicMind, setCachedPublicMind } from './useMindCache.js';
 import { loadMindARCompiler } from './loadMindARCompiler.js';
 import { fetchImageForAR } from './fetchImageForAR.js';
@@ -44,6 +44,7 @@ export function invalidateBackgroundPublicCompile() {
 
 function buildArTargets(targets) {
   return targets.map((t, i) => ({
+    id: t.id, // lets the AR scanner's Like/Save/Report buttons flag the right DB row
     targetIndex: i, label: t.label,
     planeWidth: t.planeWidth, planeHeight: t.planeHeight,
     planeOffsetY: t.planeOffsetY, videoUrl: t.videoUrl || '',
@@ -110,5 +111,9 @@ async function _doCompile(prefetchedTargets) {
   const arTargets  = buildArTargets(validTargets);
 
   setCachedPublicMind(fingerprint, mindBuffer, arTargets).catch(() => {});
+  // Self-healing — see the matching note in GuestScanScreen.jsx: whichever
+  // device pays for a from-scratch compile pushes it back to R2 so the next
+  // scan anywhere gets the instant pre-built path instead.
+  uploadPublicCombinedMind(mindBuffer, fingerprint).catch(() => {});
   return { key: fingerprint, mindBuffer, arTargets };
 }

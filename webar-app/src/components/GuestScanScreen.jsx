@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { loadPublicTargets } from "../hooks/useArStorage.js";
+import { loadPublicTargets, uploadPublicCombinedMind } from "../hooks/useArStorage.js";
 import { getCachedPublicMind, setCachedPublicMind } from "../hooks/useMindCache.js";
 import { R2_PUBLIC_URL } from "../config/api.js";
 import { useLanguage } from "../context/LanguageContext.jsx";
@@ -19,13 +19,14 @@ import { buildCameraErrorMessage } from "../utils/inAppBrowser.js";
 let _cachedPublicMind = null; // { key, mindBuffer, arTargets }
 export function invalidateGuestCache() { _cachedPublicMind = null; }
 
-// arTargets gained an `imageUrl` field (needed by the experimental jsfeat/
-// capture scan engines) after this cache shape already existed. Reject
-// entries cached before that change so they fall through to a fresh compile
-// instead of looking like a real cache hit.
+// arTargets gained `imageUrl` (needed by the experimental jsfeat/capture scan
+// engines) and later `id` (needed so the Like/Save buttons on a scanned video
+// know which DB row to toggle) fields after this cache shape already existed.
+// Reject entries cached before either change so they fall through to a fresh
+// compile instead of looking like a real cache hit with silently-broken buttons.
 function hasImageUrls(arTargets) {
   return Array.isArray(arTargets) && arTargets.length > 0 &&
-    arTargets.every((t) => !!t.imageUrl);
+    arTargets.every((t) => !!t.imageUrl && t.id != null);
 }
 
 const FONT = "'Outfit', -apple-system, BlinkMacSystemFont, sans-serif";
@@ -320,20 +321,34 @@ export default function GuestScanScreen({ onReady, onBack, onCreateAccount, onEr
           const pct = Math.min(100, Math.round(p * 100));
           if (pct !== lastPct) {
             lastPct = pct;
-            setProgress(pct);
+            if (!cancelledRef.current) setProgress(pct);
             return new Promise((resolve) => setTimeout(resolve, 0));
           }
         });
-        if (cancelledRef.current) return;
 
         const mindBuffer = await compiler.exportData();
-        mindBlobUrl = URL.createObjectURL(
-          new Blob([mindBuffer], { type: "application/octet-stream" })
-        );
         const arTargets = buildArTargets(validPublicTargets);
 
         setCachedPublicMind(fingerprint, mindBuffer, arTargets).catch(() => {});
         _cachedPublicMind = { key: fingerprint, mindBuffer, arTargets };
+        // Self-healing: this device just paid the full from-scratch compile
+        // cost because the pre-built R2 copy was stale (fingerprint mismatch,
+        // e.g. more public targets uploaded since it was last built). Push
+        // this fresh result back so the NEXT scan — on any device — gets the
+        // instant pre-built path instead of repeating this same slow compile.
+        // Best-effort and silent: requires the viewer to be signed in
+        // (uploadPublicCombinedMind no-ops without a token) and never blocks
+        // handing this scan's own result to the user.
+        // Deliberately NOT gated on cancelledRef — if the user gave up and hit
+        // back before this finished, the compile still ran to completion in
+        // the background, and skipping the upload here would waste that work
+        // and leave the stale R2 copy in place for the next person too.
+        uploadPublicCombinedMind(mindBuffer, fingerprint).catch(() => {});
+        if (cancelledRef.current) return;
+
+        mindBlobUrl = URL.createObjectURL(
+          new Blob([mindBuffer], { type: "application/octet-stream" })
+        );
         await releaseAndReady(arTargets, mindBlobUrl);
       } catch (err) {
         if (cancelledRef.current) return;
@@ -401,6 +416,11 @@ export default function GuestScanScreen({ onReady, onBack, onCreateAccount, onEr
         <div style={{ ...s.progressBar, background: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.12)' }}>
           <div style={{ ...s.progressFill, width: phase === "fetching" ? "15%" : progress + "%", background: colors.accent }} />
         </div>
+        {phase === "compiling" && (
+          <p style={{ ...s.statusText, marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+            First-time setup can take up to a minute — please keep this open.
+          </p>
+        )}
       </div>
     </div>
   );

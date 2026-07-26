@@ -6,6 +6,8 @@ import { rebuildPublicMindInBackground } from '../utils/rebuildPublicMind.js';
 import { assessMarkerQuality } from '../utils/assessMarkerQuality.js';
 import UploadProgressOverlay from './UploadProgressOverlay.jsx';
 import UploadDropZone from './UploadDropZone.jsx';
+import FrameViewer from './FrameViewer.jsx';
+import CarFrameViewer from './CarFrameViewer.jsx';
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const TEAL = "#00C9A7";
@@ -15,6 +17,13 @@ const GOLD = "#C9A84C";
 const MEMOERA_SAMPLES = [
   { id: 's1', name: 'Invitation',  emoji: '🎂', framesPath: '/invitation-29-frames', total: 360, thumb: '/invitation-29-frames/frame_0000.jpg', draggable: true },
   { id: 's2', name: 'Car Cover',   emoji: '🚗', stops: ['#1c1c1c','#3a3a3a','#707070','#b0b0b0','#e0e0e0'] },
+];
+
+// ── What-it-looks-like examples shown before the user builds their own ─────
+const EXAMPLES = [
+  { id: 'ex-car', kind: 'car', title: 'Car Reveal', thumb: '/car-frames/frame_0000.jpg', badge: '360° SPIN' },
+  { id: 'ex-invite', kind: 'sample', title: 'Invitation', framesPath: '/invitation-29-frames', total: 360, thumb: '/invitation-29-frames/frame_0000.jpg', canvasWidth: 540, canvasHeight: 960, badge: 'BIRTHDAY' },
+  { id: 'ex-sample', kind: 'sample', title: 'Sample', framesPath: '/collection-frames', total: 93, thumb: '/collection-frames/frame_0000.jpg', badge: '360° SPIN' },
 ];
 
 async function generateSampleFrames(stops) {
@@ -333,6 +342,7 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
   const [frameSheet,    setFrameSheet]    = useState(false);
   const [extracting,    setExtracting]    = useState(false);
   const [editModal,     setEditModal]     = useState(null); // { file }
+  const [previewActive, setPreviewActive] = useState(null); // example being watched full-screen
 
   // File inputs — separate refs for camera vs gallery vs storage vs video
   const markerCamRef     = useRef(null);
@@ -491,6 +501,13 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
 
   const isWorking = ['compiling','uploading','finalizing'].includes(state);
 
+  if (previewActive?.kind === 'car') return <CarFrameViewer onBack={() => setPreviewActive(null)} />;
+  if (previewActive?.kind === 'sample') return (
+    <FrameViewer title={previewActive.title} framesPath={previewActive.framesPath}
+      total={previewActive.total} onBack={() => setPreviewActive(null)}
+      canvasWidth={previewActive.canvasWidth} canvasHeight={previewActive.canvasHeight} />
+  );
+
   return (
     <div style={{ position:'fixed', inset:0,
       background:'linear-gradient(160deg,#061A1F 0%,#0A2229 50%,#061820 100%)',
@@ -542,6 +559,40 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
 
       {/* Scrollable body */}
       <div style={{ flex:1, overflowY:'auto', padding:'0 20px 40px' }}>
+
+        {/* See it in action — real examples of what a scanned photo animation looks like */}
+        <div style={{ marginBottom:24 }}>
+          <div style={labelStyle}>See It In Action</div>
+          <div style={{ fontSize:11, color:'rgba(255,255,255,0.4)', fontFamily:FONT, marginBottom:10 }}>
+            Tap an example to watch what people see when they scan
+          </div>
+          <div style={{ display:'flex', gap:12, overflowX:'auto', paddingBottom:4 }}>
+            {EXAMPLES.map((ex) => (
+              <div key={ex.id} onClick={() => setPreviewActive(ex)}
+                style={{ cursor:'pointer', borderRadius:14, overflow:'hidden', width:120, flexShrink:0,
+                  border:'1.5px solid rgba(0,201,167,0.35)', background:'rgba(0,201,167,0.06)' }}>
+                <div style={{ width:'100%', height:90, position:'relative', overflow:'hidden', background:'#0a1a20' }}>
+                  <img src={ex.thumb} alt={ex.title} loading="lazy" decoding="async"
+                    style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
+                  <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center',
+                    justifyContent:'center', background:'rgba(0,0,0,0.18)' }}>
+                    <div style={{ width:30, height:30, borderRadius:'50%', background:'rgba(0,0,0,0.55)',
+                      display:'flex', alignItems:'center', justifyContent:'center' }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><path d="M8 5v14l11-7z"/></svg>
+                    </div>
+                  </div>
+                  <div style={{ position:'absolute', top:5, right:5, background:'rgba(0,201,167,0.9)',
+                    borderRadius:20, padding:'2px 7px' }}>
+                    <span style={{ fontSize:8, fontWeight:800, color:'#fff', letterSpacing:'0.06em' }}>{ex.badge}</span>
+                  </div>
+                </div>
+                <div style={{ padding:'7px 9px 9px', fontSize:12, fontWeight:700, color:TEAL, fontFamily:FONT }}>
+                  {ex.title}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
 
         {/* Name */}
         <div style={{ marginBottom:20 }}>
