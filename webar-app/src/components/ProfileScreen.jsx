@@ -2,9 +2,19 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { API_BASE } from "../config/api.js";
 import CameraCapture from "./CameraCapture.jsx";
 import { useTheme } from "../context/ThemeContext.jsx";
+import { useLanguage } from "../context/LanguageContext.jsx";
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const GOLD = "#C9A84C";
+const TEAL = "#00C9A7";
+
+const SECURITY_QUESTIONS = [
+  "What was the name of your first pet?",
+  "What is your mother's maiden name?",
+  "What city were you born in?",
+  "What was the name of your primary school?",
+  "What is your oldest sibling's middle name?",
+];
 
 const FILTER_PRESETS = [
   { name: "Natural",  css: "" },
@@ -24,6 +34,7 @@ const FILTER_PRESETS = [
 
 export default function ProfileScreen({ user, onBack, onUserUpdate }) {
   const { colors } = useTheme();
+  const { tr } = useLanguage();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -32,12 +43,41 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
     dateOfBirth: user?.dateOfBirth || "",
     email: user?.email || "",
   });
+  const [fieldErrors, setFieldErrors] = useState({});
   const [profilePhoto, setProfilePhoto] = useState(user?.profilePhotoUrl || "");
   const [showPhotoPicker, setShowPhotoPicker] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [editorFile, setEditorFile] = useState(null);
   const galleryInputRef = useRef(null);
+
+  const [editingSecurity, setEditingSecurity] = useState(false);
+  const [securityQuestion, setSecurityQuestion] = useState(user?.securityQuestion || SECURITY_QUESTIONS[0]);
+  const [securityAnswer, setSecurityAnswer] = useState("");
+  const [savingSecurity, setSavingSecurity] = useState(false);
+  const [securityMsg, setSecurityMsg] = useState("");
+
+  const handleSaveSecurity = async () => {
+    if (!securityAnswer.trim()) { setSecurityMsg(tr.prfErrAnswerRequired); return; }
+    setSavingSecurity(true); setSecurityMsg("");
+    try {
+      const token = localStorage.getItem("memoera_token") || "";
+      const res = await fetch(API_BASE + "/api/auth/security-question", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+        body: JSON.stringify({ securityQuestion, securityAnswer: securityAnswer.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setSecurityMsg(data.error || tr.prfErrSaveFailed); return; }
+      onUserUpdate({ ...user, securityQuestion });
+      setSecurityAnswer("");
+      setEditingSecurity(false);
+    } catch {
+      setSecurityMsg(tr.prfErrNetwork);
+    } finally {
+      setSavingSecurity(false);
+    }
+  };
 
   useEffect(() => {
     setProfilePhoto(user?.profilePhotoUrl || "");
@@ -61,10 +101,22 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
   const dobParts = dob ? dob.split("-") : [];
   const dobDisplay = dobParts.length === 3
     ? (dobParts[2] + " | " + dobParts[1] + " | " + dobParts[0])
-    : dob || "Not set";
+    : dob || tr.prfNotSet;
   const initials = (((user?.firstName || " ")[0]) + ((user?.lastName || " ")[0])).toUpperCase();
 
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/;
+  const validateProfile = () => {
+    const errors = {};
+    if (!form.firstName.trim()) errors.firstName = tr.prfErrFirstNameRequired;
+    if (!form.lastName.trim()) errors.lastName = tr.prfErrLastNameRequired;
+    if (form.email.trim() && !EMAIL_RE.test(form.email.trim())) errors.email = tr.prfErrEmailInvalid;
+    return errors;
+  };
+
   const handleSave = async () => {
+    const errors = validateProfile();
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
     setSaving(true);
     try {
       const token = localStorage.getItem("memoera_token") || "";
@@ -74,11 +126,11 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
         body: JSON.stringify(form),
       });
       const data = await res.json();
-      if (!res.ok) { alert(data.error || "Failed to save"); return; }
+      if (!res.ok) { alert(data.error || tr.prfErrSaveGeneric); return; }
       onUserUpdate(data);
       setEditing(false);
     } catch {
-      alert("Network error. Please try again.");
+      alert(tr.prfErrNetwork);
     } finally {
       setSaving(false);
     }
@@ -129,6 +181,7 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
           file={editorFile}
           onApply={handleEditorApply}
           onCancel={() => setEditorFile(null)}
+          tr={tr}
         />
       )}
       {showPhotoPicker && (
@@ -136,18 +189,18 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
           <div style={styles.pickerBackdrop} onClick={() => setShowPhotoPicker(false)} />
           <div style={{ ...styles.pickerSheet, background: colors.surface }}>
             <div style={styles.pickerHandle} />
-            <p style={{ ...styles.pickerTitle, color: colors.text }}>Profile Photo</p>
+            <p style={{ ...styles.pickerTitle, color: colors.text }}>{tr.prfProfilePhoto}</p>
             <button style={{ ...styles.pickerBtn, color: colors.text }}
               onClick={() => { setShowPhotoPicker(false); setShowCamera(true); }}>
-              📷  Camera
+              📷  {tr.prfCamera}
             </button>
             <button style={{ ...styles.pickerBtn, color: colors.text }}
               onClick={() => { setShowPhotoPicker(false); galleryInputRef.current?.click(); }}>
-              🖼️  Gallery
+              🖼️  {tr.prfGallery}
             </button>
             <button style={{ ...styles.pickerCancelBtn, color: colors.textMuted }}
               onClick={() => setShowPhotoPicker(false)}>
-              Cancel
+              {tr.cancel}
             </button>
           </div>
         </div>
@@ -156,7 +209,7 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
         onChange={(e) => openEditor(e.target.files?.[0])}
         onClick={(e) => { e.target.value = ""; }} />
 
-      <button onClick={onBack} style={{ ...styles.backBtn, color: colors.textMuted }}>← Back</button>
+      <button onClick={onBack} style={{ ...styles.backBtn, color: colors.textMuted }}>← {tr.back}</button>
 
       <div style={styles.avatarWrap} onClick={() => !photoUploading && setShowPhotoPicker(true)}>
         <div style={styles.hexOuter}>
@@ -168,13 +221,13 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
           </div>
         </div>
         <div style={{ ...styles.editPhotoHint, color: colors.textMuted }}>
-          {photoUploading ? "Uploading…" : "Tap to change photo"}
+          {photoUploading ? tr.prfUploading : tr.prfTapToChangePhoto}
         </div>
         {user?.id != null && (
           <div style={{ marginTop: 8, fontSize: 11, fontWeight: 700, fontFamily: FONT,
             letterSpacing: "0.06em", color: GOLD, background: "rgba(201,168,76,0.12)",
             border: "1px solid rgba(201,168,76,0.35)", borderRadius: 20, padding: "4px 12px" }}>
-            MEMOERA ID: {formatMemoeraId(user)}
+            {tr.prfMemoeraId}: {formatMemoeraId(user)}
           </div>
         )}
       </div>
@@ -182,21 +235,31 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
       <div style={{ width: "80%", display: "flex", flexDirection: "column", alignItems: "center" }}>
         {editing ? (
           <>
-            <input style={{ ...styles.editInput, color: colors.text, background: colors.surface }}
-              placeholder="First Name" value={form.firstName}
-              onChange={(e) => setForm(f => ({ ...f, firstName: e.target.value }))} />
+            <p style={{ ...styles.fieldLabel, color: colors.textMuted }}>{tr.firstName} *</p>
+            <input style={{ ...styles.editInput, color: colors.text, background: colors.surface, borderBottomColor: fieldErrors.firstName ? '#FF6B6B' : undefined }}
+              placeholder={tr.firstName} value={form.firstName}
+              onChange={(e) => { setForm(f => ({ ...f, firstName: e.target.value })); setFieldErrors(fe => ({ ...fe, firstName: undefined })); }} />
+            {fieldErrors.firstName && <p style={styles.fieldErrorText}>⚠ {fieldErrors.firstName}</p>}
             <div style={{ ...styles.divider, background: colors.border }} />
-            <input style={{ ...styles.editInput, color: colors.text, background: colors.surface }}
-              placeholder="Last Name" value={form.lastName}
-              onChange={(e) => setForm(f => ({ ...f, lastName: e.target.value }))} />
+
+            <p style={{ ...styles.fieldLabel, color: colors.textMuted }}>{tr.lastName} *</p>
+            <input style={{ ...styles.editInput, color: colors.text, background: colors.surface, borderBottomColor: fieldErrors.lastName ? '#FF6B6B' : undefined }}
+              placeholder={tr.lastName} value={form.lastName}
+              onChange={(e) => { setForm(f => ({ ...f, lastName: e.target.value })); setFieldErrors(fe => ({ ...fe, lastName: undefined })); }} />
+            {fieldErrors.lastName && <p style={styles.fieldErrorText}>⚠ {fieldErrors.lastName}</p>}
             <div style={{ ...styles.divider, background: colors.border }} />
+
+            <p style={{ ...styles.fieldLabel, color: colors.textMuted }}>{tr.dateOfBirth}</p>
             <input style={{ ...styles.editInput, color: colors.text, background: colors.surface }}
               type="date" value={form.dateOfBirth}
               onChange={(e) => setForm(f => ({ ...f, dateOfBirth: e.target.value }))} />
             <div style={{ ...styles.divider, background: colors.border }} />
-            <input style={{ ...styles.editInput, color: colors.text, background: colors.surface }}
-              type="email" placeholder="Email (optional)" value={form.email}
-              onChange={(e) => setForm(f => ({ ...f, email: e.target.value }))} />
+
+            <p style={{ ...styles.fieldLabel, color: colors.textMuted }}>{tr.prfEmailOptional}</p>
+            <input style={{ ...styles.editInput, color: colors.text, background: colors.surface, borderBottomColor: fieldErrors.email ? '#FF6B6B' : undefined }}
+              type="email" placeholder={tr.prfEmailOptional} value={form.email}
+              onChange={(e) => { setForm(f => ({ ...f, email: e.target.value })); setFieldErrors(fe => ({ ...fe, email: undefined })); }} />
+            {fieldErrors.email && <p style={styles.fieldErrorText}>⚠ {fieldErrors.email}</p>}
           </>
         ) : (
           <>
@@ -208,13 +271,56 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
             <div style={{ ...styles.divider, background: colors.border }} />
             <div style={{ ...styles.field, color: colors.text }}>{user?.mobile || ""}</div>
             <div style={{ ...styles.divider, background: colors.border }} />
-            <div style={{ ...styles.field, color: colors.text }}>{form.email || "No email set"}</div>
+            <div style={{ ...styles.field, color: colors.text }}>{form.email || tr.prfNoEmailSet}</div>
             <div style={{ ...styles.divider, background: colors.border }} />
             <div style={{ ...styles.field, fontSize: 11, color: colors.textMuted }}>
-              {user?.securityQuestion || "Security Question"}
+              {user?.securityQuestion || tr.securityQuestion}
             </div>
             <div style={{ ...styles.divider, background: colors.border }} />
           </>
+        )}
+      </div>
+
+      <div style={{ width: "80%", marginTop: 20, padding: "14px 16px", borderRadius: 14,
+        background: "rgba(0,201,167,0.06)", border: "1px solid rgba(0,201,167,0.25)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: colors.text, fontFamily: FONT }}>{tr.securityQuestion}</div>
+            <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: FONT, marginTop: 2 }}>
+              {editingSecurity ? tr.prfSecurityHint : (user?.securityQuestion || tr.prfNotSetYet)}
+            </div>
+          </div>
+          {!editingSecurity && (
+            <button onClick={() => setEditingSecurity(true)}
+              style={{ background: "transparent", border: `1px solid ${TEAL}`, color: TEAL,
+                borderRadius: 20, padding: "6px 14px", fontSize: 12, fontWeight: 700, fontFamily: FONT, cursor: "pointer" }}>
+              {user?.securityQuestion ? tr.prfUpdate : tr.prfSetUp}
+            </button>
+          )}
+        </div>
+        {editingSecurity && (
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+            <select value={securityQuestion} onChange={(e) => setSecurityQuestion(e.target.value)}
+              style={{ ...styles.editInput, marginBottom: 0, cursor: "pointer" }}>
+              {SECURITY_QUESTIONS.map(q => <option key={q} value={q} style={{ background: "#0E1628", color: "#fff" }}>{q}</option>)}
+            </select>
+            <input style={{ ...styles.editInput, marginBottom: 0 }}
+              placeholder={tr.prfYourAnswer} value={securityAnswer}
+              onChange={(e) => setSecurityAnswer(e.target.value)} />
+            {securityMsg && <div style={{ fontSize: 11, color: "#FF6B6B", fontFamily: FONT, textAlign: "center" }}>{securityMsg}</div>}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => { setEditingSecurity(false); setSecurityAnswer(""); setSecurityMsg(""); }} disabled={savingSecurity}
+                style={{ flex: 1, background: "transparent", border: `1px solid ${colors.border}`, color: colors.text,
+                  borderRadius: 20, padding: "9px 0", fontSize: 12, fontWeight: 700, fontFamily: FONT, cursor: "pointer" }}>
+                {tr.cancel}
+              </button>
+              <button onClick={handleSaveSecurity} disabled={savingSecurity}
+                style={{ flex: 1, background: TEAL, border: "none", color: "#04211C",
+                  borderRadius: 20, padding: "9px 0", fontSize: 12, fontWeight: 700, fontFamily: FONT, cursor: "pointer" }}>
+                {savingSecurity ? tr.prfSaving : tr.save}
+              </button>
+            </div>
+          </div>
         )}
       </div>
 
@@ -222,16 +328,16 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
         {editing ? (
           <>
             <button style={{ ...styles.editBtn, color: colors.text, borderColor: colors.border }}
-              onClick={() => setEditing(false)} disabled={saving}>Cancel</button>
+              onClick={() => setEditing(false)} disabled={saving}>{tr.cancel}</button>
             <button style={styles.doneBtn} onClick={handleSave} disabled={saving}>
-              {saving ? "Saving…" : "DONE"}
+              {saving ? tr.prfSaving : tr.done}
             </button>
           </>
         ) : (
           <>
             <button style={{ ...styles.editBtn, color: colors.text, borderColor: colors.border }}
-              onClick={() => setEditing(true)}>EDIT</button>
-            <button style={styles.doneBtn} onClick={onBack}>DONE</button>
+              onClick={() => setEditing(true)}>{tr.edit}</button>
+            <button style={styles.doneBtn} onClick={onBack}>{tr.done}</button>
           </>
         )}
       </div>
@@ -241,7 +347,7 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
 
 // ── Photo Editor Modal ────────────────────────────────────────────────────────
 
-function PhotoEditorModal({ file, onApply, onCancel }) {
+function PhotoEditorModal({ file, onApply, onCancel, tr }) {
   const [tab, setTab]           = useState("crop");
   const [brightness, setBrightness] = useState(100);
   const [contrast, setContrast]     = useState(100);
@@ -310,14 +416,14 @@ function PhotoEditorModal({ file, onApply, onCancel }) {
   return (
     <div style={pe.backdrop}>
       <div style={pe.sheet}>
-        <p style={pe.title}>Edit Photo</p>
+        <p style={pe.title}>{tr.peEditPhoto}</p>
 
         {/* Tabs */}
         <div style={pe.tabs}>
           {["crop", "edit", "filter"].map(t => (
             <button key={t} style={{ ...pe.tab, ...(tab === t ? pe.tabActive : {}) }}
               onClick={() => setTab(t)}>
-              {t === "crop" ? "✂️ Crop" : t === "edit" ? "✨ Adjust" : "🎨 Filters"}
+              {t === "crop" ? `✂️ ${tr.peTabCrop}` : t === "edit" ? `✨ ${tr.peTabAdjust}` : `🎨 ${tr.peTabFilters}`}
             </button>
           ))}
         </div>
@@ -352,14 +458,14 @@ function PhotoEditorModal({ file, onApply, onCancel }) {
             </svg>
           )}
         </div>
-        {tab === "crop" && <p style={pe.hint}>Drag to reposition · Square crop</p>}
+        {tab === "crop" && <p style={pe.hint}>{tr.peHint}</p>}
 
         {/* Edit sliders */}
         {tab === "edit" && (
           <div style={pe.editPanel}>
-            <SliderRow label="Brightness"     value={brightness} onChange={setBrightness} min={50}  max={150} unit="%" />
-            <SliderRow label="Contrast"       value={contrast}   onChange={setContrast}   min={50}  max={150} unit="%" />
-            <WarmthRow label="White Balance"  value={warmth}     onChange={setWarmth}     min={-60} max={60} />
+            <SliderRow label={tr.peBrightness}    value={brightness} onChange={setBrightness} min={50}  max={150} unit="%" />
+            <SliderRow label={tr.peContrast}      value={contrast}   onChange={setContrast}   min={50}  max={150} unit="%" />
+            <WarmthRow label={tr.peWhiteBalance}  value={warmth}     onChange={setWarmth}     min={-60} max={60} tr={tr} />
           </div>
         )}
 
@@ -384,9 +490,9 @@ function PhotoEditorModal({ file, onApply, onCancel }) {
         )}
 
         <div style={pe.actions}>
-          <button style={pe.cancelBtn} onClick={onCancel}>Cancel</button>
+          <button style={pe.cancelBtn} onClick={onCancel}>{tr.cancel}</button>
           <button style={pe.applyBtn} onClick={handleApply} disabled={applying}>
-            {applying ? "Applying…" : "Use Photo"}
+            {applying ? tr.peApplying : tr.peUsePhoto}
           </button>
         </div>
       </div>
@@ -408,8 +514,8 @@ function SliderRow({ label, value, onChange, min = 50, max = 150 }) {
   );
 }
 
-function WarmthRow({ label, value, onChange, min = -60, max = 60 }) {
-  const display = value === 0 ? "Neutral" : value < 0 ? `Warm ${Math.abs(value)}` : `Cool ${value}`;
+function WarmthRow({ label, value, onChange, min = -60, max = 60, tr }) {
+  const display = value === 0 ? tr.peNeutral : value < 0 ? `${tr.peWarm} ${Math.abs(value)}` : `${tr.peCool} ${value}`;
   const color   = value < 0 ? "#F4A261" : value > 0 ? "#74B9FF" : GOLD;
   return (
     <div style={{ marginBottom: 16 }}>
@@ -421,8 +527,8 @@ function WarmthRow({ label, value, onChange, min = -60, max = 60 }) {
         onChange={(e) => onChange(Number(e.target.value))}
         style={{ width: "100%", accentColor: color }} />
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
-        <span style={{ fontSize: 10, color: "#F4A261", fontFamily: FONT }}>🌅 Warm</span>
-        <span style={{ fontSize: 10, color: "#74B9FF", fontFamily: FONT }}>❄️ Cool</span>
+        <span style={{ fontSize: 10, color: "#F4A261", fontFamily: FONT }}>🌅 {tr.peWarm}</span>
+        <span style={{ fontSize: 10, color: "#74B9FF", fontFamily: FONT }}>❄️ {tr.peCool}</span>
       </div>
     </div>
   );
@@ -486,6 +592,8 @@ const styles = {
   editPhotoHint: { fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 6, fontFamily: FONT },
   name:          { fontSize: 22, fontWeight: 700, color: "#fff", letterSpacing: "1px", marginBottom: 8, textAlign: "center" },
   divider:       { width: "100%", height: 1, background: "rgba(255,255,255,0.25)", margin: "6px 0" },
+  fieldLabel:    { fontSize: 11, fontWeight: 600, fontFamily: FONT, letterSpacing: "0.06em", textTransform: "uppercase", width: "100%", margin: "0 0 4px", textAlign: "left" },
+  fieldErrorText:{ fontSize: 11, fontWeight: 600, color: "#FF6B6B", fontFamily: FONT, width: "100%", margin: "-4px 0 8px", textAlign: "left" },
   field:         { fontSize: 14, color: "rgba(255,255,255,0.85)", fontFamily: FONT, padding: "6px 0", textAlign: "center" },
   editInput: {
     background: "rgba(255,255,255,0.07)", border: "none",

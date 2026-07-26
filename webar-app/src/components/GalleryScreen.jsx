@@ -26,7 +26,8 @@ function formatUploadDate(iso) {
   } catch { return null; }
 }
 
-export default function GalleryScreen({ onBack, onCollection }) {
+export default function GalleryScreen({ onBack, onCollection, initialQuery }) {
+  const [query, setQuery]           = useState(initialQuery || '');
   const [targets, setTargets]       = useState([]);
   const [loading, setLoading]       = useState(true);
   const [deleting, setDeleting]     = useState(false);
@@ -233,6 +234,19 @@ export default function GalleryScreen({ onBack, onCollection }) {
         )}
       </div>
 
+      {!loading && targets.length > 0 && (
+        <div style={{ margin: '0 16px 12px' }}>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search your memories…"
+            style={{ width: '100%', boxSizing: 'border-box', background: colors.surface,
+              border: `1px solid ${colors.border}`, borderRadius: 50, padding: '10px 16px',
+              fontSize: 13, fontFamily: FONT, color: colors.text, outline: 'none' }}
+          />
+        </div>
+      )}
+
       {!loading && targets.some((t) => !t._imagePreviewUrl) && (
         <div style={{ margin: "0 16px 12px", padding: "10px 14px", borderRadius: 12,
           background: "rgba(255,128,128,0.08)", border: "1px solid rgba(255,128,128,0.3)",
@@ -251,16 +265,26 @@ export default function GalleryScreen({ onBack, onCollection }) {
       )}
 
       {/* Content */}
-      {loading ? (
-        <div style={{ ...s.empty, color: colors.textMuted }}>Loading...</div>
-      ) : targets.length === 0 ? (
-        <div style={{ ...s.empty, color: colors.textMuted, flexDirection: "column", gap: 10 }}>
-          <span style={{ fontSize: 40 }}>📭</span>
-          <span>{tr.noTargets || "No targets uploaded yet."}</span>
-        </div>
-      ) : (
+      {(() => {
+        const filtered = query.trim()
+          ? targets.filter((t) => (t.label || '').toLowerCase().includes(query.trim().toLowerCase()))
+          : targets;
+        if (loading) return <div style={{ ...s.empty, color: colors.textMuted }}>Loading...</div>;
+        if (targets.length === 0) return (
+          <div style={{ ...s.empty, color: colors.textMuted, flexDirection: "column", gap: 10 }}>
+            <span style={{ fontSize: 40 }}>📭</span>
+            <span>{tr.noTargets || "No targets uploaded yet."}</span>
+          </div>
+        );
+        if (filtered.length === 0) return (
+          <div style={{ ...s.empty, color: colors.textMuted, flexDirection: "column", gap: 10 }}>
+            <span style={{ fontSize: 40 }}>🔍</span>
+            <span>No memories match "{query}"</span>
+          </div>
+        );
+        return (
         <div style={s.list}>
-          {targets.map((t, i) => {
+          {filtered.map((t, i) => {
             const uploadDate = formatUploadDate(t.createdAt);
             return (
               <div key={i} style={{ ...s.card, background: colors.cardBg || colors.surface, border: `1px solid ${colors.border}` }}>
@@ -355,7 +379,8 @@ export default function GalleryScreen({ onBack, onCollection }) {
             );
           })}
         </div>
-      )}
+        );
+      })()}
 
       {/* Ad Banner */}
       <div style={{ flexShrink: 0, borderTop: `1px solid ${colors.border}`, padding: "10px 16px",

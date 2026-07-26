@@ -583,8 +583,8 @@ function PosterMode({ colors, isDark }) {
           if (item.type === 'poster') return (
             <div key={item.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#112', overflow: 'hidden', padding: 2 }}>
-                  <img src="/logo1.png" alt="" style={{ width: '100%', objectFit: 'contain' }} />
+                <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#112', overflow: 'hidden' }}>
+                  <img src="/bot-icon.png" alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                 </div>
                 <span style={{ fontSize: 10, color: colors.textMuted, fontFamily: FONT }}>
                   {item.loading ? 'Claude is creating your poster…' : item.error ? 'Failed — try again' : 'Your poster is ready! ✨'}
@@ -779,11 +779,11 @@ export default function ChatBotWidget() {
     <>
       {/* ── Floating button ── */}
       {!open && (
-        <button onClick={() => setOpen(true)} style={s.fab} title="Chat with Memoera AI">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="#fff">
-            <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
-          </svg>
-          <span style={s.fabBadge}>AI</span>
+        <button onClick={() => setOpen(true)} style={s.fabWrap} title="Chat with Nik Bot">
+          <span style={s.fab}>
+            <img src="/bot-icon.png" alt="" style={s.fabIcon} />
+          </span>
+          <span style={s.fabLabel}>Chat with us</span>
         </button>
       )}
 
@@ -794,10 +794,10 @@ export default function ChatBotWidget() {
           {/* Header */}
           <div style={{ ...s.header, background: headerBg }}>
             <div style={s.headerAvatar}>
-              <img src="/logo-icon.png" alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              <img src="/bot-icon.png" alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
             </div>
             <div style={{ flex: 1 }}>
-              <div style={s.headerName}>Memoera AI</div>
+              <div style={s.headerName}>Nik Bot</div>
               <div style={s.headerStatus}>● Online · AI Powered</div>
             </div>
             <button onClick={() => setOpen(false)} style={s.closeBtn}>✕</button>
@@ -924,19 +924,21 @@ function TypingDots() {
 }
 
 const s = {
-  fab: {
+  fabWrap: {
     position: 'fixed', bottom: 88, right: 16, zIndex: 500,
-    width: 54, height: 54, borderRadius: '50%',
-    background: `linear-gradient(135deg, ${TEAL}, #00E5CC)`,
-    border: 'none', cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center',
-    boxShadow: `0 4px 18px rgba(0,201,167,0.5)`,
-    transition: 'transform 0.2s',
+    background: 'transparent', border: 'none', cursor: 'pointer', padding: 0,
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
   },
-  fabBadge: {
-    position: 'absolute', top: -4, right: -4,
-    background: GOLD, color: '#fff', fontSize: 8, fontWeight: 700,
-    fontFamily: FONT, borderRadius: 8, padding: '2px 5px',
+  fab: {
+    width: 54, height: 54, borderRadius: '50%',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden', boxShadow: `0 4px 18px rgba(0,201,167,0.5)`,
+  },
+  fabIcon: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
+  fabLabel: {
+    fontSize: 11, fontWeight: 700, color: '#fff', fontFamily: FONT,
+    background: 'rgba(0,0,0,0.55)', padding: '3px 10px', borderRadius: 12,
+    whiteSpace: 'nowrap', boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
   },
   panel: {
     position: 'fixed', bottom: 80, right: 12, zIndex: 500,
@@ -951,7 +953,7 @@ const s = {
   },
   headerAvatar: {
     width: 36, height: 36, borderRadius: '50%',
-    background: 'rgba(255,255,255,0.95)', overflow: 'hidden', flexShrink: 0, padding: 4,
+    background: 'transparent', overflow: 'hidden', flexShrink: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     boxShadow: '0 0 0 1.5px rgba(0,201,167,0.4)',
   },

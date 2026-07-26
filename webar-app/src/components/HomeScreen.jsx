@@ -4,30 +4,64 @@ import { useLanguage } from '../context/LanguageContext.jsx';
 import { LANGUAGES, T } from '../config/translations.js';
 import { useTheme } from '../context/ThemeContext.jsx';
 import { API_BASE } from '../config/api.js';
-import { showRewardedAd, showBanner, removeBanner } from '../services/AdMobService.js';
+import { showBanner, removeBanner } from '../services/AdMobService.js';
 import { useFestivalNotifications } from '../hooks/useFestivalNotifications.js';
 import { playScanFeedback } from '../utils/feedback.js';
+import { fetchStreakStatus } from '../utils/streak.js';
+import { shareMemoera } from '../utils/share.js';
 
-const AD_BONUS_KEY = 'memoera_ad_bonus_mb';
-const AD_COOLDOWN_KEY = 'memoera_ad_last';
-const AD_COOLDOWN_MS = 30 * 60 * 1000; // 30-min cooldown between ads
+const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
+const GOLD = "#C9A84C";
+const VIOLET = "#8f6ffb";
+const DANGER = "#FF6B6B";
 
-const COLLECTION_TOTAL = 93;
+// Every option from the Settings screen, surfaced directly in the profile
+// menu (each `section` deep-links straight into that accordion section)
+// plus Refer a Friend, which lives on its own screen.
+// Labels resolved from `tr` at render time (see profileMenuItems below) so the
+// dropdown follows the selected language instead of staying English forever.
+const PROFILE_MENU_KEYS = [
+  { key: 'account',       icon: '👤', section: 'account' },
+  { key: 'notifications', icon: '🔔', section: 'notifications' },
+  { key: 'ar',            icon: '🔭', section: 'ar' },
+  { key: 'posters',       icon: '🖼️', section: 'posters' },
+  { key: 'theme',         icon: '🎨', section: 'theme' },
+  { key: 'subscription',  icon: '💎', section: 'subscription' },
+  { key: 'refer',         icon: '🎁', section: null },
+  { key: 'support',       icon: '💬', section: 'support' },
+  { key: 'about',         icon: '🏢', section: 'about' },
+];
 
-export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium, onSignOut, onRefer, onCollection, onAdmin, onScan, user }) {
+const PROMO_CARDS = [
+  { key: 'streak',    eyebrow: 'Milestone', title: 'Keep your streak', body: null, variant: 'warm' },
+  { key: 'tip',       eyebrow: 'Tip', title: 'Steadier scans', body: 'Hold for 2 seconds for sharper 3D detail.', variant: 'violet' },
+];
+
+export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium, onSignOut, onRefer, onStreak, onCollection, onAdmin, onScan, onSearch, onAnimation, user }) {
   const { lang, setLang } = useLanguage();
   const { theme, toggleTheme, colors } = useTheme();
   const tr = { ...T.en, ...(T[lang] || {}) };
   const whatsappUrl = "https://wa.me/919187713120";
+  const isDark = theme === 'dark';
 
-  const [infoSlide,    setInfoSlide]    = useState(0);   // 0=About Us  1=Company Details
-  const [infoExpanded, setInfoExpanded] = useState(false);
-  const slideStartX  = useRef(0);
-  const slideStartY  = useRef(0);
-  const [adModalOpen,      setAdModalOpen]      = useState(false);
+  const PROFILE_MENU_LABELS = {
+    account: tr.accountSection, notifications: tr.notificationsSection, ar: tr.arSettingsSection,
+    posters: tr.myPosters, theme: tr.themeSection, subscription: tr.subscriptionSection,
+    refer: tr.referAFriend, support: tr.supportSection, about: tr.aboutUsSection,
+  };
+
   const [storageAlert,     setStorageAlert]     = useState(null);
   const [storageDismissed, setStorageDismissed] = useState(false);
+  const [storagePct,       setStoragePct]       = useState(null);
   const [notifOpen,  setNotifOpen]  = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [streakCount, setStreakCount] = useState(0);
+  const [toastMsg, setToastMsg] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [navDotActive, setNavDotActive] = useState(0);
+  const navScrollRef = useRef(null);
+  const promoTrackRef = useRef(null);
+  const [promoDot, setPromoDot] = useState(0);
   const [notifs, setNotifs] = useState([
     { id: 1, icon: '🎉', title: 'Welcome to Memoera!', body: 'Start uploading your AR targets and bring memories to life.', time: 'Just now' },
     { id: 2, icon: '📸', title: 'Scan your first target', body: 'Point your camera at an uploaded image to trigger AR content.', time: '5 min ago' },
@@ -37,11 +71,14 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
   // Festival greeting notifications from the backend
   const { festivalNotifs, unreadCount: festivalUnread, markRead: markFestivalRead } =
     useFestivalNotifications(user?.email);
-  const [adWatching, setAdWatching] = useState(false);
-  const [bonusMB, setBonusMB] = useState(() => parseInt(localStorage.getItem(AD_BONUS_KEY) || '0', 10));
-  const [adMsg, setAdMsg] = useState('');
 
-  // Fetch storage on mount and trigger upgrade prompt when >= 500 MB
+  const showToast = useCallback((msg) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(''), 2300);
+  }, []);
+
+  // Fetch storage on mount — drives both the real "storage used" stat and
+  // the upgrade-nudge banner when a user is close to / at their limit.
   useEffect(() => {
     const token = localStorage.getItem('memoera_token');
     if (!token) return;
@@ -51,38 +88,101 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
         if (!d) return;
         const totalBytes = (d.privateBytes || 0) + (d.publicBytes || 0);
         const LIMIT = 500 * 1024 * 1024;
+        setStoragePct(Math.min(100, Math.round((totalBytes / LIMIT) * 100)));
         if (totalBytes >= LIMIT) setStorageAlert('full');
         else if (totalBytes >= LIMIT * 0.9) setStorageAlert('warning');
       })
       .catch(() => {});
   }, []);
 
-  const handleWatchAd = useCallback(async () => {
-    const last = parseInt(localStorage.getItem(AD_COOLDOWN_KEY) || '0', 10);
-    const now = Date.now();
-    if (now - last < AD_COOLDOWN_MS) {
-      const mins = Math.ceil((AD_COOLDOWN_MS - (now - last)) / 60000);
-      setAdMsg(`Please wait ${mins} min before watching another ad.`);
-      return;
-    }
-    setAdWatching(true);
-    setAdMsg('');
-    // Show a real Google AdMob rewarded ad
-    const reward = await showRewardedAd();
-    if (reward !== null) {
-      // User watched the ad and earned the reward
-      const newBonus = bonusMB + 50;
-      setBonusMB(newBonus);
-      localStorage.setItem(AD_BONUS_KEY, String(newBonus));
-      localStorage.setItem(AD_COOLDOWN_KEY, String(Date.now()));
-      setAdMsg('+50 MB earned! Storage updated.');
-    } else {
-      setAdMsg('Ad not available right now. Try again later.');
-    }
-    setAdWatching(false);
-  }, [bonusMB]);
+  useEffect(() => {
+    fetchStreakStatus().then((data) => { if (data) setStreakCount(data.currentStreak || 0); });
+  }, []);
 
-  const isDark = theme === 'dark';
+
+  // Dot indicators reflect actual scroll position of the icon row.
+  useEffect(() => {
+    const el = navScrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const maxScroll = el.scrollWidth - el.clientWidth;
+      const pct = maxScroll > 0 ? el.scrollLeft / maxScroll : 0;
+      setNavDotActive(Math.min(2, Math.round(pct * 2)));
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Click-and-drag (mouse) scrolling for the icon row — touch devices already
+  // scroll natively via touchAction:pan-x, this adds the same left-right drag
+  // feel for desktop/mouse users.
+  useEffect(() => {
+    const el = navScrollRef.current;
+    if (!el) return;
+    let isDown = false, startX = 0, scrollStart = 0, moved = false;
+
+    const onDown = (e) => {
+      isDown = true; moved = false;
+      startX = e.pageX; scrollStart = el.scrollLeft;
+      el.style.cursor = 'grabbing';
+      el.style.userSelect = 'none';
+    };
+    const suppressNextClick = (e) => { e.preventDefault(); e.stopPropagation(); };
+    const onUp = () => {
+      if (!isDown) return;
+      isDown = false;
+      el.style.cursor = 'grab';
+      el.style.userSelect = '';
+      if (moved) {
+        el.addEventListener('click', suppressNextClick, { capture: true, once: true });
+      }
+    };
+    const onMove = (e) => {
+      if (!isDown) return;
+      const dx = e.pageX - startX;
+      if (Math.abs(dx) > 5) moved = true;
+      el.scrollLeft = scrollStart - dx;
+    };
+
+    el.style.cursor = 'grab';
+    el.addEventListener('mousedown', onDown);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      el.removeEventListener('mousedown', onDown);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, []);
+
+  // Promo carousel dot indicators
+  useEffect(() => {
+    const el = promoTrackRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const idx = Math.round(el.scrollLeft / el.clientWidth);
+      setPromoDot(idx);
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  const handleSearchSubmit = useCallback((e) => {
+    e.preventDefault();
+    const q = searchQuery.trim();
+    if (!q) return;
+    onSearch?.(q);
+  }, [searchQuery, onSearch]);
+
+  const handleShare = useCallback(async () => {
+    try {
+      const result = await shareMemoera();
+      if (result === 'copied') showToast('Link copied!');
+    } catch (err) {
+      // User cancelling the native share sheet throws AbortError — not a real failure.
+      if (err?.name !== 'AbortError') showToast('Could not share right now.');
+    }
+  }, [showToast]);
 
   // ── Pull-to-refresh ──────────────────────────────────────────────────────
   const contentRef    = useRef(null);
@@ -136,627 +236,397 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
     };
   }, []);
 
-  // (preview canvas handles its own animation — see HomePreviewCanvas below)
-
-
   // Show AdMob banner while on home screen, remove when leaving
   useEffect(() => {
     showBanner();
     return () => { removeBanner(); };
   }, []);
 
+  const hour = new Date().getHours();
+  const [greetWord, greetEmoji] = hour < 5 ? ['Still up', '🌙'] : hour < 12 ? ['Good morning', '☀️'] : hour < 17 ? ['Good afternoon', '⛅'] : hour < 21 ? ['Good evening', '🌇'] : ['Good night', '🌙'];
+  const userName = user?.firstName || user?.name || user?.username || 'Explorer';
+
   return (
     <div className="memoera-screen" style={{ ...styles.screen, background: colors.bg }}>
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes homeFloat { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
-        @keyframes homeBrandGlow_${theme} {
-          0%,100%{text-shadow:0 0 12px ${colors.accent}55}
-          50%{text-shadow:0 0 26px ${colors.accent}cc,0 0 50px ${colors.accent}33}
+        @keyframes homeOrbDrift1 {
+          0%,100% { transform: translate(0,0) scale(1); opacity: 0.55; }
+          50%     { transform: translate(24px,30px) scale(1.15); opacity: 0.85; }
         }
-        @keyframes homeLogoGlow_${theme} {
-          0%,100%{box-shadow:0 0 10px ${colors.accent}44}
-          50%{box-shadow:0 0 22px ${colors.accent}aa,0 0 40px ${colors.accent}28}
+        @keyframes homeOrbDrift2 {
+          0%,100% { transform: translate(0,0) scale(1); opacity: 0.4; }
+          50%     { transform: translate(-30px,-20px) scale(1.2); opacity: 0.7; }
         }
-        @keyframes goldGlow {
-          0%,100%{box-shadow:-4px 0 20px rgba(0,0,0,0.4),0 0 8px rgba(201,168,76,0.3)}
-          50%{box-shadow:-4px 0 20px rgba(0,0,0,0.4),0 0 22px rgba(201,168,76,0.65),0 0 40px rgba(201,168,76,0.18)}
+        @keyframes homeShimmer {
+          0%   { transform: translateX(-120%) rotate(20deg); }
+          100% { transform: translateX(220%) rotate(20deg); }
         }
-        @keyframes adPulse_${theme} {
-          0%,100%{box-shadow:0 0 0 0 ${colors.accent}66}
-          50%{box-shadow:0 0 0 6px ${colors.accent}00}
-        }
-        @keyframes bannerScroll {
-          0%{transform:translateX(100%)} 100%{transform:translateX(-100%)}
-        }
-        .nav-btn-hover:hover { background: rgba(201,168,76,0.12) !important; }
-        .social-icon-hover:hover { filter: brightness(1.25) !important; transform: scale(1.08) !important; }
+        @keyframes homePulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
+        @keyframes ptr-spin { to { transform: rotate(360deg); } }
+        @keyframes hg-ring { 0%{transform:scale(.9);opacity:.6} 100%{transform:scale(1.5);opacity:0} }
 
-        @keyframes scanNavPulse {
-          0%,100%{box-shadow:0 0 0 0 rgba(0,201,167,0.6)}
-          50%{box-shadow:0 0 0 7px rgba(0,201,167,0)}
+        .home-shimmer-wrap { position: relative; overflow: hidden; }
+        .home-shimmer-wrap::after {
+          content: ''; position: absolute; top: -50%; left: 0; width: 30%; height: 200%;
+          background: linear-gradient(90deg, transparent, rgba(255,255,255,0.35), transparent);
+          animation: homeShimmer 3.2s ease-in-out infinite;
+          pointer-events: none;
         }
-        @keyframes ptr-spin {
-          to { transform: rotate(360deg); }
-        }
+        .home-icon-btn { transition: transform .14s ease, box-shadow .14s ease; }
+        .home-icon-btn:hover { transform: translateY(-2px); }
+        .home-icon-btn:active { transform: translateY(1px) scale(.94); }
 
+        .home-feature { transition: transform .18s ease; }
+        .home-feature-badge { transition: transform .18s ease, box-shadow .18s ease; transform-style: preserve-3d; }
+        .home-feature:hover .home-feature-badge { transform: translateY(-5px); box-shadow: 0 20px 34px -14px rgba(0,0,0,.5); }
+        .home-feature:active .home-feature-badge { transform: translateY(1px) scale(.95) !important; }
+
+        .home-promo-cta { transition: transform .12s ease; }
+        .home-promo-cta:hover { transform: translateY(-2px) rotate(8deg); }
+        .home-promo-cta:active { transform: scale(.92); }
+
+        .home-mode-tile { transition: transform .18s ease, background .18s ease, border-color .18s ease; }
+        .home-mode-tile:hover { transform: translateY(-3px); }
+        .home-mode-tile:active { transform: scale(.96) !important; }
+
+        .home-social-btn { transition: transform .15s ease, box-shadow .15s ease; }
+        .home-social-btn:hover { transform: translateX(4px); }
+        .home-social-btn:active { transform: translateX(4px) scale(.92); }
+
+        .home-dot { transition: all .2s ease; }
       ` }} />
+
+      <div style={{ ...styles.glowOrb, top: '4%', left: '-12%', width: 260, height: 260,
+        background: `radial-gradient(circle, ${colors.accent || '#00C9A7'}66 0%, transparent 70%)`,
+        animation: 'homeOrbDrift1 10s ease-in-out infinite' }} />
+      <div style={{ ...styles.glowOrb, top: '38%', right: '-16%', width: 300, height: 300,
+        background: `radial-gradient(circle, ${GOLD}55 0%, transparent 70%)`,
+        animation: 'homeOrbDrift2 13s ease-in-out infinite' }} />
 
       <div style={styles.watermark}>
         <img src="/logo.png" alt="" style={{ ...styles.watermarkImg, filter: isDark ? 'brightness(10) saturate(0)' : 'brightness(0) saturate(0)' }} />
       </div>
 
-      {/* â"€â"€ Header — logo only â"€â"€ */}
-      <div style={styles.header}>
-        <div style={{ ...styles.logoCircle, animation: `homeLogoGlow_${theme} 3s ease-in-out infinite`, flexShrink: 0,
-          background:'transparent', boxShadow:'0 0 0 2px rgba(0,201,167,0.35)' }}>
-          <img src="/logo-icon.png" alt="Memoera" style={styles.logo} />
-        </div>
-      </div>
-
-      {/* â"€â"€ Utility strip — dead-end right, fixed â"€â"€ */}
-      <div style={{ ...styles.utilityStrip, background: isDark ? 'rgba(6,20,24,0.85)' : 'rgba(255,255,255,0.88)' }}>
-        {/* Bell */}
-        <button
-          onClick={() => setNotifOpen(o => !o)}
-          style={styles.utilityStripBtn}
-        >
-          <BellIcon size={22} color={colors.text} />
-          {(notifs.length + festivalUnread) > 0 && (
-            <span style={{ position: 'absolute', top: 4, right: 4, width: 7, height: 7, borderRadius: '50%', background: '#FF6B6B', border: `1.5px solid ${colors.bg}` }} />
-          )}
-        </button>
-
-        <div style={{ ...styles.utilityStripDivider, background: colors.border }} />
-
-        {/* Theme toggle */}
-        <button onClick={toggleTheme} title="Toggle theme" style={styles.utilityStripBtn}>
-          {theme === 'dark' ? <SunIcon size={18} color={colors.text} /> : <MoonIcon size={17} color={colors.text} />}
-        </button>
-
-        <div style={{ ...styles.utilityStripDivider, background: colors.border }} />
-
-        {/* Language */}
-        <select value={lang} onChange={(e) => setLang(e.target.value)}
-          style={{ ...styles.utilityStripLang, color: colors.text, background: colors.surface }}>
-          {Object.entries(LANGUAGES).map(([k, v]) => (
-            <option key={k} value={k} style={{ background: colors.bgSolid, color: colors.text }}>{v}</option>
-          ))}
-        </select>
-
-        <div style={{ ...styles.utilityStripDivider, background: colors.border }} />
-
-        {/* Admin Panel — only visible to the admin email */}
-        {user?.email === import.meta.env.VITE_ADMIN_EMAIL && onAdmin && (
-          <>
-            <div style={{ ...styles.utilityStripDivider, background: colors.border }} />
-            <button onClick={onAdmin} title="Admin Panel" style={styles.utilityStripBtn}>
-              <span style={{ fontSize:15 }}>⚙</span>
-            </button>
-          </>
-        )}
-
-        {/* Sign out */}
-        <button onClick={onSignOut} title="Sign Out" style={styles.utilityStripBtn}>
-          <PowerIcon color={colors.text} />
-        </button>
-      </div>
-
-      {/* â"€â"€ Notification panel — dropdown from bell â"€â"€ */}
-      {notifOpen && (
-        <div style={{ position: 'fixed', top: 78, right: 58, width: 290, borderRadius: 16, zIndex: 25,
-          background: colors.bgSolid, border: '1px solid ' + colors.border,
-          boxShadow: '0 8px 32px rgba(0,0,0,0.35)', overflow: 'hidden' }}>
-          <div style={{ padding: '12px 16px 8px', borderBottom: '1px solid ' + colors.border,
-            display: 'flex', alignItems: 'center', gap: 8 }}>
-            <BellIcon size={20} color={colors.text} />
-            <span style={{ fontSize: 14, fontWeight: 700, color: colors.text, fontFamily: FONT }}>
-              Notifications {(notifs.length + festivalUnread) > 0 && <span style={{ fontSize: 11, background: '#FF6B6B', color: '#fff', borderRadius: 10, padding: '1px 6px', marginLeft: 4 }}>{notifs.length + festivalUnread}</span>}
-            </span>
-            <button onClick={() => setNotifOpen(false)}
-              style={{ marginLeft: 'auto', background: 'transparent', border: 'none',
-                color: colors.textMuted, fontSize: 16, cursor: 'pointer', padding: '0 2px' }}>✕</button>
-          </div>
-          <div style={{ maxHeight: 400, overflowY: 'auto' }}>
-            {/* Festival greeting image cards — newest first */}
-            {festivalNotifs.map((fn) => (
-              <div key={fn.id}
-                onClick={() => markFestivalRead(fn.id)}
-                style={{ position: 'relative', cursor: 'pointer' }}>
-                <img src={fn.image_url} alt={fn.festival_name}
-                  style={{ width: '100%', display: 'block', maxHeight: 160, objectFit: 'cover' }} />
-                {!fn.is_read && (
-                  <span style={{ position: 'absolute', top: 8, right: 8, background: '#FF6B6B',
-                    color: '#fff', fontSize: 9, fontWeight: 700, borderRadius: 8,
-                    padding: '2px 7px', fontFamily: FONT }}>NEW</span>
-                )}
-                <div style={{ padding: '8px 14px 10px',
-                  background: isDark ? 'rgba(0,201,167,0.07)' : 'rgba(0,201,167,0.05)',
-                  borderBottom: '1px solid ' + colors.border }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: '#00C9A7', fontFamily: FONT }}>
-                    🎉 Happy {fn.festival_name}!
-                  </div>
-                  <div style={{ fontSize: 10, color: colors.textMuted, fontFamily: FONT, marginTop: 2 }}>
-                    {new Date(fn.created_at).toLocaleDateString('en-IN', { day:'2-digit', month:'short' })}
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {/* Regular app notifications */}
-            {notifs.length === 0 && festivalNotifs.length === 0 ? (
-              <div style={{ padding: '24px 16px', textAlign: 'center' }}>
-                <div style={{ fontSize: 28, marginBottom: 8 }}>✅</div>
-                <div style={{ fontSize: 13, color: colors.textMuted, fontFamily: FONT }}>All caught up!</div>
-              </div>
-            ) : (
-              notifs.map((n, i) => (
-                <div key={n.id}
-                  onClick={() => setNotifs(prev => prev.filter(x => x.id !== n.id))}
-                  style={{ padding: '10px 16px',
-                    borderBottom: i < notifs.length - 1 ? '1px solid ' + colors.border : 'none',
-                    display: 'flex', gap: 12, alignItems: 'flex-start',
-                    cursor: 'pointer', transition: 'background 0.15s' }}
-                  onMouseEnter={e => e.currentTarget.style.background = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                  <span style={{ fontSize: 20, flexShrink: 0 }}>{n.icon}</span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: colors.text, fontFamily: FONT }}>{n.title}</div>
-                    <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: FONT, marginTop: 2, lineHeight: 1.5 }}>{n.body}</div>
-                  </div>
-                  <span style={{ fontSize: 10, color: colors.textMuted, fontFamily: FONT, flexShrink: 0 }}>{n.time}</span>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* â"€â"€ Storage upgrade alert â"€â"€ */}
-      {storageAlert && !storageDismissed && (
-        <div style={{
-          margin: '0 16px 2px', borderRadius: 14, padding: '12px 16px',
-          background: storageAlert === 'full'
-            ? 'linear-gradient(135deg,rgba(255,80,80,0.18),rgba(255,120,60,0.12))'
-            : 'linear-gradient(135deg,rgba(255,180,0,0.15),rgba(255,120,0,0.10))',
-          border: `1px solid ${storageAlert === 'full' ? 'rgba(255,80,80,0.4)' : 'rgba(255,160,0,0.4)'}`,
-          display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, zIndex: 1,
-        }}>
-          <span style={{ fontSize: 20, flexShrink: 0 }}>{storageAlert === 'full' ? '🔴' : '🟡'}</span>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: colors.text, fontFamily: FONT }}>
-              {storageAlert === 'full' ? 'Storage Full — 500 MB Used' : 'Storage Almost Full'}
-            </div>
-            <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: FONT, marginTop: 2 }}>
-              {storageAlert === 'full'
-                ? 'You cannot upload new targets. Upgrade to Premium for up to 2 GB.'
-                : 'You have used 90%+ of your free 500 MB. Upgrade to keep uploading.'}
-            </div>
-          </div>
-          <button onClick={onPremium} style={{
-            background: `linear-gradient(135deg,${colors.accent || '#00C9A7'},${colors.accent || '#00C9A7'}cc)`,
-            border: 'none', borderRadius: 20, color: '#000',
-            fontSize: 11, fontWeight: 700, fontFamily: FONT,
-            padding: '7px 13px', cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
-          }}>Upgrade</button>
-          <button onClick={() => setStorageDismissed(true)} style={{
-            background: 'transparent', border: 'none', color: colors.textMuted,
-            fontSize: 16, cursor: 'pointer', padding: '0 2px', flexShrink: 0,
-          }}>✕</button>
-        </div>
-      )}
-
-      {/* ── Pull-to-refresh indicator ── */}
-      {(pullDist > 8 || refreshing) && (
-        <div style={{ position:'fixed', top:0, left:0, right:0, zIndex:50,
-          display:'flex', flexDirection:'column', alignItems:'center',
-          paddingTop: refreshing ? 14 : Math.max(0, pullDist - 30),
-          pointerEvents:'none', transition: refreshing ? 'padding-top 0.3s ease' : 'none' }}>
-          <div style={{ width:40, height:40, borderRadius:'50%',
-            background: pullDist >= PULL_THRESHOLD || refreshing ? 'rgba(0,201,167,0.18)' : isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)',
-            border: `2.5px solid ${pullDist >= PULL_THRESHOLD || refreshing ? '#00C9A7' : isDark ? 'rgba(255,255,255,0.22)' : 'rgba(0,0,0,0.15)'}`,
-            display:'flex', alignItems:'center', justifyContent:'center',
-            boxShadow: pullDist >= PULL_THRESHOLD || refreshing ? '0 0 18px rgba(0,201,167,0.5)' : 'none',
-            transition:'background 0.2s, border 0.2s, box-shadow 0.2s' }}>
-            <span style={{ fontSize:20, color: pullDist >= PULL_THRESHOLD || refreshing ? '#00C9A7' : isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.3)',
-              display:'inline-block',
-              transform: refreshing ? 'none' : `rotate(${Math.min((pullDist / PULL_THRESHOLD) * 180, 180)}deg)`,
-              animation: refreshing ? 'ptr-spin 0.65s linear infinite' : 'none',
-              transition: refreshing ? 'none' : 'transform 0.05s, color 0.2s' }}>↻</span>
-          </div>
-          {!refreshing && pullDist >= PULL_THRESHOLD && (
-            <span style={{ marginTop:6, fontSize:10, color:'#00C9A7', fontFamily:'Outfit,sans-serif', fontWeight:700, letterSpacing:'0.05em' }}>
-              Release to Refresh
-            </span>
-          )}
-          {refreshing && (
-            <span style={{ marginTop:6, fontSize:10, color:'#00C9A7', fontFamily:'Outfit,sans-serif', fontWeight:700, letterSpacing:'0.05em' }}>
-              Refreshing…
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* ── Scrollable content ── */}
+      {/* ── Single scrollable column — header through footer all scroll together ── */}
       <div ref={contentRef} className="memoera-content" style={styles.content}>
 
-        {/* â"€â"€ Watch Ad modal â"€â"€ portaled to <body> (see review modal note below) */}
-        {adModalOpen && createPortal(
-          <div style={styles.adModalOverlay} onClick={() => !adWatching && setAdModalOpen(false)}>
-            <div style={{ ...styles.adModal, background: colors.surface }} onClick={e => e.stopPropagation()}>
-              <div style={styles.adModalIcon}>📺</div>
-              <div style={{ ...styles.adTitle, color: colors.text, textAlign:'center' }}>Watch Ad &amp; Earn Storage</div>
-              <div style={{ ...styles.adSub, color: colors.textMuted, textAlign:'center', marginBottom:16 }}>
-                Get +50 MB per ad Â· Bonus earned: <strong style={{ color: '#00C9A7' }}>{bonusMB} MB</strong>
-              </div>
-              <button onClick={handleWatchAd} disabled={adWatching} style={{
-                ...styles.adBtn,
-                opacity: adWatching ? 0.7 : 1,
-              }}>
-                {adWatching ? <><Spinner /> Watching...</> : 'Watch Ad Now'}
-              </button>
-              {adMsg && <p style={{ ...styles.adMsg, color: adMsg.startsWith('+') ? '#00C9A7' : colors.textMuted }}>{adMsg}</p>}
-              {!adWatching && <button onClick={() => setAdModalOpen(false)} style={{ ...styles.adCloseBtn, color: colors.textMuted }}>Close</button>}
+        {/* ── Header — brand mark + utility controls ── */}
+        <div style={styles.header}>
+          <div style={styles.brandRow}>
+            <div style={{ ...styles.brandMark, background: colors.surfaceHigh, border: `1px solid ${colors.border}` }}>
+              <img src="/logo-icon.png" alt="Memoera" style={styles.brandMarkImg} />
             </div>
-          </div>,
-          document.body
+            <div>
+              <div style={{ ...styles.brandName, color: colors.text }}>MEMOERA</div>
+            </div>
+          </div>
+
+          <div style={styles.headerControls}>
+            <button className="home-icon-btn" onClick={toggleTheme} title="Toggle theme"
+              style={{ ...styles.iconBtn, background: colors.surfaceHigh, border: `1px solid ${colors.border}` }}>
+              {isDark ? <SunIcon size={16} color={colors.text} /> : <MoonIcon size={15} color={colors.text} />}
+            </button>
+
+            <div style={{ ...styles.langPill, background: colors.surfaceHigh, border: `1px solid ${colors.border}` }}>
+              <select value={lang} onChange={(e) => setLang(e.target.value)}
+                style={{ ...styles.langSelect, color: colors.text }}>
+                {Object.entries(LANGUAGES).map(([k, v]) => (
+                  <option key={k} value={k} style={{ background: colors.bgSolid, color: colors.text }}>{v}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ position: 'relative' }}>
+              <button className="home-icon-btn" onClick={() => setNotifOpen(o => !o)} title="Notifications" aria-label="Notifications"
+                style={{ ...styles.iconBtn, background: colors.surfaceHigh, border: `1px solid ${colors.border}` }}>
+                <BellIcon size={16} color={colors.text} />
+                {(notifs.length + festivalUnread) > 0 && <span style={{ ...styles.badgeDot, boxShadow: `0 0 0 2px ${colors.surfaceHigh}` }} />}
+              </button>
+              {notifOpen && (
+                <div style={{ ...styles.dropdown, background: colors.bgSolid, border: `1px solid ${colors.border}` }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px 10px', borderBottom: `1px solid ${colors.border}` }}>
+                    <BellIcon size={16} color={colors.text} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: colors.text, fontFamily: FONT }}>
+                      Notifications {(notifs.length + festivalUnread) > 0 && <span style={{ fontSize: 10, background: DANGER, color: '#fff', borderRadius: 10, padding: '1px 6px', marginLeft: 4 }}>{notifs.length + festivalUnread}</span>}
+                    </span>
+                    <button onClick={() => setNotifOpen(false)} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: colors.textMuted, fontSize: 15, cursor: 'pointer' }}>✕</button>
+                  </div>
+                  <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+                    {festivalNotifs.map((fn) => (
+                      <div key={fn.id} onClick={() => markFestivalRead(fn.id)} style={{ position: 'relative', cursor: 'pointer' }}>
+                        <img src={fn.image_url} alt={fn.festival_name} style={{ width: '100%', display: 'block', maxHeight: 150, objectFit: 'cover' }} />
+                        {!fn.is_read && <span style={{ position: 'absolute', top: 8, right: 8, background: DANGER, color: '#fff', fontSize: 9, fontWeight: 700, borderRadius: 8, padding: '2px 7px', fontFamily: FONT }}>NEW</span>}
+                        <div style={{ padding: '8px 12px 10px', background: colors.surface, borderBottom: `1px solid ${colors.border}` }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: colors.accent, fontFamily: FONT }}>🎉 Happy {fn.festival_name}!</div>
+                          <div style={{ fontSize: 10, color: colors.textMuted, fontFamily: FONT, marginTop: 2 }}>
+                            {new Date(fn.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {notifs.length === 0 && festivalNotifs.length === 0 ? (
+                      <div style={{ padding: '20px 14px', textAlign: 'center' }}>
+                        <div style={{ fontSize: 26, marginBottom: 6 }}>✅</div>
+                        <div style={{ fontSize: 12, color: colors.textMuted, fontFamily: FONT }}>All caught up!</div>
+                      </div>
+                    ) : notifs.map((n) => (
+                      <div key={n.id} onClick={() => setNotifs(prev => prev.filter(x => x.id !== n.id))}
+                        style={{ padding: '9px 10px', borderRadius: 10, display: 'flex', gap: 10, alignItems: 'flex-start', cursor: 'pointer' }}>
+                        <span style={{ fontSize: 18, flexShrink: 0 }}>{n.icon}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12.5, fontWeight: 600, color: colors.text, fontFamily: FONT }}>{n.title}</div>
+                          <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: FONT, marginTop: 2, lineHeight: 1.4 }}>{n.body}</div>
+                        </div>
+                        <span style={{ fontSize: 9.5, color: colors.textMuted, fontFamily: FONT, flexShrink: 0 }}>{n.time}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div style={{ position: 'relative' }}>
+              <button className="home-icon-btn" onClick={() => setProfileMenuOpen(o => !o)} title="Profile menu" aria-label="Profile menu"
+                style={{ ...styles.iconBtn, borderRadius: '50%', background: colors.surfaceHigh, border: `1px solid ${colors.border}` }}>
+                {user?.profilePhotoUrl
+                  ? <img src={user.profilePhotoUrl} alt="" style={{ width: 22, height: 22, borderRadius: '50%', objectFit: 'cover' }} />
+                  : <ProfileIcon size={16} color={colors.text} />}
+              </button>
+              {profileMenuOpen && (
+                <div style={{ ...styles.dropdown, width: 200, background: colors.bgSolid, border: `1px solid ${colors.border}` }}>
+                  {PROFILE_MENU_KEYS.map((item) => (
+                    <button key={item.key}
+                      onClick={() => { setProfileMenuOpen(false); item.section ? onSettings(item.section) : onRefer(); }}
+                      style={{ ...styles.menuItem, color: colors.text }}>
+                      <span style={{ fontSize: 15 }}>{item.icon}</span> {PROFILE_MENU_LABELS[item.key]}
+                    </button>
+                  ))}
+                  <button onClick={() => { setProfileMenuOpen(false); onSignOut(); }} style={{ ...styles.menuItem, color: DANGER }}>
+                    <PowerIcon color={DANGER} /> {tr.signOut}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Storage upgrade alert ── */}
+        {storageAlert && !storageDismissed && (
+          <div style={{ ...styles.card, background: colors.surface, border: `1px solid ${storageAlert === 'full' ? 'rgba(255,80,80,0.4)' : 'rgba(255,160,0,0.4)'}`,
+            display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', flexShrink: 0 }}>
+            <span style={{ fontSize: 20, flexShrink: 0 }}>{storageAlert === 'full' ? '🔴' : '🟡'}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: colors.text, fontFamily: FONT }}>
+                {storageAlert === 'full' ? 'Storage Full — 500 MB Used' : 'Storage Almost Full'}
+              </div>
+              <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: FONT, marginTop: 2 }}>
+                {storageAlert === 'full' ? 'Upgrade to Premium for up to 2 GB.' : 'You have used 90%+ of your free 500 MB.'}
+              </div>
+            </div>
+            <button onClick={onPremium} style={{ background: `linear-gradient(135deg,${colors.accent},${colors.accent}cc)`, border: 'none', borderRadius: 20, color: '#000', fontSize: 11, fontWeight: 700, fontFamily: FONT, padding: '7px 13px', cursor: 'pointer', flexShrink: 0 }}>Upgrade</button>
+            <button onClick={() => setStorageDismissed(true)} style={{ background: 'transparent', border: 'none', color: colors.textMuted, fontSize: 15, cursor: 'pointer', flexShrink: 0 }}>✕</button>
+          </div>
         )}
 
-        {/* Greeting hero card */}
-        <GreetingHero user={user} colors={colors} isDark={isDark} />
-
-        {/* Demo video → then "How It Works" steps, in one combined card */}
-        <DemoAndHowItWorksCard colors={colors} isDark={isDark} />
-
-        {/* Animated "Happy Customers" reviews */}
-        <HappyCustomersCard colors={colors} isDark={isDark} user={user} />
-
-      </div>
-
-      {/* â"€â"€ About Us (top) + Company Details (bottom) — portrait stacked â"€â"€ */}
-      <div className="memoera-info-section" style={{ padding: '4px 80px 12px 16px', flexShrink: 0, zIndex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
-
-        {/* 1. About Us */}
-        <div style={{ ...styles.card, background: colors.surface, border: '1px solid ' + colors.border, overflow: 'hidden' }}>
-          <button
-            onClick={() => setInfoSlide(infoSlide === 0 && infoExpanded ? -1 : 0) || setInfoExpanded(!(infoSlide === 0 && infoExpanded))}
-            style={{ width: '100%', background: 'transparent', border: 'none', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '8px 12px', fontFamily: FONT }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: infoExpanded && infoSlide === 0 ? '#00C9A7' : colors.text, transition: 'color 0.2s' }}>About Us</span>
-            <span style={{ fontSize: 9, color: colors.textMuted, transition: 'transform 0.25s',
-              transform: infoExpanded && infoSlide === 0 ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
-          </button>
-          {infoExpanded && infoSlide === 0 && (
-            <div style={{ borderTop: '1px solid ' + colors.border, padding: '8px 12px 12px' }}>
-              <p style={{ ...styles.cardText, color: colors.textMuted }}>
-                We are dedicated to safeguarding your most cherished memories through advanced, secure digital storage
-                solutions designed for modern life. Our mission is to ensure that your precious moments are preserved
-                with a single touch.
-              </p>
-              <p style={{ ...styles.cardText, color: colors.textMuted, marginTop: 6 }}>
-                Enhance your business with Smart Brochures. We prevent 1st Copy or Duplicate Products &amp; act as
-                Mini Theft Protection.
-              </p>
-              <p style={{ ...styles.cardText, color: colors.textMuted, marginTop: 6, fontStyle: 'italic' }}>
-                This app is built by the Memoera Team, with the help of Claude AI.
-              </p>
+        {/* ── Pull-to-refresh indicator ── */}
+        {(pullDist > 8 || refreshing) && (
+          <div style={{ position:'fixed', top:0, left:0, right:0, zIndex:50,
+            display:'flex', flexDirection:'column', alignItems:'center',
+            paddingTop: refreshing ? 14 : Math.max(0, pullDist - 30),
+            pointerEvents:'none', transition: refreshing ? 'padding-top 0.3s ease' : 'none' }}>
+            <div style={{ width:40, height:40, borderRadius:'50%',
+              background: pullDist >= PULL_THRESHOLD || refreshing ? `${colors.accent}22` : colors.surfaceHigh,
+              border: `2.5px solid ${pullDist >= PULL_THRESHOLD || refreshing ? colors.accent : colors.border}`,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              boxShadow: pullDist >= PULL_THRESHOLD || refreshing ? `0 0 18px ${colors.accent}55` : 'none',
+              transition:'background 0.2s, border 0.2s, box-shadow 0.2s' }}>
+              <span style={{ fontSize:20, color: pullDist >= PULL_THRESHOLD || refreshing ? colors.accent : colors.textMuted,
+                display:'inline-block',
+                transform: refreshing ? 'none' : `rotate(${Math.min((pullDist / PULL_THRESHOLD) * 180, 180)}deg)`,
+                animation: refreshing ? 'ptr-spin 0.65s linear infinite' : 'none',
+                transition: refreshing ? 'none' : 'transform 0.05s, color 0.2s' }}>↻</span>
             </div>
-          )}
+            {!refreshing && pullDist >= PULL_THRESHOLD && <span style={{ marginTop:6, fontSize:10, color: colors.accent, fontFamily: FONT, fontWeight:700, letterSpacing:'0.05em' }}>Release to Refresh</span>}
+            {refreshing && <span style={{ marginTop:6, fontSize:10, color: colors.accent, fontFamily: FONT, fontWeight:700, letterSpacing:'0.05em' }}>Refreshing…</span>}
+          </div>
+        )}
+
+        {/* ── Greeting ── */}
+        <div style={styles.greeting}>
+          <div style={{ ...styles.eyebrow, color: colors.textMuted }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: colors.accent, animation: 'homePulse 2.4s ease-in-out infinite', display: 'inline-block' }} />
+            {greetEmoji} {greetWord}
+          </div>
+          <h1 style={{ ...styles.hello, color: colors.text }}>
+            Hello, <span style={styles.helloName}>{userName}</span>
+          </h1>
         </div>
 
-        {/* 2. Company Details */}
-        <div style={{ ...styles.card, background: colors.surface, border: '1px solid ' + colors.border, overflow: 'hidden' }}>
-          <button
-            onClick={() => { setInfoSlide(1); setInfoExpanded(!(infoExpanded && infoSlide === 1)); }}
-            style={{ width: '100%', background: 'transparent', border: 'none', cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              padding: '8px 12px', fontFamily: FONT }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: infoExpanded && infoSlide === 1 ? '#00C9A7' : colors.text, transition: 'color 0.2s' }}>Company Details</span>
-            <span style={{ fontSize: 9, color: colors.textMuted, transition: 'transform 0.25s',
-              transform: infoExpanded && infoSlide === 1 ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
+        {/* ── Feature row — horizontally scrollable, swipe sideways for more ── */}
+        <div className="memoera-nav-bar" ref={navScrollRef} style={styles.navBar}>
+          {onScan && (
+            <NavBtn className="home-feature" img="/nav-scan.png" label={tr.scan || 'Scan'} labelColor={colors.text}
+              onClick={() => { playScanFeedback(); onScan(); }} />
+          )}
+          <NavBtn className="home-feature" img="/nav-create.png" label={tr.upload || 'Create'} labelColor={colors.text} onClick={onUpload} />
+          {onCollection && (
+            <NavBtn className="home-feature" img="/nav-saved.png" label={tr.navSaved || 'Saved'} labelColor={colors.text} onClick={onCollection} />
+          )}
+          <NavBtn className="home-feature" img="/nav-albums.png" label={tr.gallery || 'Albums'} labelColor={colors.text} onClick={onGallery} />
+          {onStreak && (
+            <NavBtn className="home-feature" img="/nav-streak.png" count={streakCount} label={tr.navStreak || 'Streak'} labelColor={colors.text} onClick={onStreak} />
+          )}
+          <NavBtn className="home-feature" img="/nav-animation.png" label={tr.navAnimation || 'Animation'} labelColor={colors.text} onClick={() => onAnimation ? onAnimation() : onSettings('posters')} />
+          <NavBtn className="home-feature" icon={<ShareIcon color="#fff" />} bg="linear-gradient(135deg,#00C9A7,#00E5CC)" label={tr.navShare || 'Share'} labelColor={colors.text} onClick={handleShare} />
+        </div>
+
+        <div style={styles.navDots}>
+          {[0, 1, 2].map((i) => (
+            <span key={i} className="home-dot" style={{ ...styles.navDot, background: navDotActive === i ? colors.accent : colors.textMuted, opacity: navDotActive === i ? 1 : 0.4 }} />
+          ))}
+        </div>
+
+        {/* ── Promo carousel ── */}
+        <div style={styles.promoWrap}>
+          <div ref={promoTrackRef} style={styles.promoTrack}>
+            {PROMO_CARDS.map((p) => {
+              const accentColor = p.variant === 'warm' ? GOLD : p.variant === 'violet' ? VIOLET : colors.accent;
+              const body = p.key === 'streak'
+                ? (streakCount > 0 ? `Day ${streakCount} — keep it going for a badge.` : 'Scan today to start your streak.')
+                : p.body;
+              return (
+                <article key={p.key} style={{ ...styles.promoCard, background: colors.surface, border: `1px solid ${colors.border}` }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontFamily: 'ui-monospace, monospace', fontSize: 9.5, letterSpacing: '.1em', color: accentColor, textTransform: 'uppercase' }}>{p.eyebrow}</div>
+                    <h3 style={{ margin: '4px 0 4px', fontSize: 15, fontFamily: FONT, color: colors.text, letterSpacing: '-.01em' }}>{p.title}</h3>
+                    <p style={{ margin: 0, fontSize: 11.5, color: colors.textMuted, fontFamily: FONT, maxWidth: '22ch' }}>{body}</p>
+                  </div>
+                  <button className="home-promo-cta" aria-label={p.title}
+                    onClick={() => p.key === 'streak' ? onStreak?.() : showToast('Got it — steady scans for sharper detail.')}
+                    style={{ flex: 'none', width: 42, height: 42, borderRadius: 14, border: 'none', cursor: 'pointer',
+                      background: `linear-gradient(160deg, ${accentColor}, ${accentColor}cc)`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#04140f' }}>
+                    <ArrowRightIcon />
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+          <div style={styles.promoDots}>
+            {PROMO_CARDS.map((p, i) => (
+              <button key={p.key} onClick={() => promoTrackRef.current?.scrollTo({ left: i * promoTrackRef.current.clientWidth, behavior: 'smooth' })}
+                aria-label={`Go to slide ${i + 1}`}
+                style={{ ...styles.dot, width: promoDot === i ? 18 : 6, background: promoDot === i ? colors.accent : colors.border }} />
+            ))}
+          </div>
+        </div>
+
+        {/* ── Search — find something in your uploaded targets ── */}
+        <form onSubmit={handleSearchSubmit} style={{ ...styles.searchBar, background: colors.surface, border: `1px solid ${colors.border}` }}>
+          <SearchIcon size={15} color={colors.textMuted} />
+          <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search memories, places, tags…" style={{ ...styles.searchInput, color: colors.text }} />
+          <button type="submit" aria-label="Search" style={{ ...styles.searchGo, background: `linear-gradient(160deg, ${GOLD}, ${GOLD}cc)` }}>
+            <ArrowRightIcon color="#2b1002" />
           </button>
-          {infoExpanded && infoSlide === 1 && (
-            <div style={{ borderTop: '1px solid ' + colors.border, padding: '8px 12px 12px' }}>
-              {[
-                { label: 'Email',        value: 'memoerabangalore@gmail.com' },
-                { label: 'Mobile',       value: '+91 9187713120' },
-                { label: 'MD & Founder', value: 'Lohith B.' },
-                { label: 'Website',      value: 'www.memoera.in', link: 'https://www.memoera.in' },
-                { label: 'GSTIN',        value: '29AAUCM9420H1ZU' },
-                { label: 'Terms of Service', value: 'View Terms', link: '/terms-of-service.html' },
-                { label: 'Privacy Policy', value: 'View Policy', link: '/privacy-policy.html' },
-              ].map(({ label, value, link }) => (
-                <div key={label} style={styles.detailRow}>
-                  <span style={{ ...styles.detailLabel, color: colors.textMuted }}>{label}</span>
-                  {link
-                    ? <a href={link} target="_blank" rel="noreferrer"
-                        style={{ ...styles.detailValue, color: '#00C9A7', textDecoration: 'none' }}>{value}</a>
-                    : <span style={{ ...styles.detailValue, color: colors.text }}>{value}</span>
-                  }
+        </form>
+
+        {/* Full-bleed "Explore modes" banner — three diagonal-cut partitions */}
+        <ExploreModes onScan={onScan} onGallery={onGallery} onCollection={onCollection} colors={colors} />
+
+        {/* ── Social icons + Reviews / Stats ── */}
+        <div style={styles.bodyGrid}>
+          <div style={styles.socialRail}>
+            <SocialLink className="home-social-btn" href="https://www.instagram.com/memoerabangalore/" icon={<InstagramIcon color={colors.text} />} colors={colors} />
+            <SocialLink className="home-social-btn" href="https://www.facebook.com/profile.php?id=61574312286741" icon={<FacebookIcon color={colors.text} />} colors={colors} />
+            <SocialLink className="home-social-btn" href="https://www.youtube.com/@memoerabangalore" icon={<YouTubeIcon color={colors.text} />} colors={colors} />
+            <SocialLink className="home-social-btn" href="https://x.com/Memo_Era" icon={<XIcon color={colors.text} />} colors={colors} />
+            <SocialLink className="home-social-btn" href={whatsappUrl} icon={<WhatsAppIcon color={colors.text} />} colors={colors} />
+          </div>
+
+          <div style={styles.stack}>
+            <HappyCustomersCard colors={colors} isDark={isDark} user={user} />
+
+            <div style={{ ...styles.card, display: 'flex', gap: 8, padding: 12, background: colors.surface, border: `1px solid ${colors.border}` }}>
+              <div style={{ ...styles.stat, background: `${colors.accent}1e`, color: colors.accent }}>
+                <StreakGlyph />
+                <span style={{ ...styles.statNum, color: colors.text }}>{streakCount}d</span>
+                <span style={{ ...styles.statLabel, color: colors.textMuted }}>Streak</span>
+              </div>
+              {storagePct !== null && (
+                <div style={{ ...styles.stat, background: `${GOLD}22`, color: GOLD }}>
+                  <StorageGlyph />
+                  <span style={{ ...styles.statNum, color: colors.text }}>{storagePct}%</span>
+                  <span style={{ ...styles.statLabel, color: colors.textMuted }}>Storage</span>
                 </div>
-              ))}
+              )}
             </div>
-          )}
+          </div>
         </div>
 
-      </div>
+        <AboutUsAccordion colors={colors} />
 
-      {/* â"€â"€ Right-side nav bar â"€â"€ */}
-      <div className="memoera-nav-bar" style={{ ...styles.navBar, background: colors.navBg }}>
-        {onScan && <NavBtn icon={<ScanCameraIcon color="#00C9A7" />} label={tr.scan || 'Scan'} onClick={() => { playScanFeedback(); onScan(); }} />}
-        <NavBtn icon={<PlusIcon    color={colors.navIcon} />} label={tr.upload}   onClick={onUpload} />
-        <NavBtn icon={<GalleryIcon color={colors.navIcon} />} label={tr.gallery}  onClick={onGallery} />
-        <NavBtn icon={<GearIcon    color={colors.navIcon} />} label={tr.settings} onClick={onSettings} />
-        <NavBtn icon={<ReferIcon   color={colors.navIcon} />} label="Refer"       onClick={onRefer} />
-        <NavBtn icon={<DiamondIcon />}                        label="Premium"     onClick={onPremium} />
-      </div>
-
-      {/* â"€â"€ Bottom bar â"€â"€ */}
-      <div style={{ ...styles.bottomBar, borderTopColor: colors.border, background: colors.bottomBar }}>
-        <div style={styles.socialRow}>
-          <SocialLink href="https://www.instagram.com/memoerabangalore/" icon={<InstagramIcon />} />
-          <SocialLink href="https://www.facebook.com/profile.php?id=61574312286741" icon={<FacebookIcon />} />
-          <SocialLink href="https://www.youtube.com/@memoerabangalore" icon={<YouTubeIcon />} />
-          <SocialLink href="https://x.com/Memo_Era" icon={<XIcon />} />
-<a href={whatsappUrl} target="_blank" rel="noreferrer" style={styles.chatLink}>
-            <WhatsAppIcon />
-            <span style={{ ...styles.chatText, color: colors.text }}>Chat with us</span>
-          </a>
-        </div>
+        {toastMsg && (
+          <div style={{ ...styles.toast, background: colors.bgSolid, border: `1px solid ${colors.border}`, color: colors.text }}>
+            {toastMsg}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-/* ── Greeting hero ── */
-function GreetingHero({ user, colors, isDark }) {
-  const hour = new Date().getHours();
-  const [greeting, emoji] = hour < 12
-    ? ['Good Morning', '☀️']
-    : hour < 17
-    ? ['Good Afternoon', '⛅']
-      : ['Good Evening', '🌙'];
-
-  const name = user?.name || user?.username || 'there';
-
-  return (
-    <div>
-      <style>{`
-        @keyframes gh-fadein   { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes gh-scanring { 0%{transform:scale(1);opacity:0.7} 100%{transform:scale(1.9);opacity:0} }
-        @keyframes gh-scanring2{ 0%{transform:scale(1);opacity:0.45}100%{transform:scale(1.9);opacity:0} }
-        @keyframes gh-pulse    { 0%,100%{box-shadow:0 0 0 0 rgba(0,201,167,0.5)} 50%{box-shadow:0 0 0 10px rgba(0,201,167,0)} }
-        @keyframes gh-shimmer  { 0%{transform:translateX(-200%)skewX(-18deg)} 60%,100%{transform:translateX(200%)skewX(-18deg)} }
-        @keyframes gh-dot      { 0%,100%{opacity:0.3;transform:scale(0.8)} 50%{opacity:1;transform:scale(1.3)} }
-      `}</style>
-
-      {/* Greeting text */}
-      <div style={{ animation:'gh-fadein 0.6s ease both' }}>
-        <div style={{ fontSize:11, fontWeight:600, color: colors.textMuted, fontFamily:FONT,
-          letterSpacing:'0.08em', textTransform:'uppercase', marginBottom:3 }}>
-          {emoji} {greeting}
-        </div>
-        <div style={{ fontSize:20, fontWeight:800, color: colors.text, fontFamily:FONT,
-          lineHeight:1.15 }}>
-          Hello, <span style={{ color:'#00C9A7' }}>{name}</span>!
-        </div>
-        <div style={{ fontSize:11, color: colors.textMuted, fontFamily:FONT, marginTop:4 }}>
-          Your AR world is ready. Point, scan, relive.
-        </div>
-      </div>
-
-    </div>
-  );
-}
-
-const HOW_STEPS = [
+const EXPLORE_MODES = [
   { icon: '📤', title: 'Upload',  desc: 'Upload a photo, video, or 3D model as your AR target.' },
   { icon: '📱', title: 'Scan',    desc: 'Point your camera at the uploaded photo to detect it.' },
   { icon: '✨', title: 'Relive',  desc: 'Watch your memory come alive right on top of it!' },
 ];
 
-// Two clips play back-to-back like a mini playlist (intro, then the
-// upload-and-relive payoff), and once the last one ends — or after a
-// timeout, for anyone who scrolls past without tapping play — the
-// "How It Works" steps start cycling. One act follows the other, all in
-// a single card instead of separate ones.
-const VIDEO_PLAYLIST = ['/wings-to-memories.mp4', '/review-our-album.mp4'];
-
-function DemoAndHowItWorksCard({ colors, isDark }) {
-  const videoRef = useRef(null);
-  const fallbackRef = useRef(null);
-  const startedRef = useRef(false);
-  const [videoIndex, setVideoIndex] = useState(0);
-  const [playing, setPlaying] = useState(false);
-  const [showSteps, setShowSteps] = useState(false);
-  const [active, setActive] = useState(0);
-
-  const handlePlay = () => {
-    if (fallbackRef.current) { clearTimeout(fallbackRef.current); fallbackRef.current = null; }
-    startedRef.current = true;
-    const v = videoRef.current;
-    if (!v) return;
-    v.currentTime = 0;
-    v.play();
-    setPlaying(true);
-  };
-
-  const handleFullscreen = (e) => {
-    e.stopPropagation();
-    const v = videoRef.current;
-    if (!v) return;
-    if (!playing) handlePlay();
-    // iOS Safari/WebView exposes fullscreen video via this method, not the
-    // standard Fullscreen API (requestFullscreen on <video> isn't supported there).
-    if (v.webkitEnterFullscreen) v.webkitEnterFullscreen();
-    else if (v.requestFullscreen) v.requestFullscreen();
-    else if (v.webkitRequestFullscreen) v.webkitRequestFullscreen();
-  };
-
-  // Clips alternate forever once started — a continuous back-to-back loop
-  // rather than stopping after one pass through the playlist.
-  const handleEnded = () => {
-    setVideoIndex((i) => (i + 1) % VIDEO_PLAYLIST.length);
-  };
-
-  // Advance to the next clip in the playlist automatically. `onPause` fires
-  // the instant a clip ends (before `onEnded` advances the index), which
-  // flips `playing` back to false — without resetting it here, the "tap to
-  // play" overlay would reappear over each new clip even though it's
-  // actually already playing underneath, making continuous playback look
-  // like it stopped.
-  useEffect(() => {
-    if (!startedRef.current) return; // first clip waits for the user to tap play
-    const v = videoRef.current;
-    if (!v) return;
-    v.load();
-    v.play();
-    setPlaying(true);
-  }, [videoIndex]);
-
-  // Fallback so the steps still play even if the video is never tapped.
-  useEffect(() => {
-    fallbackRef.current = setTimeout(() => setShowSteps(true), 6000);
-    return () => { if (fallbackRef.current) clearTimeout(fallbackRef.current); };
-  }, []);
-
-  useEffect(() => {
-    if (!showSteps) return;
-    const id = setInterval(() => setActive((a) => (a + 1) % HOW_STEPS.length), 2400);
-    return () => clearInterval(id);
-  }, [showSteps]);
-
+// Full-bleed diagonal-cut banner, split into three tiles — one per
+// "Explore modes" step. Deliberately breaks out of the page's side padding
+// (negative margins) so the diagonal edges run edge-to-edge like a ribbon.
+function ExploreModes({ onScan, onGallery, onCollection, colors }) {
+  const actions = [
+    () => onScan?.(),
+    () => onGallery?.(),
+    () => onCollection?.(),
+  ];
   return (
-    <div style={{ borderRadius: 16, overflow: 'hidden', marginTop: 10,
-      background: colors.surface, border: `1px solid ${colors.border}`,
-      boxShadow: '0 4px 18px rgba(0,0,0,0.12)' }}>
-      <style>{`
-        @keyframes htu-pulseBadge { 0%,100%{opacity:0.6} 50%{opacity:1} }
-        @keyframes htu-pop        { 0%{transform:scale(0.85);opacity:0.5} 100%{transform:scale(1);opacity:1} }
-        @keyframes htu-ringGrow   { 0%{transform:scale(1);opacity:0.55} 100%{transform:scale(1.7);opacity:0} }
-        @keyframes dv-playHover   { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
-      `}</style>
-
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px 0' }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: colors.text, fontFamily: FONT }}>
-          🎥 See Memoera in Action
-        </span>
-        <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, letterSpacing: '0.08em',
-          color: '#00C9A7', background: 'rgba(0,201,167,0.12)', border: '1px solid rgba(0,201,167,0.35)',
-          borderRadius: 20, padding: '3px 9px', animation: 'htu-pulseBadge 1.8s ease-in-out infinite' }}>
-          DEMO
-        </span>
+    <div style={s2.wrap}>
+      <div style={s2.head}>
+        <h2 style={{ ...s2.headTitle, color: colors.text }}>Explore modes</h2>
+        <span style={{ ...s2.headSub, color: colors.textMuted }}>3 WAYS IN</span>
       </div>
-
-      {/* Video */}
-      <div style={{ position: 'relative', marginTop: 12, background: '#000',
-        maxWidth: 220, marginLeft: 'auto', marginRight: 'auto', borderRadius: 12, overflow: 'hidden' }}>
-        <video
-          ref={videoRef}
-          src={VIDEO_PLAYLIST[videoIndex]}
-          playsInline
-          controls={playing}
-          preload="metadata"
-          onPause={() => setPlaying(false)}
-          onEnded={handleEnded}
-          style={{ width: '100%', display: 'block', aspectRatio: '9 / 16', objectFit: 'cover', background: '#000' }}
-        />
-        {!playing && (
-          <button onClick={handlePlay} aria-label="Play demo video" style={{
-            position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: 'rgba(0,0,0,0.28)', border: 'none', cursor: 'pointer', padding: 0,
-          }}>
-            <span style={{
-              width: 52, height: 52, borderRadius: '50%',
-              background: 'rgba(0,201,167,0.92)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 4px 20px rgba(0,201,167,0.5)', animation: 'dv-playHover 2.2s ease-in-out infinite',
-            }}>
-              <span style={{ marginLeft: 4, width: 0, height: 0,
-                borderStyle: 'solid', borderWidth: '9px 0 9px 15px',
-                borderColor: 'transparent transparent transparent #04140f' }} />
-            </span>
-          </button>
-        )}
-
-        <button onClick={handleFullscreen} aria-label="View full screen" title="View full screen" style={{
-          position: 'absolute', top: 8, right: 8, zIndex: 2,
-          width: 30, height: 30, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'rgba(0,0,0,0.55)', border: '1px solid rgba(255,255,255,0.25)', cursor: 'pointer', padding: 0,
-        }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2"
-            strokeLinecap="round" strokeLinejoin="round">
-            <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M3 16v3a2 2 0 0 0 2 2h3" />
-          </svg>
-        </button>
+      <div style={s2.accent}>
+        <div style={s2.shape}>
+          {EXPLORE_MODES.map((step, i) => (
+            <button key={i} className="home-mode-tile" onClick={actions[i]} style={s2.tile}>
+              <span style={s2.tileIcon}><span style={{ fontSize: 22 }}>{step.icon}</span></span>
+              <span style={s2.tileTitle}>{step.title}</span>
+              <span style={s2.tileDesc}>{step.desc}</span>
+            </button>
+          ))}
+        </div>
       </div>
-
-      <div style={{ padding: '10px 14px 0', textAlign: 'center' }}>
-        <p style={{ margin: 0, fontSize: 12, color: colors.textMuted, fontFamily: FONT, lineHeight: 1.5 }}>
-          Watch a photo come alive — this is what your guests will see.
-        </p>
-      </div>
-
-      {/* Divider into "How It Works" */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '16px 18px 0' }}>
-        <div style={{ flex: 1, height: 1, background: colors.border }} />
-        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', color: colors.textMuted, fontFamily: FONT }}>
-          HOW IT WORKS
-        </span>
-        <div style={{ flex: 1, height: 1, background: colors.border }} />
-      </div>
-
-      {/* Steps row */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '16px 18px 4px' }}>
-        {HOW_STEPS.map((step, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', flex: i < HOW_STEPS.length - 1 ? 1 : 'none' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
-              <div style={{ position: 'relative', width: 44, height: 44 }}>
-                {active === i && (
-                  <div style={{ position: 'absolute', inset: 0, borderRadius: '50%',
-                    border: '2px solid #00C9A7', animation: 'htu-ringGrow 1.4s ease-out infinite' }} />
-                )}
-                <div key={active === i ? `on-${i}` : `off-${i}`} style={{
-                  width: 44, height: 44, borderRadius: '50%', display: 'flex',
-                  alignItems: 'center', justifyContent: 'center', fontSize: 20,
-                  background: active === i
-                    ? 'linear-gradient(135deg,#00C9A7,#00E5CC)'
-                    : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)'),
-                  boxShadow: active === i ? '0 4px 16px rgba(0,201,167,0.5)' : 'none',
-                  transition: 'background 0.3s, box-shadow 0.3s',
-                  animation: 'htu-pop 0.35s ease',
-                }}>
-                  {step.icon}
-                </div>
-              </div>
-              <span style={{ fontSize: 10, fontWeight: 700, fontFamily: FONT,
-                color: active === i ? '#00C9A7' : colors.textMuted, transition: 'color 0.3s' }}>
-                {step.title}
-              </span>
-            </div>
-            {i < HOW_STEPS.length - 1 && (
-              <div style={{ flex: 1, height: 2, margin: '0 6px 18px', borderRadius: 2,
-                background: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)', overflow: 'hidden' }}>
-                <div style={{ height: '100%', width: active > i ? '100%' : '0%',
-                  background: '#00C9A7', transition: 'width 0.5s ease' }} />
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Dynamic description */}
-      <div style={{ padding: '6px 18px 14px', textAlign: 'center' }}>
-        <p key={active} style={{ margin: 0, fontSize: 12, color: colors.textMuted, fontFamily: FONT,
-          lineHeight: 1.5, animation: 'htu-pop 0.3s ease' }}>
-          {HOW_STEPS[active].desc}
-        </p>
-      </div>
-
     </div>
   );
 }
+
+const s2 = {
+  wrap: { position: 'relative', marginLeft: -16, marginRight: -16, marginTop: 6 },
+  head: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 20px 10px' },
+  headTitle: { fontFamily: FONT, fontSize: 15, margin: 0, letterSpacing: '-.01em', color: '#fff' },
+  headSub: { fontFamily: 'ui-monospace, monospace', fontSize: 9.5, color: 'rgba(255,255,255,.5)', letterSpacing: '.08em' },
+  accent: { position: 'relative', background: '#00E5CC', clipPath: 'polygon(0 6%, 100% 0%, 100% 94%, 0% 100%)' },
+  shape: { margin: 3, background: '#0A3733', clipPath: 'polygon(0 6%, 100% 0%, 100% 94%, 0% 100%)',
+    display: 'flex', padding: '30px 10px 38px', gap: 8 },
+  tile: { flex: 1, minWidth: 0, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: 16, padding: '14px 6px', display: 'flex', flexDirection: 'column', alignItems: 'center',
+    gap: 8, textAlign: 'center', cursor: 'pointer', color: '#fff', fontFamily: FONT, boxSizing: 'border-box' },
+  tileIcon: { width: 40, height: 40, borderRadius: 14, background: 'rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  tileTitle: { fontSize: 11.5, fontWeight: 700, width: '100%' },
+  tileDesc: { fontSize: 9, color: 'rgba(255,255,255,.65)', lineHeight: 1.3, width: '100%', overflowWrap: 'break-word', wordBreak: 'break-word' },
+};
 
 const CUSTOMER_REVIEWS = [
   { name: 'Ananya R.',   avatar: '👩',  rating: 5, text: 'Turned my wedding album into AR magic — guests still talk about it! Scanning the photos brings our videos to life instantly.' },
@@ -832,7 +702,7 @@ function HappyCustomersCard({ colors, isDark, user }) {
   }, [myRating, myText, user, loadReviews]);
 
   return (
-    <div style={{ borderRadius: 16, overflow: 'hidden', marginTop: 10,
+    <div style={{ borderRadius: 18, overflow: 'hidden',
       background: colors.surface, border: `1px solid ${colors.border}`,
       boxShadow: '0 4px 18px rgba(0,0,0,0.12)' }}>
       <style>{`
@@ -890,7 +760,7 @@ function HappyCustomersCard({ colors, isDark, user }) {
           lineHeight: 1.6, fontStyle: 'italic', whiteSpace: 'normal', wordBreak: 'break-word',
           overflowWrap: 'anywhere', display: 'block', maxWidth: '100%', WebkitLineClamp: 'unset',
           WebkitBoxOrient: 'unset' }}>
-          “{r.text}”
+          "{r.text}"
         </p>
       </div>
 
@@ -964,7 +834,7 @@ function HappyCustomersCard({ colors, isDark, user }) {
             </div>
             <p style={{ margin: 0, fontSize: 14, color: colors.text, fontFamily: FONT,
               lineHeight: 1.7, fontStyle: 'italic', whiteSpace: 'normal', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
-              “{r.text}”
+              "{r.text}"
             </p>
           </div>
         </div>,
@@ -972,8 +842,8 @@ function HappyCustomersCard({ colors, isDark, user }) {
       )}
 
       {/* Write-a-review modal — portaled to <body> so it always paints above
-          sibling sections (e.g. About Us / Company Details), regardless of
-          which nested stacking context it's authored in. */}
+          sibling sections, regardless of which nested stacking context it's
+          authored in. */}
       {writeOpen && createPortal(
         <div onClick={() => !submitting && setWriteOpen(false)} style={{
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
@@ -1044,29 +914,52 @@ function HappyCustomersCard({ colors, isDark, user }) {
   );
 }
 
-function Spinner() {
-  return <span style={{ display:'inline-block',width:14,height:14,border:'2px solid rgba(255,255,255,0.3)',
-    borderTopColor:'#fff',borderRadius:'50%',animation:'spin 0.7s linear infinite',marginRight:6,
-    verticalAlign:'middle' }} />;
-}
-
-function NavBtn({ icon, label, onClick, active }) {
+function NavBtn({ icon, img, count, label, sublabel, bg, onClick, labelColor, subColor, className }) {
   return (
-    <button onClick={onClick} title={label} className="nav-btn-hover"
-      style={{ ...styles.navBtn, ...(active ? styles.navBtnActive : {}) }}>
-      {icon}
+    <button onClick={onClick} title={label} className={`nav-tile-hover home-feature ${className || ''}`} style={styles.navBtn}>
+      <span className={`nav-tile-badge home-feature-badge${img ? '' : ' home-shimmer-wrap'}`} style={{ ...styles.navTileBadge, background: img ? 'transparent' : bg, boxShadow: img ? 'none' : styles.navTileBadge.boxShadow }}>
+        {img ? <img src={img} alt="" style={styles.navTileImg} /> : icon}
+        {count > 0 && <span style={styles.navTileCount}>{count}</span>}
+      </span>
+      <span style={{ ...styles.navBtnLabel, color: labelColor }}>{label}</span>
+      {sublabel && <span style={{ ...styles.navBtnSublabel, color: subColor }}>{sublabel}</span>}
     </button>
   );
 }
-function SocialLink({ href, icon }) {
+function SocialLink({ href, icon, className }) {
   return (
     <a href={href} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
-      <div className="social-icon-hover" style={styles.socialIcon}>{icon}</div>
+      <div className={`social-icon-hover ${className || ''}`} style={styles.socialIcon}>{icon}</div>
     </a>
   );
 }
 
-/* â"€â"€ Icons â"€â"€ */
+function AboutUsAccordion({ colors }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ borderRadius: 16, overflow: 'hidden', background: colors.surface, border: `1px solid ${colors.border}` }}>
+      <button onClick={() => setOpen(o => !o)} style={{
+        width: '100%', background: 'transparent', border: 'none', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '14px 16px', fontFamily: FONT,
+      }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: colors.text }}>About Us</span>
+        <span style={{ color: colors.textMuted, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>▾</span>
+      </button>
+      {open && (
+        <div style={{ padding: '0 16px 16px' }}>
+          <p style={{ margin: 0, fontSize: 12.5, color: colors.textMuted, fontFamily: FONT, lineHeight: 1.6 }}>
+            Memoera (OPC) Private Limited, based in Bengaluru, India, builds AR experiences that
+            bring your printed photos, cards, and keepsakes to life. Scan any Memoera target and
+            watch your memories play back as video, audio, or animation — instantly.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Icons ── */
 function SunIcon({ size = 18, color = '#555' }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1078,15 +971,6 @@ function SunIcon({ size = 18, color = '#555' }) {
     </svg>
   );
 }
-function ScanCameraIcon({ color = '#555' }) {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
-      stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/>
-      <circle cx="12" cy="13" r="4"/>
-    </svg>
-  );
-}
 function MoonIcon({ size = 17, color = '#555' }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1095,139 +979,146 @@ function MoonIcon({ size = 17, color = '#555' }) {
   );
 }
 function BellIcon({ size = 20, color = '#555' }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>; }
+function ProfileIcon({ size = 22, color = '#555' }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-3.6 3.1-6 8-6s8 2.4 8 6"/></svg>; }
+function ShareIcon({ color = '#555' }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="18" cy="5" r="3" /><circle cx="6" cy="12" r="3" /><circle cx="18" cy="19" r="3" />
+      <line x1="8.6" y1="10.6" x2="15.4" y2="6.4" /><line x1="8.6" y1="13.4" x2="15.4" y2="17.6" />
+    </svg>
+  );
+}
+function SearchIcon({ size = 18, color = '#00C9A7' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+  );
+}
+function ArrowRightIcon({ color = 'currentColor' }) {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round"><path d="M5 12h14M13 5l7 7-7 7"/></svg>;
+}
 function PowerIcon({ color = '#555' }) {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18.36 6.64A9 9 0 1 1 5.64 6.64"/><line x1="12" y1="2" x2="12" y2="12"/></svg>;
 }
-function PlusIcon({ color='#555' }) { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>; }
-function GalleryIcon({ color='#555' }) { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>; }
-function GearIcon({ color='#555' }) { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>; }
-function ReferIcon({ color='#555' }) { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>; }
-function DiamondIcon() { return <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M12 2 L22 10 L12 22 L2 10 Z" fill="#C9A84C" stroke="#C9A84C" strokeWidth="1"/><path d="M2 10 L12 10 L12 22 Z" fill="rgba(201,168,76,0.4)"/><path d="M12 10 L22 10 L12 22 Z" fill="rgba(201,168,76,0.7)"/></svg>; }
-function InstagramIcon() { return <svg width="22" height="22" viewBox="0 0 24 24" fill="none"><defs><radialGradient id="ig-grad" cx="30%" cy="107%" r="150%"><stop offset="0%" stopColor="#fdf497"/><stop offset="5%" stopColor="#fdf497"/><stop offset="45%" stopColor="#fd5949"/><stop offset="60%" stopColor="#d6249f"/><stop offset="90%" stopColor="#285AEB"/></radialGradient></defs><rect x="2" y="2" width="20" height="20" rx="6" fill="url(#ig-grad)"/><circle cx="12" cy="12" r="4.5" stroke="#fff" strokeWidth="1.8" fill="none"/><circle cx="17.5" cy="6.5" r="1.2" fill="#fff"/></svg>; }
-function FacebookIcon() { return <svg width="22" height="22" viewBox="0 0 24 24"><rect width="24" height="24" rx="6" fill="#1877F2"/><path d="M15.5 8H13V6.5C13 5.67 13.67 5.5 14 5.5h1.5V3h-2C11.12 3 10 4.34 10 6v2H8v2.5h2V21h3v-10.5h2l.5-2.5z" fill="#fff"/></svg>; }
-function YouTubeIcon() { return <svg width="22" height="22" viewBox="0 0 24 24"><rect width="24" height="24" rx="6" fill="#FF0000"/><path d="M19.6 8.2s-.2-1.3-.8-1.9c-.7-.8-1.6-.8-2-.8C14.4 5.4 12 5.4 12 5.4s-2.4 0-4.8.1c-.4 0-1.3 0-2 .8-.6.6-.8 1.9-.8 1.9S4.2 9.6 4.2 11v1.3c0 1.4.2 2.8.2 2.8s.2 1.3.8 1.9c.7.8 1.7.7 2.2.8C8.8 18 12 18 12 18s2.4 0 4.8-.1c.4 0 1.3 0 2-.8.6-.6.8-1.9.8-1.9s.2-1.4.2-2.8V11c0-1.4-.2-2.8-.2-2.8zm-11 5.6V9.8l5.3 2-5.3 2z" fill="#fff"/></svg>; }
-function XIcon() { return <svg width="22" height="22" viewBox="0 0 24 24"><rect width="24" height="24" rx="6" fill="#000"/><path d="M17.5 3.5h2.8l-6 6.9 7.1 9.1h-5.5l-4.3-5.7-5 5.7H3.8l6.4-7.3L3.5 3.5h5.7l3.9 5.2 4.4-5.2zm-1 13.6h1.5L7.7 5h-1.6l10.4 12.1z" fill="#fff"/></svg>; }
-function WhatsAppIcon() { return <svg width="18" height="18" viewBox="0 0 24 24" fill="#25D366" style={{ marginRight: 6 }}><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413Z"/></svg>; }
+function StreakGlyph() { return <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2c1 3-2.5 4-2.5 7.2 0 1.6 1 2.6 2 2.6.8 0 1.6-.6 1.6-1.7 0-.7-.3-1.1-.3-1.1 2 .6 3.7 2.6 3.7 5.1 0 3.3-2.9 5.9-6.5 5.9S3.5 18.4 3.5 15.1c0-4.8 4.7-6 8.5-13.1Z"/></svg>; }
+function StorageGlyph() { return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><rect x="3" y="4" width="18" height="6" rx="1.6"/><rect x="3" y="14" width="18" height="6" rx="1.6"/><circle cx="7" cy="7" r="0.6" fill="currentColor" stroke="none"/><circle cx="7" cy="17" r="0.6" fill="currentColor" stroke="none"/></svg>; }
 
-const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
-const GOLD = "#C9A84C";
+const SOCIAL = "#0D333B";
+function InstagramIcon() {
+  return <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke={SOCIAL} strokeWidth="1.7">
+    <rect x="3.2" y="3.2" width="17.6" height="17.6" rx="6"/>
+    <circle cx="12" cy="12" r="4.2"/>
+    <circle cx="17" cy="7" r="1" fill={SOCIAL} stroke="none"/>
+  </svg>;
+}
+function FacebookIcon() {
+  return <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke={SOCIAL} strokeWidth="1.7">
+    <circle cx="12" cy="12" r="9.3"/>
+    <path d="M14.2 8.6h-1.3c-.5 0-.9.4-.9.9v1.3h2.2l-.3 1.9h-1.9V21h-2v-8.3H8.3v-1.9H10V9.3c0-1.6 1-2.7 2.6-2.7h1.6z" fill={SOCIAL} stroke="none"/>
+  </svg>;
+}
+function YouTubeIcon() {
+  return <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke={SOCIAL} strokeWidth="1.7">
+    <circle cx="12" cy="12" r="9.3"/>
+    <path d="M10 8.3v7.4l6.2-3.7z" fill={SOCIAL} stroke="none"/>
+  </svg>;
+}
+function XIcon() {
+  return <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke={SOCIAL} strokeWidth="1.7">
+    <circle cx="12" cy="12" r="9.3"/>
+    <path d="M17.8 8.2c-.4.2-.8.3-1.2.4.4-.3.7-.7.9-1.2-.4.3-.9.4-1.3.6-.4-.4-1-.7-1.6-.7-1.2 0-2.1 1-2.1 2.2 0 .2 0 .3.1.5-1.8-.1-3.3-.9-4.4-2.2-.2.3-.3.6-.3 1 0 .7.4 1.3.9 1.7-.3 0-.6-.1-.9-.3v0c0 1 .7 1.8 1.7 2-.2.1-.4.1-.6.1-.1 0-.3 0-.4 0 .3.8 1 1.4 1.9 1.5-.7.6-1.6.9-2.6.9-.2 0-.3 0-.5 0 .9.6 2 1 3.2 1 3.8 0 5.9-3.2 5.9-5.9v-.3c.4-.3.7-.6 1-1z" fill={SOCIAL} stroke="none"/>
+  </svg>;
+}
+function WhatsAppIcon() {
+  return <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke={SOCIAL} strokeWidth="1.7">
+    <circle cx="12" cy="12" r="9.3"/>
+    <path d="M9.9 9.6c.1-.3.3-.3.4-.3h.3c.1 0 .3 0 .4.3.2.4.5 1.1.5 1.2.1.1.1.2 0 .3-.1.2-.1.2-.2.3-.1.1-.2.3-.3.4-.1.1-.2.2-.1.4.2.3.6.9 1.3 1.5.8.7 1.3.9 1.5.9.2.1.3.1.4-.1.1-.1.3-.4.5-.6.1-.1.3-.1.4-.1.2.1.9.5 1.1.6.2.1.3.1.3.2.1.2.1.5-.1 1-.2.4-1 .9-1.5.9-.4 0-1.2-.1-2.5-.9-1.9-1.1-3.2-3.2-3.3-3.4-.1-.1-.8-1.1-.8-2.1 0-1 .5-1.5.7-1.7z" fill={SOCIAL} stroke="none"/>
+  </svg>;
+}
 
 const styles = {
   screen: { position:'fixed',inset:0,display:'flex',flexDirection:'column',fontFamily:FONT,overflow:'hidden' },
   watermark: { position:'fixed',bottom:-60,left:-40,width:'70vw',maxWidth:280,opacity:0.05,pointerEvents:'none',zIndex:0 },
+  glowOrb: { position:'fixed',borderRadius:'50%',pointerEvents:'none',zIndex:0,filter:'blur(2px)' },
   watermarkImg: { width:'100%' },
 
-  header: { padding:'26px 16px 10px 16px',flexShrink:0,position:'relative',zIndex:1,
-    display:'flex',alignItems:'center',
-    animation:'homeFloat 6s ease-in-out infinite' },
+  content: { flex:1,padding:'0 16px',overflowY:'auto',overflowX:'hidden',position:'relative',zIndex:1,
+    display:'flex',flexDirection:'column',gap:10,paddingBottom:130 },
 
-  /* Fixed utility strip — dead-end right, horizontal row */
-  utilityStrip: { position:'fixed',top:28,right:10,zIndex:15,
-    display:'flex',flexDirection:'row',alignItems:'center',gap:0,
-    background:'rgba(6,20,24,0.80)',
-    backdropFilter:'blur(14px)',WebkitBackdropFilter:'blur(14px)',
-    borderRadius:12,
-    border:'1px solid rgba(201,168,76,0.3)',
-    padding:'4px 6px' },
-  utilityStripBtn: { background:'transparent',border:'none',cursor:'pointer',
-    width:34,height:34,display:'flex',alignItems:'center',justifyContent:'center',
-    borderRadius:8,position:'relative' },
-  utilityStripDivider: { height:18,width:1,margin:'0 2px' },
-  utilityStripLang: { border:'none',fontSize:10,fontFamily:FONT,padding:'3px 4px',
-    cursor:'pointer',outline:'none',minWidth:58,maxWidth:80,textAlign:'center',borderRadius:6 },
-  logoRow: { display:'flex',flexDirection:'column',alignItems:'center',gap:4 },
-  logoCircle: { width:54,height:54,borderRadius:'50%',flexShrink:0,background:'#071C22',overflow:'hidden',
-    display:'flex',alignItems:'center',justifyContent:'center',
-    animation:'homeLogoGlow 3s ease-in-out infinite' },
-  logo: { width:'78%',height:'78%',objectFit:'contain',objectPosition:'center',display:'block' },
-  brandWrap: { display:'flex',flexDirection:'column' },
-  brand: { fontSize:22,fontWeight:700,letterSpacing:'-0.3px',animation:'homeBrandGlow 3.5s ease-in-out infinite' },
-  tagline: { fontSize:9,letterSpacing:'0.04em',lineHeight:1.3,whiteSpace:'nowrap' },
-  iconCircleBtn: { width:32,height:32,borderRadius:'50%',border:'1px solid',background:'transparent',
-    cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,flexShrink:0,padding:0 },
-  langSelect: { border:'1px solid',borderRadius:16,fontSize:11,fontFamily:FONT,padding:'5px 10px',
-    cursor:'pointer',outline:'none',flexShrink:0 },
-  navLangSelect: { width:44,border:'1px solid',borderRadius:8,fontSize:9,fontFamily:FONT,
-    padding:'4px 2px',cursor:'pointer',outline:'none',textAlign:'center',flexShrink:0 },
+  header: { padding:'22px 0 0',flexShrink:0,position:'relative',zIndex:1,
+    display:'flex',alignItems:'center',justifyContent:'space-between',gap:10 },
+  brandRow: { display:'flex',alignItems:'center',gap:10,minWidth:0 },
+  brandMark: { width:44,height:44,borderRadius:14,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',
+    boxShadow:'inset 0 1px 0 rgba(255,255,255,.14)' },
+  brandMarkImg: { width:'70%',height:'70%',objectFit:'contain' },
+  brandName: { fontFamily:FONT,fontWeight:800,letterSpacing:'-.02em',fontSize:15 },
 
-  content: { flex:1,padding:'0 80px 0 16px',overflowY:'auto',position:'relative',zIndex:1,
-    display:'flex',flexDirection:'column',gap:10,paddingBottom:10 },
+  headerControls: { display:'flex',alignItems:'center',gap:8,flexShrink:0 },
+  iconBtn: { width:36,height:36,borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',
+    cursor:'pointer',position:'relative',boxShadow:'inset 0 1px 0 rgba(255,255,255,.1)' },
+  badgeDot: { position:'absolute',top:5,right:5,width:7,height:7,borderRadius:'50%',background:DANGER },
+  langPill: { borderRadius:12,display:'flex',alignItems:'center',boxShadow:'inset 0 1px 0 rgba(255,255,255,.1)' },
+  langSelect: { border:'none',background:'transparent',fontSize:11,fontFamily:FONT,padding:'8px 6px',
+    cursor:'pointer',outline:'none',maxWidth:56 },
 
-  /* Accordion cards */
-  card: { borderRadius:12,overflow:'hidden',marginTop:4,
-    boxShadow:'0 2px 10px rgba(0,0,0,0.15)' },
-  accordionBtn: { width:'100%',background:'transparent',border:'none',
-    display:'flex',justifyContent:'space-between',alignItems:'center',
-    padding:'9px 14px',cursor:'pointer',fontFamily:FONT },
-  accordionLabel: { fontSize:13,fontWeight:600 },
-  accordionChevron: { fontSize:9,transition:'transform 0.25s ease' },
-  accordionBody: { padding:'0 14px 10px',display:'flex',flexDirection:'column',gap:6 },
-  cardText: { fontSize:11,lineHeight:1.6,margin:0 },
-  detailRow: { display:'flex',justifyContent:'space-between',alignItems:'center',gap:4 },
-  detailLabel: { fontSize:10,letterSpacing:'0.05em',textTransform:'uppercase',fontFamily:FONT },
-  detailValue: { fontSize:11,fontFamily:FONT },
+  dropdown: { position:'absolute',top:'calc(100% + 8px)',right:0,width:270,zIndex:30,
+    borderRadius:16,boxShadow:'0 8px 32px rgba(0,0,0,0.35)',overflow:'hidden',overflowY:'auto',maxHeight:'70vh' },
+  menuItem: { width:'100%',background:'transparent',border:'none',cursor:'pointer',
+    display:'flex',alignItems:'center',gap:10,padding:'10px 14px',fontFamily:FONT,fontSize:13,fontWeight:600 },
 
-  /* Utility box */
-  utilityBox: { display:'flex',alignItems:'center',border:'1px solid',borderRadius:14,
-    padding:'4px 8px',gap:2,backdropFilter:'blur(10px)',WebkitBackdropFilter:'blur(10px)' },
-  utilityBtn: { background:'transparent',border:'none',cursor:'pointer',padding:'5px 6px',
-    display:'flex',alignItems:'center',justifyContent:'center',borderRadius:8 },
-  utilityDivider: { width:1,height:14,background:'rgba(201,168,76,0.35)',flexShrink:0 },
-  utilityLangSelect: { border:'none',fontSize:10,fontFamily:FONT,padding:'4px 2px',
-    cursor:'pointer',outline:'none',maxWidth:65 },
+  card: { borderRadius:16 },
 
-  /* Ad modal */
-  adModalOverlay: { position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',backdropFilter:'blur(4px)',
-    zIndex:50,display:'flex',alignItems:'flex-end',justifyContent:'center' },
-  adModal: { width:'100%',maxWidth:420,borderRadius:'24px 24px 0 0',padding:'24px 20px 40px',
-    boxShadow:'0 -8px 40px rgba(0,0,0,0.4)' },
-  adModalIcon: { fontSize:40,textAlign:'center',marginBottom:10 },
-  adTitle: { fontSize:15,fontWeight:700,fontFamily:FONT,margin:'0 0 4px' },
-  adSub: { fontSize:12,fontFamily:FONT,marginTop:2 },
-  adBtn: { width:'100%',background:'linear-gradient(135deg,#00C9A7,#00E5CC)',border:'none',
-    borderRadius:50,color:'#040D0B',fontSize:14,fontWeight:700,fontFamily:FONT,
-    padding:'12px 20px',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:6 },
-  adMsg: { fontSize:12,fontFamily:FONT,textAlign:'center',marginTop:8 },
-  adCloseBtn: { width:'100%',background:'transparent',border:'none',fontSize:13,fontFamily:FONT,
-    cursor:'pointer',marginTop:12,padding:'8px' },
+  greeting: { padding:'8px 2px 0' },
+  eyebrow: { fontFamily:'ui-monospace, monospace',fontSize:10.5,letterSpacing:'.1em',textTransform:'uppercase',
+    display:'flex',alignItems:'center',gap:8 },
+  hello: { fontFamily:FONT,fontWeight:800,letterSpacing:'-.02em',fontSize:24,margin:'4px 0 4px' },
+  helloName: { background:'linear-gradient(100deg,#C9A84C,#00C9A7 55%,#8f6ffb)',WebkitBackgroundClip:'text',backgroundClip:'text',color:'transparent' },
 
-  /* Announcement panel */
-  announcementPanel: { position:'fixed',bottom:70,left:10,right:10,zIndex:20,
-    borderRadius:16,padding:'14px 16px',border:'1px solid',
-    backdropFilter:'blur(12px)',WebkitBackdropFilter:'blur(12px)',
-    boxShadow:'0 8px 32px rgba(0,0,0,0.3)' },
-  announcementTitle: { fontSize:14,fontWeight:700,fontFamily:FONT,marginBottom:10 },
-  announcementItem: { fontSize:12,fontFamily:FONT,lineHeight:1.6,padding:'4px 0',
-    borderBottom:'1px solid rgba(128,128,128,0.1)' },
-  smallIconBtn: { width:36,height:36,borderRadius:10,border:'1px solid',background:'transparent',
-    fontSize:18,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',
-    flexShrink:0,padding:6 },
-  announcementIconImg: { width:'100%',height:'100%',objectFit:'contain',
-    filter:'brightness(0) invert(0.4)' },
+  navBar: { display:'flex',flexDirection:'row',alignItems:'flex-start',
+    padding:'10px 2px 8px',gap:14,
+    overflowX:'auto',overflowY:'hidden',WebkitOverflowScrolling:'touch',flexShrink:0,
+    touchAction:'pan-x',scrollSnapType:'x mandatory' },
+  navBtn: { background:'transparent',border:'none',padding:0,
+    cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'flex-start',
+    gap:6,width:80,flexShrink:0,scrollSnapAlign:'start' },
+  navTileBadge: { width:56,height:56,borderRadius:20,display:'flex',alignItems:'center',justifyContent:'center',
+    boxShadow:'0 4px 14px rgba(0,0,0,0.25)',flexShrink:0,position:'relative' },
+  navTileImg: { width:'100%',height:'100%',objectFit:'cover',display:'block' },
+  navTileCount: { position:'absolute',top:-6,right:-8,minWidth:15,height:15,borderRadius:8,
+    background:DANGER,color:'#fff',fontSize:9,fontWeight:700,
+    display:'flex',alignItems:'center',justifyContent:'center',padding:'0 3px',
+    boxShadow:'0 1px 4px rgba(0,0,0,0.3)' },
+  navBtnLabel: { fontSize:12.5,fontWeight:700,textAlign:'center',lineHeight:1.2,width:'100%' },
+  navBtnSublabel: { fontSize:9,fontWeight:600,textAlign:'center',lineHeight:1.25,width:'100%' },
+  navDots: { display:'flex',justifyContent:'center',gap:6,padding:'2px 0 4px' },
+  navDot: { width:6,height:6,borderRadius:'50%',transition:'background 0.2s,opacity 0.2s' },
 
-  /* Nav */
-  navBar: { position:'fixed',right:0,top:'50%',transform:'translateY(-50%)',
-    borderRadius:'16px 0 0 16px',display:'flex',flexDirection:'column',alignItems:'center',
-    padding:'10px 6px',gap:2,border:'2px solid '+GOLD,borderRight:'none',zIndex:10,
-    backdropFilter:'blur(20px)',WebkitBackdropFilter:'blur(20px)',
-    animation:'goldGlow 3s ease-in-out infinite' },
-  navBtn: { background:'transparent',border:'none',borderRadius:10,padding:'8px',
-    cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',
-    width:46,transition:'background 0.2s,filter 0.2s' },
-  navBtnActive: { background:'rgba(201,168,76,0.18)',filter:'drop-shadow(0 0 6px rgba(201,168,76,0.6))' },
+  promoWrap: { padding:'4px 0 0' },
+  promoTrack: { display:'flex',gap:14,overflowX:'auto',scrollSnapType:'x mandatory',WebkitOverflowScrolling:'touch' },
+  promoCard: { scrollSnapAlign:'center',flex:'0 0 100%',borderRadius:20,padding:'16px 18px',
+    display:'flex',alignItems:'center',justifyContent:'space-between',gap:12,boxShadow:'0 4px 18px rgba(0,0,0,0.1)' },
+  promoDots: { display:'flex',justifyContent:'center',gap:6,padding:'10px 0 2px' },
+  dot: { height:6,borderRadius:4,border:'none',cursor:'pointer',padding:0,transition:'width .2s ease, background .2s ease' },
 
-  /* Bottom */
-  bottomBar: { padding:'10px 16px 20px',flexShrink:0,
-    borderTop:'1px solid',position:'relative',zIndex:1,
-    backdropFilter:'blur(10px)',WebkitBackdropFilter:'blur(10px)' },
-  socialRow: { display:'flex',alignItems:'center',gap:10,flexWrap:'wrap' },
-  socialIcon: { width:38,height:38,borderRadius:10,display:'flex',alignItems:'center',
-    justifyContent:'center',overflow:'hidden',transition:'filter 0.2s,transform 0.2s' },
-  chatLink: { textDecoration:'none',display:'inline-flex',alignItems:'center',marginLeft:'auto' },
-  chatText: { fontSize:13,fontFamily:FONT,fontWeight:500 },
+  searchBar: { display:'flex',alignItems:'center',gap:8,borderRadius:50,padding:'4px 4px 4px 18px',marginTop:6 },
+  searchInput: { flex:1,background:'transparent',border:'none',outline:'none',fontSize:13.5,fontFamily:FONT,padding:'12px 0' },
+  searchGo: { width:38,height:38,borderRadius:'50%',border:'none',cursor:'pointer',
+    display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0 },
 
-  /* Ad bottom button */
-  adBottomBtn: { display:'inline-flex',alignItems:'center',background:'linear-gradient(135deg,#00C9A7,#00E5CC)',
-    border:'none',borderRadius:20,color:'#040D0B',fontSize:12,fontWeight:700,fontFamily:FONT,
-    padding:'7px 14px',cursor:'pointer',flexShrink:0,whiteSpace:'nowrap' },
+  bodyGrid: { display:'grid',gridTemplateColumns:'52px 1fr',gap:12,padding:'8px 0 20px' },
+  socialRail: { display:'flex',flexDirection:'column',gap:10,alignItems:'center' },
+  socialIcon: { width:52,height:52,borderRadius:16,display:'flex',alignItems:'center',
+    justifyContent:'center',overflow:'hidden',flexShrink:0,background:'#ffffff',
+    boxShadow:'0 1px 4px rgba(0,0,0,0.15)' },
+  stack: { display:'flex',flexDirection:'column',gap:12,minWidth:0 },
+
+  stat: { flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:4,
+    padding:'12px 6px',borderRadius:14 },
+  statNum: { fontFamily:'ui-monospace, monospace',fontSize:15,fontWeight:700 },
+  statLabel: { fontSize:9.5,letterSpacing:'.04em' },
+
+  toast: { position:'fixed',bottom:90,left:'50%',transform:'translateX(-50%)',zIndex:40,
+    borderRadius:20,padding:'10px 18px',fontSize:13,fontFamily:FONT,fontWeight:600,
+    boxShadow:'0 4px 20px rgba(0,0,0,0.25)' },
 };

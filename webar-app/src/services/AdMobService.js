@@ -48,18 +48,15 @@ export async function initAdMob() {
   }
 }
 
+// Disabled: @capacitor-community/admob 8.0.0's BannerExecutor throws an
+// uncaught native NullPointerException (ViewGroup.addView on a null
+// container) almost every time this fires right after Home mounts — it's a
+// native-side crash, so the try/catch here never even sees it; it just takes
+// the whole app down. Re-enable once the plugin ships a fix for the
+// container-not-ready race, or once this is confirmed to reproduce reliably
+// enough to report upstream with repro steps.
 export async function showBanner() {
-  if (!isNative()) return;
-  try {
-    await AdMob.showBanner({
-      adId: AD_UNITS.BANNER,
-      adSize: BannerAdSize.ADAPTIVE_BANNER,
-      position: BannerAdPosition.BOTTOM_CENTER,
-      isTesting,
-    });
-  } catch (err) {
-    console.warn('[AdMob] showBanner failed:', err);
-  }
+  return;
 }
 
 export async function hideBanner() {

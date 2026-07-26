@@ -19,6 +19,7 @@
     "@capacitor/browser": "^8.0.3",
     "@capacitor/cli": "^8.3.4",
     "@capacitor/core": "^8.3.4",
+    "@capacitor/share": "^8.0.1",
     "@imgly/background-removal": "^1.7.0",
     "idb-keyval": "^6.2.2",
     "react": "^18.3.1",

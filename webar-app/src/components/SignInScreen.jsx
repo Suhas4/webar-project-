@@ -4,19 +4,46 @@ import { useLanguage } from "../context/LanguageContext.jsx";
 import { T } from "../config/translations.js";
 import { useTheme } from "../context/ThemeContext.jsx";
 
-export default function SignInScreen({ onSuccess, onGoForgotPassword, successMessage }) {
+function validateSignIn(mobile, password) {
+  const errors = {};
+  if (!mobile.trim()) {
+    errors.mobile = 'Mobile number is required.';
+  } else if (!/^\d{10}$/.test(mobile.replace(/\s/g, ''))) {
+    errors.mobile = 'Enter a valid 10-digit mobile number.';
+  }
+  if (!password) errors.password = 'Password is required.';
+  return errors;
+}
+
+export default function SignInScreen({ onSuccess, onGoForgotPassword, onBack, successMessage }) {
   const [mobile, setMobile] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [showValidation, setShowValidation] = useState(false);
   const { lang } = useLanguage();
   const tr = { ...T.en, ...(T[lang] || {}) };
   const { colors } = useTheme();
 
+  const handleMobileChange = (e) => {
+    const v = e.target.value;
+    setMobile(v);
+    if (showValidation) setFieldErrors(validateSignIn(v, password));
+  };
+  const handlePasswordChange = (e) => {
+    const v = e.target.value;
+    setPassword(v);
+    if (showValidation) setFieldErrors(validateSignIn(mobile, v));
+  };
+
   const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
-    if (!mobile.trim() || !password) { setError("Please enter your mobile number and password."); return; }
+    const errors = validateSignIn(mobile, password);
+    setFieldErrors(errors);
+    setShowValidation(true);
+    if (Object.keys(errors).length > 0) return;
     setLoading(true); setError("");
     try {
       const res = await fetch(`${API_BASE}/api/auth/signin`, {
@@ -35,7 +62,7 @@ export default function SignInScreen({ onSuccess, onGoForgotPassword, successMes
   }, [mobile, password, onSuccess]);
 
   return (
-    <div style={{ ...styles.screen, background: colors.bg === styles.screen.background ? styles.screen.background : `${colors.bg}` }}>
+    <div style={{ ...styles.screen, background: colors.bg }}>
       <div style={styles.orb1}/><div style={styles.orb2}/>
       <div style={styles.container}>
         <img src="/logo.png" alt="Memoera" style={styles.logo} />
@@ -46,28 +73,31 @@ export default function SignInScreen({ onSuccess, onGoForgotPassword, successMes
           <form onSubmit={handleSubmit} style={styles.form}>
             <div style={styles.fieldWrap}>
               <label style={{ ...styles.label, color: colors.textMuted }}>{tr.mobileNumber}</label>
-              <input style={{ ...styles.input, color: colors.text, background: colors.surface }} type="tel" placeholder="Enter mobile number"
-                value={mobile} onChange={(e) => setMobile(e.target.value)} maxLength={10} />
+              <input style={{ ...styles.input, color: colors.text, background: colors.surface, borderBottomColor: showValidation && fieldErrors.mobile ? '#FF6B6B' : undefined }} type="tel" placeholder="Enter mobile number"
+                value={mobile} onChange={handleMobileChange} maxLength={10} />
+              {showValidation && fieldErrors.mobile && <p style={styles.fieldError}>⚠ {fieldErrors.mobile}</p>}
             </div>
             <div style={styles.fieldWrap}>
               <label style={{ ...styles.label, color: colors.textMuted }}>{tr.password}</label>
               <div style={styles.passwordWrap}>
-                <input style={{ ...styles.input, paddingRight: 44, color: colors.text, background: colors.surface }}
+                <input style={{ ...styles.input, paddingRight: 44, color: colors.text, background: colors.surface, borderBottomColor: showValidation && fieldErrors.password ? '#FF6B6B' : undefined }}
                   type={showPass ? "text" : "password"} placeholder="Enter password"
-                  value={password} onChange={(e) => setPassword(e.target.value)} />
+                  value={password} onChange={handlePasswordChange} />
                 <button type="button" style={styles.eyeBtn}
                   onClick={() => setShowPass((v) => !v)} tabIndex={-1}>
                   {showPass ? "Hide" : "Show"}
                 </button>
               </div>
+              {showValidation && fieldErrors.password && <p style={styles.fieldError}>⚠ {fieldErrors.password}</p>}
             </div>
-            <button type="button" style={styles.forgotLink} onClick={onGoForgotPassword}>{tr.forgotPassword}</button>
+            <button type="button" style={{ ...styles.forgotLink, color: colors.textMuted }} onClick={onGoForgotPassword}>{tr.forgotPassword}</button>
             <button type="submit" disabled={loading}
               style={{ ...styles.submitBtn, ...(loading ? styles.submitBtnDisabled : {}) }}>
               {loading ? <Spinner /> : tr.signIn}
             </button>
           </form>
         </div>
+        {onBack && <button onClick={onBack} style={{ ...styles.backBtn, color: colors.textMuted }}>← Back</button>}
       </div>
     </div>
   );
@@ -101,6 +131,7 @@ const styles = {
   form: { display:"flex",flexDirection:"column",gap:16 },
   fieldWrap: { display:"flex",flexDirection:"column",gap:6 },
   label: { fontSize:11,fontWeight:600,fontFamily:FONT,color:"rgba(255,255,255,0.45)",letterSpacing:"0.08em",textTransform:"uppercase" },
+  fieldError: { fontSize:11,fontWeight:600,color:"#FF6B6B",fontFamily:FONT,margin:"2px 0 0" },
   input: { background:"rgba(255,255,255,0.05)",border:"none",borderBottom:"1.5px solid rgba(0,201,167,0.4)",
     borderRadius:"8px 8px 0 0",padding:"12px 14px",fontSize:15,fontFamily:FONT,color:"#ffffff",outline:"none",width:"100%" },
   passwordWrap: { position:"relative" },
@@ -114,4 +145,6 @@ const styles = {
     fontSize:16,fontWeight:700,fontFamily:FONT,padding:"15px 24px",cursor:"pointer",letterSpacing:"0.05em",
     boxShadow:"0 4px 24px rgba(0,201,167,0.35)",marginTop:4 },
   submitBtnDisabled: { opacity:0.65,cursor:"not-allowed",boxShadow:"none" },
+  backBtn: { background:"transparent",border:"none",color:"rgba(255,255,255,0.4)",
+    fontSize:14,fontFamily:FONT,cursor:"pointer",marginTop:20,padding:"4px 0" },
 };

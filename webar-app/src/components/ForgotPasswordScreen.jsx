@@ -1,7 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { API_BASE, parseApiResponse } from "../config/api.js";
+import { useTheme } from "../context/ThemeContext.jsx";
+import OtpKeypad from "./OtpKeypad.jsx";
 
 export default function ForgotPasswordScreen({ onBack, onSuccess }) {
+  const { colors } = useTheme();
   const [step, setStep] = useState(1);
   const [mobile, setMobile] = useState("");
   const [securityQuestion, setSecurityQuestion] = useState("");
@@ -14,6 +17,7 @@ export default function ForgotPasswordScreen({ onBack, onSuccess }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [fieldErrors, setFieldErrors] = useState({});
 
   const cooldownRef = useRef(null);
   useEffect(() => () => { if (cooldownRef.current) clearInterval(cooldownRef.current); }, []);
@@ -29,7 +33,9 @@ export default function ForgotPasswordScreen({ onBack, onSuccess }) {
 
   const handleGetQuestion = useCallback(async (e) => {
     e && e.preventDefault();
-    if (!mobile.trim()) { setError("Enter your mobile number."); return; }
+    if (!mobile.trim()) { setFieldErrors({ mobile: "Mobile number is required." }); return; }
+    if (!/^\d{10}$/.test(mobile.replace(/\s/g, ""))) { setFieldErrors({ mobile: "Enter a valid 10-digit mobile number." }); return; }
+    setFieldErrors({});
     setLoading(true); setError("");
     try {
       const res = await fetch(API_BASE+"/api/auth/forgot-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({mobile:mobile.trim()})});
@@ -67,8 +73,12 @@ export default function ForgotPasswordScreen({ onBack, onSuccess }) {
 
   const handleReset = useCallback(async (e) => {
     e && e.preventDefault();
-    if (newPassword.length < 6) { setError("Password must be at least 6 characters."); return; }
-    if (newPassword !== confirmPassword) { setError("Passwords do not match."); return; }
+    const errors = {};
+    if (newPassword.length < 6) errors.newPassword = "Password must be at least 6 characters.";
+    if (confirmPassword && newPassword !== confirmPassword) errors.confirmPassword = "Passwords do not match.";
+    if (!confirmPassword) errors.confirmPassword = "Please confirm your password.";
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
     setLoading(true); setError("");
     try {
       const res = await fetch(API_BASE+"/api/auth/reset-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({resetToken,newPassword})});
@@ -86,56 +96,59 @@ export default function ForgotPasswordScreen({ onBack, onSuccess }) {
   };
 
   return (
-    <div style={S.screen}>
+    <div style={{ ...S.screen, background: colors.bg }}>
       <div style={S.orb1}/><div style={S.orb2}/>
       <div style={S.container}>
         <img src="/logo.png" alt="Memoera" style={S.logo} />
-        <div style={S.card}>
+        <div style={{ ...S.card, background: colors.surface, border: `1px solid ${colors.border}` }}>
           <div style={S.stepRow}>
             {[1,2,3,4].map(s=>(
               <div key={s} style={{display:"flex",alignItems:"center",gap:2}}>
-                <div style={{...S.dot,...(step>=s?S.dotActive:{})}}>{s}</div>
-                {s<4&&<div style={{...S.line,...(step>s?S.lineActive:{})}}/>}
+                <div style={{...S.dot, background: colors.surfaceHigh, color: colors.textMuted, border: `1.5px solid ${colors.border}`, ...(step>=s?S.dotActive:{})}}>{s}</div>
+                {s<4&&<div style={{...S.line, background: colors.border, ...(step>s?S.lineActive:{})}}/>}
               </div>
             ))}
           </div>
-          <h2 style={S.heading}>{["FORGOT PASSWORD","SECURITY QUESTION","ENTER OTP","NEW PASSWORD"][step-1]}</h2>
+          <h2 style={{ ...S.heading, color: colors.text }}>{["FORGOT PASSWORD","SECURITY QUESTION","ENTER OTP","NEW PASSWORD"][step-1]}</h2>
           {error && <div style={S.errorBox}>{error}</div>}
           {step===1 && (
             <form onSubmit={handleGetQuestion} style={S.form}>
-              <p style={S.hint}>Enter your registered mobile number.</p>
-              <input style={S.input} type="tel" placeholder="Mobile number" maxLength={10} value={mobile} onChange={e=>setMobile(e.target.value)} />
+              <p style={{ ...S.hint, color: colors.textMuted }}>Enter your registered mobile number.</p>
+              <input style={{...S.input, color: colors.text, background: colors.inputBg, ...(fieldErrors.mobile ? S.inputError : {})}} type="tel" placeholder="Mobile number" maxLength={10} value={mobile} onChange={e=>{setMobile(e.target.value); if(fieldErrors.mobile) setFieldErrors({});}} />
+              {fieldErrors.mobile && <p style={S.fieldError}>⚠ {fieldErrors.mobile}</p>}
               <button type="submit" disabled={loading} style={{...S.btn,...(loading?S.btnDisabled:{})}}>Continue</button>
             </form>
           )}
           {step===2 && (
             <form onSubmit={handleVerifyAnswer} style={S.form}>
-              <p style={S.hint}>{securityQuestion}</p>
-              <input style={S.input} type="text" placeholder="Your answer" value={securityAnswer} onChange={e=>setSecurityAnswer(e.target.value)} />
+              <p style={{ ...S.hint, color: colors.textMuted }}>{securityQuestion}</p>
+              <input style={{ ...S.input, color: colors.text, background: colors.inputBg }} type="text" placeholder="Your answer" value={securityAnswer} onChange={e=>setSecurityAnswer(e.target.value)} />
               <button type="submit" disabled={loading} style={{...S.btn,...(loading?S.btnDisabled:{})}}>Verify</button>
             </form>
           )}
           {step===3 && (
             <form onSubmit={handleVerifyOTP} style={S.form}>
-              <p style={S.hint}>OTP sent to your mobile. Valid 10 minutes.</p>
-              <input style={{...S.input,letterSpacing:"0.3em",fontSize:22,textAlign:"center"}} type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={otp} onChange={e=>setOtp(e.target.value.replace(/\D/g,"").slice(0,6))} />
+              <p style={{ ...S.hint, color: colors.textMuted }}>OTP sent to your mobile. Valid 10 minutes.</p>
+              <OtpKeypad value={otp} onChange={setOtp} />
               <button type="submit" disabled={loading} style={{...S.btn,...(loading?S.btnDisabled:{})}}>Verify OTP</button>
-              <button type="button" disabled={resendCooldown>0} onClick={resendOTP} style={S.resendBtn}>{resendCooldown>0?"Resend in "+resendCooldown+"s":"Resend OTP"}</button>
+              <button type="button" disabled={resendCooldown>0} onClick={resendOTP} style={{ ...S.resendBtn, color: colors.textMuted }}>{resendCooldown>0?"Resend in "+resendCooldown+"s":"Resend OTP"}</button>
             </form>
           )}
           {step===4 && (
             <form onSubmit={handleReset} style={S.form}>
-              <p style={S.hint}>Choose a new password.</p>
+              <p style={{ ...S.hint, color: colors.textMuted }}>Choose a new password.</p>
               <div style={{position:"relative"}}>
-                <input style={{...S.input,paddingRight:52}} type={showPass?"text":"password"} placeholder="New password (min 6 chars)" value={newPassword} onChange={e=>setNewPassword(e.target.value)} />
+                <input style={{...S.input,paddingRight:52, color: colors.text, background: colors.inputBg, ...(fieldErrors.newPassword ? S.inputError : {})}} type={showPass?"text":"password"} placeholder="New password (min 6 chars)" value={newPassword} onChange={e=>{setNewPassword(e.target.value); setFieldErrors(fe=>({...fe, newPassword: undefined}));}} />
                 <button type="button" style={S.eyeBtn} onClick={()=>setShowPass(v=>!v)}>Show</button>
               </div>
-              <input style={S.input} type={showPass?"text":"password"} placeholder="Confirm password" value={confirmPassword} onChange={e=>setConfirmPassword(e.target.value)} />
+              {fieldErrors.newPassword && <p style={S.fieldError}>⚠ {fieldErrors.newPassword}</p>}
+              <input style={{...S.input, color: colors.text, background: colors.inputBg, ...(fieldErrors.confirmPassword ? S.inputError : {})}} type={showPass?"text":"password"} placeholder="Confirm password" value={confirmPassword} onChange={e=>{setConfirmPassword(e.target.value); setFieldErrors(fe=>({...fe, confirmPassword: undefined}));}} />
+              {fieldErrors.confirmPassword && <p style={S.fieldError}>⚠ {fieldErrors.confirmPassword}</p>}
               <button type="submit" disabled={loading} style={{...S.btn,...(loading?S.btnDisabled:{})}}>Reset Password</button>
             </form>
           )}
         </div>
-        <button onClick={onBack} style={S.backBtn}>← Back</button>
+        <button onClick={onBack} style={{ ...S.backBtn, color: colors.textMuted }}>← Back</button>
       </div>
     </div>
   );
@@ -160,6 +173,8 @@ const S = {
   errorBox:{background:"rgba(255,80,80,0.08)",border:"1px solid rgba(255,80,80,0.3)",borderRadius:10,padding:"10px 14px",fontSize:13,color:"#FF6B6B",fontFamily:FONT,marginBottom:16,textAlign:"center"},
   form:{display:"flex",flexDirection:"column",gap:14},
   input:{background:"rgba(255,255,255,0.05)",border:"none",borderBottom:"1.5px solid rgba(0,201,167,0.4)",borderRadius:"8px 8px 0 0",padding:"12px 14px",fontSize:15,fontFamily:FONT,color:"#ffffff",outline:"none",width:"100%"},
+  inputError:{borderBottomColor:"#FF6B6B"},
+  fieldError:{fontSize:11,fontWeight:600,color:"#FF6B6B",fontFamily:FONT,margin:"-8px 0 0"},
   btn:{display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,"+TEAL+",#00E5CC)",border:"none",borderRadius:50,color:"#080C18",fontSize:16,fontWeight:700,fontFamily:FONT,padding:"15px 24px",cursor:"pointer",boxShadow:"0 4px 24px rgba(0,201,167,0.35)"},
   btnDisabled:{opacity:0.65,cursor:"not-allowed",boxShadow:"none"},
   resendBtn:{background:"transparent",border:"none",color:"rgba(255,255,255,0.35)",fontSize:13,fontFamily:FONT,cursor:"pointer",textAlign:"center",textDecoration:"underline"},

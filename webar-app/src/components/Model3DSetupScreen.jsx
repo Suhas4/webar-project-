@@ -2,6 +2,7 @@
 import { COMPILER_URL } from '../hooks/loadMindARCompiler.js';
 import CameraCapture from './CameraCapture.jsx';
 import UploadProgressOverlay from './UploadProgressOverlay.jsx';
+import UploadDropZone from './UploadDropZone.jsx';
 import { saveTargets, loadTargets } from '../hooks/useArStorage.js';
 import { rebuildPublicMindInBackground } from '../utils/rebuildPublicMind.js';
 import { assessMarkerQuality } from '../utils/assessMarkerQuality.js';
@@ -25,9 +26,9 @@ const MODEL_ANIMATIONS = [
   { id: 'float',   icon: '🌊', label: 'Float',       desc: 'Gentle continuous up-down bob' },
 ];
 
-function emptyCard(absoluteNumber) {
+function emptyCard(absoluteNumber, imageFile = null, imagePreviewUrl = null) {
   return {
-    label: `Target ${absoluteNumber}`, imageFile: null, imagePreviewUrl: null,
+    label: `Target ${absoluteNumber}`, imageFile, imagePreviewUrl,
     glbFile: null, glbName: '', animationEffect: 'popIn',
   };
 }
@@ -37,8 +38,12 @@ function isModelFile(file) {
   return MODEL_EXTENSIONS.some((ext) => name.endsWith(ext));
 }
 
-export default function Model3DSetupScreen({ onStart, onSignOut, isPublic }) {
-  const [cards, setCards] = useState(() => [emptyCard(1)]);
+export default function Model3DSetupScreen({ onStart, onBack, onSignOut, isPublic, sharedImageFile, sharedImagePreviewUrl, sharedLabel }) {
+  const [cards, setCards] = useState(() => {
+    const card = emptyCard(1, sharedImageFile, sharedImagePreviewUrl);
+    if (sharedLabel) card.label = sharedLabel;
+    return [card];
+  });
   const [startIndex, setStartIndex] = useState(0);
   const [compileState, setCompileState] = useState('idle');
   const [compileProgress, setCompileProgress] = useState(0);
@@ -211,6 +216,8 @@ export default function Model3DSetupScreen({ onStart, onSignOut, isPublic }) {
       <div style={styles.orb1} />
       <div style={styles.orb2} />
 
+      {onBack && <button onClick={onBack} style={styles.backBtn}>← Back</button>}
+
       <div style={styles.header}>
         <div style={styles.headerRow}>
           <h1 style={styles.bigTitle}>UPLOAD</h1>
@@ -288,26 +295,14 @@ function ModelTargetCard({ index, card, showValidation, onImageFile, onGlbFile, 
           onClose={() => setShowPicker(false)}
         />
       )}
-      <div
-        style={{ ...card_s.zone, ...(imageMissing ? card_s.zoneError : {}), height: card.imagePreviewUrl ? 'auto' : 80, padding: card.imagePreviewUrl ? 8 : '0 16px' }}
+      <UploadDropZone
+        title="Tap to upload"
+        hint="JPG, PNG (Max 50MB)"
+        error={imageMissing ? 'Image required' : ''}
+        preview={card.imagePreviewUrl}
+        fileName={card.imageFile?.name}
         onClick={() => setShowPicker(true)}
-        role="button" tabIndex={0}
-        onKeyDown={(e) => e.key === 'Enter' && setShowPicker(true)}>
-        {card.imagePreviewUrl ? (
-          <div style={card_s.previewRow}>
-            <img src={card.imagePreviewUrl} alt="Marker" style={card_s.preview} />
-            <div>
-              <span style={card_s.fileName}>{card.imageFile?.name}</span>
-              <br /><span style={card_s.changeLink}>Tap to change</span>
-            </div>
-          </div>
-        ) : (
-          <div style={card_s.zoneContent}>
-            <span style={card_s.zoneIcon}>🖼️</span>
-            <span style={card_s.zoneText}>{imageMissing ? 'Image required' : 'Tap to select image'}</span>
-          </div>
-        )}
-      </div>
+      />
 
       <p style={{ ...card_s.label, marginTop: 16 }}>3D Model<span style={card_s.hint}> &mdash; .glb, .gltf, .obj, or .fbx file shown when marker is scanned</span></p>
       <input
@@ -344,26 +339,14 @@ function ModelTargetCard({ index, card, showValidation, onImageFile, onGlbFile, 
           </div>
         </>
       )}
-      <div
-        style={{ ...card_s.zone, ...(glbMissing ? card_s.zoneError : {}), height: card.glbName ? 'auto' : 80, padding: card.glbName ? 8 : '0 16px' }}
+      <UploadDropZone
+        title="Tap to upload"
+        hint="GLB, GLTF, OBJ, FBX"
+        error={glbMissing ? '3D model required' : ''}
+        preview={card.glbName ? <span style={{ fontSize: 40 }}>🧊</span> : null}
+        fileName={card.glbName}
         onClick={() => setShowModelPicker(true)}
-        role="button" tabIndex={0}
-        onKeyDown={(e) => e.key === 'Enter' && setShowModelPicker(true)}>
-        {card.glbName ? (
-          <div style={card_s.previewRow}>
-            <div style={card_s.modelIconBox}>🧊</div>
-            <div>
-              <span style={card_s.fileName}>{card.glbName}</span>
-              <br /><span style={card_s.changeLink}>Tap to change</span>
-            </div>
-          </div>
-        ) : (
-          <div style={card_s.zoneContent}>
-            <span style={card_s.zoneIcon}>🧊</span>
-            <span style={card_s.zoneText}>{glbMissing ? '3D model required' : 'Tap to select .glb / .gltf / .obj / .fbx'}</span>
-          </div>
-        )}
-      </div>
+      />
       {glbMissing && <p style={card_s.fieldError}>3D model file is required</p>}
 
       {card.glbName && (
@@ -466,7 +449,8 @@ const styles = {
   },
   orb1: { position: 'fixed', top: -120, left: -80, width: 320, height: 320, borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,201,167,0.2) 0%, transparent 70%)', pointerEvents: 'none', zIndex: 0 },
   orb2: { position: 'fixed', bottom: -100, right: -60, width: 280, height: 280, borderRadius: '50%', background: 'radial-gradient(circle, rgba(0,229,204,0.16) 0%, transparent 70%)', pointerEvents: 'none', zIndex: 0 },
-  header: { padding: '52px 24px 20px', flexShrink: 0, position: 'relative', zIndex: 1 },
+  backBtn: { position: 'absolute', top: 48, left: 16, zIndex: 2, background: 'rgba(0,201,167,0.08)', border: '1px solid rgba(0,201,167,0.25)', borderRadius: 20, color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: 600, fontFamily: FONT, padding: '7px 16px', cursor: 'pointer' },
+  header: { padding: '92px 24px 20px', flexShrink: 0, position: 'relative', zIndex: 1 },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   bigTitle: { fontSize: 32, fontWeight: 700, color: '#ffffff', fontFamily: FONT, margin: 0, letterSpacing: '0.06em' },
   signOutBtn: { background: 'rgba(0,201,167,0.08)', border: '1px solid rgba(0,201,167,0.25)', borderRadius: 20, color: 'rgba(255,255,255,0.5)', fontSize: 12, fontFamily: FONT, fontWeight: 500, padding: '7px 14px', cursor: 'pointer' },

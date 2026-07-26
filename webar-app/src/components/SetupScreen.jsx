@@ -9,15 +9,21 @@ import { T } from '../config/translations.js';
 import { useTheme } from '../context/ThemeContext.jsx';
 import { isImageOwnedByAnotherUser, checkImageModeration, extractVideoThumbnail } from '../utils/contentSafety.js';
 import { assessMarkerQuality } from '../utils/assessMarkerQuality.js';
+import { pingStreak } from '../utils/streak.js';
 
 
-function emptyCard(absoluteNumber) {
-  return { label: `Target ${absoluteNumber}`, imageFile: null, imagePreviewUrl: null,
+function emptyCard(absoluteNumber, imageFile = null, imagePreviewUrl = null) {
+  return { label: `Target ${absoluteNumber}`, imageFile, imagePreviewUrl,
     videoFile: null, videoName: null, videoSize: null };
 }
 
-export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSignOut, user, isPublic = false }) {
-  const [cards, setCards] = useState(() => initialCards?.length ? initialCards : [emptyCard(1)]);
+export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onBack, onSignOut, user, isPublic = false, sharedImageFile, sharedImagePreviewUrl, sharedLabel }) {
+  const [cards, setCards] = useState(() => {
+    if (initialCards?.length) return initialCards;
+    const card = emptyCard(1, sharedImageFile, sharedImagePreviewUrl);
+    if (sharedLabel) card.label = sharedLabel;
+    return [card];
+  });
   const [startIndex, setStartIndex] = useState(0);
   const [compileState, setCompileState] = useState('idle');
   const [compileProgress, setCompileProgress] = useState(0);
@@ -42,7 +48,7 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
     }).catch(() => {});
   }, [isPublic, initialCards]);
 
-  const isCompiling = compileState === 'checking' || compileState === 'compiling' || compileState === 'saving' || compileState === 'uploading' || compileState === 'finalizing';
+  const isCompiling = compileState === 'checking' || compileState === 'compiling' || compileState === 'saving' || compileState === 'uploading' || compileState === 'finalizing' || compileState === 'done';
   const canStart = cards.length > 0 && cards.every((c) => c.imageFile && c.videoFile);
   const prevCanStart = useRef(false);
 
@@ -202,6 +208,11 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
         targetType: 'video',
         urlLink: '',
       }));
+      // Brief "File Uploaded!" success animation before handing off to AR.
+      setCompileState('done');
+      pingStreak();
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+
       onStart({ targets: arTargets, mindFileUrl: localMindUrl });
 
       // After a public upload, rebuild the shared combined .mind in R2 so
@@ -291,6 +302,8 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onSi
       <div style={styles.orb1} />
       <div style={styles.orb2} />
 
+      {onBack && <button onClick={onBack} style={styles.backBtn}>← Back</button>}
+
       {/* Header */}
       <div style={styles.header}>
         <div style={styles.headerRow}>
@@ -377,7 +390,8 @@ const styles = {
     background: 'radial-gradient(circle, rgba(0,229,204,0.16) 0%, transparent 70%)',
     pointerEvents: 'none', zIndex: 0,
   },
-  header: { padding: '52px 24px 20px', flexShrink: 0, position: 'relative', zIndex: 1 },
+  backBtn: { position: 'absolute', top: 48, left: 16, zIndex: 2, background: 'rgba(0,201,167,0.08)', border: '1px solid rgba(0,201,167,0.25)', borderRadius: 20, color: 'rgba(255,255,255,0.7)', fontSize: 13, fontWeight: 600, fontFamily: FONT, padding: '7px 16px', cursor: 'pointer' },
+  header: { padding: '92px 24px 20px', flexShrink: 0, position: 'relative', zIndex: 1 },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 2 },
   logoRow: { display: 'flex', alignItems: 'baseline' },
   logoText: { fontSize: 26, fontWeight: 700, fontFamily: FONT, color: '#ffffff', letterSpacing: '-0.5px' },

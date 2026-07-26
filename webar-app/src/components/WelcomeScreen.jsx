@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
+import { useTheme } from '../context/ThemeContext.jsx';
 
 export default function WelcomeScreen({ onDone, user }) {
+  const { colors } = useTheme();
   useEffect(() => {
     const timer = setTimeout(onDone, 2200);
     return () => clearTimeout(timer);
@@ -9,7 +11,7 @@ export default function WelcomeScreen({ onDone, user }) {
   const firstName = user?.firstName || '';
 
   return (
-    <div style={styles.screen}>
+    <div style={{ ...styles.screen, background: colors.bg }}>
       <style>{`
         @keyframes welcome-fade-in {
           from { opacity: 0; transform: scale(0.96); }
@@ -27,8 +29,8 @@ export default function WelcomeScreen({ onDone, user }) {
 
       <div style={styles.center}>
         <img src="/logo1.png" alt="Memoera" style={styles.logo} />
-        <p style={styles.brandName}>Memoera</p>
-        {firstName ? <p style={styles.greeting}>Hello, {firstName} 👋</p> : null}
+        <p style={{ ...styles.brandName, color: colors.text }}>Memoera</p>
+        {firstName ? <p style={{ ...styles.greeting, color: colors.textMuted }}>Hello, {firstName} 👋</p> : null}
       </div>
     </div>
   );

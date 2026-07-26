@@ -292,9 +292,9 @@ export default function ReferFriendScreen({ onBack, user }) {
                 </button>
               </div>
 
-              {/* Demo hint */}
+              {/* Hint */}
               <div style={{ fontSize:10, color: colors.textMuted, fontFamily:FONT, marginBottom:8 }}>
-                Example: an employee or friend shared code <strong style={{ color:TEAL, letterSpacing:'0.08em' }}>DEMO50</strong> — enter it to claim your bonus.
+                Got a code from an employee or friend? Enter it above to claim your bonus.
               </div>
             </>
           )}

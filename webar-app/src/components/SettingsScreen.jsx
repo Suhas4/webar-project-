@@ -7,6 +7,7 @@ import { invalidateGuestCache } from './GuestScanScreen.jsx';
 import { invalidateBackgroundPublicCompile } from '../hooks/backgroundCompilePublic.js';
 import { clearCachedPublicMind } from '../hooks/useMindCache.js';
 import { uploadPresigned } from '../hooks/useArStorage.js';
+import { TERMS_SECTIONS } from '../content/termsContent.js';
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const GOLD  = "#C9A84C";
@@ -21,11 +22,14 @@ function readPref(key, def = false) {
 }
 function savePref(key, val) { try { localStorage.setItem(key, String(val)); } catch {} }
 
-export default function SettingsScreen({ onBack, onProfile }) {
+export default function SettingsScreen({ onBack, onProfile, initialSection }) {
   const { colors, theme, setTheme } = useTheme();
   const { lang } = useLanguage();
   const tr = { ...T.en, ...(T[lang] || {}) };
-  const [openSection, setOpenSection] = useState(null); // 'account'|'notifications'|'ar'|'subscription'|'support'|'about'|'theme'
+  const [openSection, setOpenSection] = useState(initialSection || null); // 'account'|'notifications'|'ar'|'subscription'|'support'|'about'|'theme'
+  // Deep-linked from the Home profile menu (e.g. tapping "Account") — show
+  // only that one section instead of the full Settings list.
+  const isFocused = !!initialSection;
   const [openStorage, setOpenStorage] = useState(false);
   const [storage, setStorage]         = useState(null);
   const [storageLoading, setStorageLoading] = useState(false);
@@ -95,30 +99,47 @@ export default function SettingsScreen({ onBack, onProfile }) {
     if (next === 'posters' && !posterHistory) fetchPosterHistory();
   };
 
+  // Deep-linked straight into a section (e.g. from the Home profile menu) —
+  // fetch whatever that section needs, same as if the user had tapped it.
+  useEffect(() => {
+    if (initialSection === 'account' && !storage) fetchStorage();
+    if (initialSection === 'posters' && !posterHistory) fetchPosterHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const storageLimitBytes = storage?.limitBytes || LIMIT;
   const privatePct = storage ? (storage.unlimited ? 0 : Math.min(100, (storage.privateBytes / storageLimitBytes) * 100)) : 0;
   const publicPct  = storage ? (storage.unlimited ? 0 : Math.min(100, (storage.publicBytes  / storageLimitBytes) * 100)) : 0;
 
+  const SECTION_TITLES = {
+    account: tr.accountSection, notifications: tr.notificationsSection, ar: tr.arSettingsSection,
+    posters: tr.myPosters, theme: tr.themeSection, subscription: tr.subscriptionSection,
+    support: tr.supportSection, about: tr.aboutUsSection,
+  };
+
   return (
     <div style={{ ...s.screen, background: colors.bg }}>
       <div style={s.header}>
-        <button onClick={onBack} style={{ ...s.backBtn, color: colors.textMuted }}>← Back</button>
-        <h2 style={{ ...s.title, color: colors.text }}>{tr.settingsTitle || 'Settings'}</h2>
+        <button onClick={onBack} style={{ ...s.backBtn, color: colors.textMuted }}>← {tr.back}</button>
+        <h2 style={{ ...s.title, color: colors.text }}>
+          {isFocused ? SECTION_TITLES[initialSection] || tr.settingsTitle || 'Settings' : (tr.settingsTitle || 'Settings')}
+        </h2>
       </div>
 
       <div style={s.content}>
 
         {/* ── Account ── */}
+        {(!isFocused || initialSection === 'account') && (
         <AccordionCard
           label={tr.accountSection || 'Account'} icon="👤"
           open={openSection === 'account'}
           onToggle={() => toggleSection('account')}
           colors={colors}
         >
-          <RowButton label={tr.profile || 'Profile'} icon="🪪" hint="Edit your name & photo"
+          <RowButton label={tr.profile || 'Profile'} icon="🪪" hint={tr.hintEditProfile}
             onPress={onProfile} colors={colors} />
           <Divider colors={colors} />
-          <RowButton label={tr.storage || 'Storage'} icon="💾" hint="Manage your storage"
+          <RowButton label={tr.storage || 'Storage'} icon="💾" hint={tr.hintManageStorage}
             onPress={() => setOpenStorage(o => !o)} colors={colors}
             right={<span style={{ fontSize: 11, color: colors.textMuted }}>{openStorage ? '▲' : '▼'}</span>}
           />
@@ -144,38 +165,42 @@ export default function SettingsScreen({ onBack, onProfile }) {
             </div>
           )}
           <Divider colors={colors} />
-          <RowButton label={tr.changePassword || 'Change Password'} icon="🔑" hint="Update your account password"
+          <RowButton label={tr.changePassword || 'Change Password'} icon="🔑" hint={tr.hintChangePassword}
             onPress={() => setShowChangePw(true)} colors={colors} />
         </AccordionCard>
+        )}
 
         {/* ── Notifications ── */}
+        {(!isFocused || initialSection === 'notifications') && (
         <AccordionCard
           label={tr.notificationsSection || 'Notifications'} icon="🔔"
           open={openSection === 'notifications'}
           onToggle={() => toggleSection('notifications')}
           colors={colors}
         >
-          <ToggleRow label={tr.smsAlerts || 'SMS Alerts'} hint="Receive important alerts via SMS"
+          <ToggleRow label={tr.smsAlerts || 'SMS Alerts'} hint={tr.hintSmsAlerts}
             value={smsAlerts} onChange={v => toggle('memoera_sms_alerts', v, setSmsAlerts)} colors={colors} />
           <Divider colors={colors} />
-          <ToggleRow label={tr.pushNotifications || 'Push Notifications'} hint="App notifications on your device"
+          <ToggleRow label={tr.pushNotifications || 'Push Notifications'} hint={tr.hintPushNotif}
             value={pushNotif} onChange={v => toggle('memoera_push_notif', v, setPushNotif)} colors={colors} />
         </AccordionCard>
+        )}
 
         {/* ── AR Settings ── */}
+        {(!isFocused || initialSection === 'ar') && (
         <AccordionCard
           label={tr.arSettingsSection || 'AR Settings'} icon="🔭"
           open={openSection === 'ar'}
           onToggle={() => toggleSection('ar')}
           colors={colors}
         >
-          <ToggleRow label={tr.soundOnScan || 'Sound on Scan'} hint="Play sound when a target is detected"
+          <ToggleRow label={tr.soundOnScan || 'Sound on Scan'} hint={tr.hintSoundScan}
             value={soundScan} onChange={v => toggle('memoera_sound_scan', v, setSoundScan)} colors={colors} />
           <Divider colors={colors} />
-          <ToggleRow label={tr.autoFlash || 'Auto Flash'} hint="Automatically enable flash when scanning"
+          <ToggleRow label={tr.autoFlash || 'Auto Flash'} hint={tr.hintAutoFlash}
             value={autoFlash} onChange={v => toggle('memoera_auto_flash', v, setAutoFlash)} colors={colors} />
           <Divider colors={colors} />
-          <ToggleRow label={tr.enableFlashDark || 'Enable Flash in Dark'} hint="Turn on torch in low-light conditions"
+          <ToggleRow label={tr.enableFlashDark || 'Enable Flash in Dark'} hint={tr.hintFlashDark}
             value={darkFlash} onChange={v => toggle('memoera_dark_flash', v, setDarkFlash)} colors={colors} />
           <Divider colors={colors} />
           <div style={{ padding: '10px 0 2px' }}>
@@ -200,8 +225,10 @@ export default function SettingsScreen({ onBack, onProfile }) {
             </div>
           </div>
         </AccordionCard>
+        )}
 
         {/* ── My Posters (history) ── */}
+        {(!isFocused || initialSection === 'posters') && (
         <AccordionCard
           label="My Posters" icon="🖼️"
           open={openSection === 'posters'}
@@ -245,8 +272,10 @@ export default function SettingsScreen({ onBack, onProfile }) {
             )}
           </div>
         </AccordionCard>
+        )}
 
         {/* ── Appearance / Theme ── */}
+        {(!isFocused || initialSection === 'theme') && (
         <AccordionCard
           label={tr.themeSection || 'Appearance'} icon="🎨"
           open={openSection === 'theme'}
@@ -288,42 +317,48 @@ export default function SettingsScreen({ onBack, onProfile }) {
           })}
           <div style={{ height: 6 }} />
         </AccordionCard>
+        )}
 
         {/* ── Subscription ── */}
+        {(!isFocused || initialSection === 'subscription') && (
         <AccordionCard
           label={tr.subscriptionSection || 'Subscription'} icon="💎"
           open={openSection === 'subscription'}
           onToggle={() => toggleSection('subscription')}
           colors={colors}
         >
-          <RowButton label={tr.upgradePremium || 'Upgrade to Premium'} icon="⭐" hint="More storage, no ads, priority processing"
+          <RowButton label={tr.upgradePremium || 'Upgrade to Premium'} icon="⭐" hint={tr.hintUpgradePremium}
             onPress={() => setShowSubscribe(true)} colors={colors} />
           <Divider colors={colors} />
-          <RowButton label="Restore Purchase" icon="🔄" hint="Restore a previous subscription"
+          <RowButton label={tr.restorePurchase} icon="🔄" hint={tr.hintRestorePurchase}
             onPress={() => alert('No active subscription found for this account.')} colors={colors} />
         </AccordionCard>
+        )}
 
         {/* ── Support ── */}
+        {(!isFocused || initialSection === 'support') && (
         <AccordionCard
           label={tr.supportSection || 'Support'} icon="💬"
           open={openSection === 'support'}
           onToggle={() => toggleSection('support')}
           colors={colors}
         >
-          <ToggleRow label={tr.analytics || 'Analytics'} hint="Help improve the app by sharing usage data"
+          <ToggleRow label={tr.analytics || 'Analytics'} hint={tr.hintAnalytics}
             value={analytics} onChange={v => toggle('memoera_analytics', v, setAnalytics)} colors={colors} />
           <Divider colors={colors} />
-          <RowButton label={tr.helpCenter || 'Help Center'} icon="📚" hint="FAQ & Tutorials"
+          <RowButton label={tr.helpCenter || 'Help Center'} icon="📚" hint={tr.hintHelpCenter}
             onPress={() => setShowHelpCenter(true)} colors={colors} />
           <Divider colors={colors} />
           <RowButton label={tr.contactSupport || 'Contact Support'} icon="🛎️" hint="memoerabangalore@gmail.com"
             onPress={() => setShowContactSupport(true)} colors={colors} />
           <Divider colors={colors} />
-          <RowButton label={tr.aboutApp || 'About Memoera'} icon="ℹ️" hint="App info & version"
+          <RowButton label={tr.aboutApp || 'About Memoera'} icon="ℹ️" hint={tr.hintAboutApp}
             onPress={() => setShowAbout(true)} colors={colors} />
         </AccordionCard>
+        )}
 
         {/* ── About Us & Company Details ── */}
+        {(!isFocused || initialSection === 'about') && (
         <AccordionCard
           label={tr.aboutUsSection || 'About Us'} icon="🏢"
           open={openSection === 'about'}
@@ -349,10 +384,10 @@ export default function SettingsScreen({ onBack, onProfile }) {
           <Divider colors={colors} />
           <CompanyRow icon="📧" label="Email" value="memoerabangalore@gmail.com" colors={colors} />
           <Divider colors={colors} />
-          <RowButton label={tr.privacyPolicy || 'Privacy Policy'} icon="🔒" hint="How we handle your data"
+          <RowButton label={tr.privacyPolicy || 'Privacy Policy'} icon="🔒" hint={tr.hintPrivacyPolicy}
             onPress={() => setShowPrivacy(true)} colors={colors} />
           <Divider colors={colors} />
-          <RowButton label={tr.termsOfService || 'Terms & Conditions'} icon="📄" hint="App usage terms"
+          <RowButton label={tr.termsOfService || 'Terms & Conditions'} icon="📄" hint={tr.hintTerms}
             onPress={() => setShowTerms(true)} colors={colors} />
           <Divider colors={colors} />
           <div style={{ padding: '10px 6px 6px', textAlign: 'center' }}>
@@ -362,7 +397,7 @@ export default function SettingsScreen({ onBack, onProfile }) {
             </div>
           </div>
         </AccordionCard>
-
+        )}
 
       </div>
 
@@ -436,7 +471,7 @@ function PosterViewModal({ poster, onClose }) {
 function AccordionCard({ label, icon, open, onToggle, colors, children }) {
   return (
     <div style={{
-      borderRadius: 18, border: `1px solid ${colors.border}`,
+      borderRadius: 18, border: `1.5px dashed ${TEAL}`,
       background: colors.cardBg || colors.surface,
       marginBottom: 12, overflow: 'hidden',
       backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
@@ -447,16 +482,17 @@ function AccordionCard({ label, icon, open, onToggle, colors, children }) {
         cursor: 'pointer', textAlign: 'left',
       }}>
         <span style={{
-          width: 36, height: 36, borderRadius: 10, fontSize: 18,
+          width: 40, height: 40, borderRadius: 12, fontSize: 18,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: `${colors.accent || TEAL}18`,
+          background: `linear-gradient(135deg, ${TEAL}, #00E5CC)`,
+          boxShadow: `0 3px 10px ${TEAL}44`,
           flexShrink: 0,
         }}>{icon}</span>
-        <span style={{ flex: 1, fontSize: 15, fontWeight: 600, color: colors.text, fontFamily: FONT }}>
+        <span style={{ flex: 1, fontSize: 15, fontWeight: 700, color: colors.text, fontFamily: FONT }}>
           {label}
         </span>
         <span style={{
-          fontSize: 10, color: colors.textMuted,
+          fontSize: 10, color: TEAL,
           transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
           transition: 'transform 0.25s',
           display: 'inline-block',
@@ -560,11 +596,28 @@ function ChangePasswordModal({ onClose, colors }) {
   const [loading, setLoading]   = useState(false);
   const [msg, setMsg]           = useState('');
   const [isErr, setIsErr]       = useState(false);
+  const [fieldErrors, setFieldErrors] = useState({});
+
+  const validate = () => {
+    const errors = {};
+    if (!current) errors.current = 'Current password is required.';
+    if (!newPw) {
+      errors.newPw = 'New password is required.';
+    } else if (newPw.length < 6) {
+      errors.newPw = 'New password must be at least 6 characters.';
+    }
+    if (!confirm) {
+      errors.confirm = 'Please confirm your new password.';
+    } else if (newPw && newPw !== confirm) {
+      errors.confirm = 'New passwords do not match.';
+    }
+    return errors;
+  };
 
   const handleSubmit = async () => {
-    if (!current || !newPw || !confirm) { setMsg('All fields are required.'); setIsErr(true); return; }
-    if (newPw.length < 6) { setMsg('New password must be at least 6 characters.'); setIsErr(true); return; }
-    if (newPw !== confirm) { setMsg('New passwords do not match.'); setIsErr(true); return; }
+    const errors = validate();
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
     setLoading(true); setMsg('');
     try {
       const token = localStorage.getItem('memoera_token') || '';
@@ -616,9 +669,9 @@ function ChangePasswordModal({ onClose, colors }) {
 
         {/* Scrollable inputs */}
         <div style={{ overflowY: 'auto', flex: 1, paddingBottom: 8 }}>
-          <PwInput label="Current Password" value={current} onChange={setCurrent} colors={colors} />
-          <PwInput label="New Password"     value={newPw}   onChange={setNewPw}   colors={colors} />
-          <PwInput label="Confirm New"      value={confirm} onChange={setConfirm} colors={colors} />
+          <PwInput label="Current Password" value={current} onChange={(v) => { setCurrent(v); setFieldErrors(fe => ({ ...fe, current: undefined })); }} error={fieldErrors.current} colors={colors} />
+          <PwInput label="New Password"     value={newPw}   onChange={(v) => { setNewPw(v); setFieldErrors(fe => ({ ...fe, newPw: undefined })); }}   error={fieldErrors.newPw} colors={colors} />
+          <PwInput label="Confirm New"      value={confirm} onChange={(v) => { setConfirm(v); setFieldErrors(fe => ({ ...fe, confirm: undefined })); }} error={fieldErrors.confirm} colors={colors} />
           {msg && (
             <p style={{ fontSize: 13, color: isErr ? '#ff6b6b' : TEAL, fontFamily: FONT,
               textAlign: 'center', margin: '4px 0 0', lineHeight: 1.5 }}>
@@ -641,7 +694,7 @@ function ChangePasswordModal({ onClose, colors }) {
   );
 }
 
-function PwInput({ label, value, onChange, colors }) {
+function PwInput({ label, value, onChange, error, colors }) {
   const [show, setShow] = useState(false);
   return (
     <div style={{ marginBottom: 12 }}>
@@ -649,7 +702,7 @@ function PwInput({ label, value, onChange, colors }) {
         {label.toUpperCase()}
       </p>
       <div style={{ display: 'flex', alignItems: 'center', background: colors.surface,
-        border: '1px solid ' + colors.border, borderRadius: 10, overflow: 'hidden' }}>
+        border: '1px solid ' + (error ? '#FF6B6B' : colors.border), borderRadius: 10, overflow: 'hidden' }}>
         <input
           type={show ? 'text' : 'password'} value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -663,6 +716,7 @@ function PwInput({ label, value, onChange, colors }) {
           {show ? '🙈' : '👁️'}
         </button>
       </div>
+      {error && <p style={{ fontSize: 11, fontWeight: 600, color: '#FF6B6B', fontFamily: FONT, margin: '4px 2px 0' }}>⚠ {error}</p>}
     </div>
   );
 }
@@ -995,59 +1049,8 @@ function PrivacyPolicyModal({ onClose, colors }) {
 // ── Terms & Conditions Modal ──────────────────────────────────────────────────
 
 function TermsModal({ onClose, colors }) {
-  const sections = [
-    {
-      title: "1. Acceptance of Terms",
-      body: `These Terms and Conditions ("Terms") constitute a legally binding agreement between you ("User") and Memoera (OPC) Private Limited ("Memoera", "we", "us"), a company registered in Bengaluru, Karnataka, India. By downloading, installing, or using the Memoera application, you agree to be bound by these Terms. If you do not agree, you must not use the Service. These Terms are governed by the laws of India, and the courts of Bengaluru shall have exclusive jurisdiction over any disputes.`,
-    },
-    {
-      title: "2. Description of Service",
-      body: `Memoera provides an Augmented Reality (AR) platform that allows users to upload target images and link them to media content (videos, images, or URLs). When a registered target is scanned using the Memoera camera, the linked content is displayed as an AR overlay. The Service is provided "as is" and may be modified, updated, or discontinued at our discretion with reasonable notice.`,
-    },
-    {
-      title: "3. Account Registration",
-      body: `You must register an account to access core features. You agree to: (a) provide accurate, current, and complete registration information; (b) maintain the security of your password and accept responsibility for all activity under your account; (c) notify us immediately of any unauthorised use of your account at memoerabangalore@gmail.com; (d) be at least 13 years of age to use the Service. We reserve the right to suspend or terminate accounts that violate these Terms.`,
-    },
-    {
-      title: "4. User Content & Acceptable Use",
-      body: `You retain ownership of all content you upload ("User Content"). By uploading, you grant Memoera a non-exclusive, worldwide, royalty-free licence to host, store, transmit, and display your content solely to provide the Service.\n\nYou must NOT upload content that: is illegal under Indian law or international law; infringes third-party intellectual property rights (copyright, trademark, patent); contains malware, viruses, or harmful code; constitutes harassment, hate speech, or discrimination; depicts or promotes violence, self-harm, or child exploitation; violates the privacy of any individual.\n\nWe reserve the right to remove content that violates these restrictions without prior notice and to report illegal content to appropriate authorities.`,
-    },
-    {
-      title: "5. Storage & Subscription",
-      body: `Free accounts receive 250 MB for private targets and 250 MB for public targets. Additional storage may be earned through the referral programme (subject to limits) or by upgrading to a Premium subscription.\n\nPremium Plans: Monthly (₹99/month) and Yearly (₹799/year) plans are available. Plans auto-renew unless cancelled before the renewal date. All payments are processed by Razorpay. Memoera does not store payment card details.\n\nRefunds: Subscription fees are non-refundable except where required by applicable consumer protection law. Refund requests must be submitted within 7 days of purchase to memoerabangalore@gmail.com with proof of transaction.`,
-    },
-    {
-      title: "6. Intellectual Property",
-      body: `The Memoera application, including its name, logo, design, code, AR tracking engine, and all associated content created by Memoera, is the exclusive intellectual property of Memoera (OPC) Private Limited, protected under Indian copyright and trademark law and applicable international treaties. You may not copy, reverse-engineer, decompile, disassemble, or create derivative works from the Memoera application or its components without express written permission.`,
-    },
-    {
-      title: "7. Data Infrastructure & Security",
-      body: `Memoera uses Amazon Web Services (AWS) to store and process data. AWS provides enterprise-grade security including physical security of data centres, AES-256 encryption at rest, TLS encryption in transit, and ISO 27001 certification. While we implement robust security measures, no system is completely immune to breaches. In the event of a data breach affecting your personal information, we will notify affected users in accordance with applicable Indian data protection law within 72 hours of becoming aware of the breach.`,
-    },
-    {
-      title: "8. Limitation of Liability",
-      body: `To the maximum extent permitted by applicable law, Memoera shall not be liable for: (a) any indirect, incidental, special, consequential, or punitive damages; (b) loss of data, profits, goodwill, or other intangible losses; (c) damages arising from your use or inability to use the Service; (d) unauthorised access to or alteration of your transmissions or data, provided we have taken reasonable security precautions.\n\nOur total aggregate liability to you for any claim shall not exceed the amount you paid to Memoera in the 12 months preceding the claim, or ₹500, whichever is greater.`,
-    },
-    {
-      title: "9. Disclaimer of Warranties",
-      body: `The Service is provided "AS IS" and "AS AVAILABLE" without warranties of any kind, either express or implied, including but not limited to implied warranties of merchantability, fitness for a particular purpose, accuracy, or non-infringement. Memoera does not warrant that: (a) the Service will be uninterrupted or error-free; (b) AR recognition will work on all target images or devices; (c) results from using the Service will meet your expectations. You use the Service at your sole risk.`,
-    },
-    {
-      title: "10. Termination",
-      body: `You may delete your account at any time through the app. Upon termination, your licence to use the Service ends immediately. We may terminate or suspend your account immediately, without prior notice, if you breach these Terms, engage in illegal activity, or if required by law. Upon termination, we will delete your data in accordance with our Privacy Policy retention schedule. Provisions that by their nature should survive termination (intellectual property, limitation of liability, governing law) will remain in effect.`,
-    },
-    {
-      title: "11. Governing Law & Dispute Resolution",
-      body: `These Terms are governed by the laws of India, without regard to conflict-of-law principles. Any dispute arising out of or in connection with these Terms shall first be attempted to be resolved through good-faith negotiation. If unresolved within 30 days, disputes shall be referred to binding arbitration under the Arbitration and Conciliation Act, 1996, with proceedings in Bengaluru, Karnataka, in English. Nothing in this clause prevents either party from seeking interim injunctive relief from a competent court.`,
-    },
-    {
-      title: "12. Changes to Terms",
-      body: `We reserve the right to modify these Terms at any time. Material changes will be communicated via in-app notification at least 7 days before they take effect. Continued use of the Service after changes take effect constitutes your acceptance. If you do not agree to the revised Terms, you must stop using the Service and delete your account.\n\nLast Updated: January 2025\n\nFor questions about these Terms, contact: memoerabangalore@gmail.com`,
-    },
-  ];
-
   return (
-    <PolicyModal title="Terms & Conditions" icon="📄" onClose={onClose} colors={colors} sections={sections} />
+    <PolicyModal title="Terms & Conditions" icon="📄" onClose={onClose} colors={colors} sections={TERMS_SECTIONS} />
   );
 }
 

@@ -9,7 +9,16 @@ webar-app/deploy.zip
 # Go / Backend
 backend/webar-backend
 backend/*.exe
+backend/*.exe~
 backend/.env
+backend/backend_log.txt
+
+# Logs
+*.log
+vite_log.txt
+
+# Auto-provisioned local Postgres (used when DATABASE_URL isn't set)
+memoera-embedded-postgres/
 
 # OS files
 .DS_Store

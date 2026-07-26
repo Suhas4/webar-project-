@@ -20,6 +20,7 @@ import (
 	"net/smtp"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	embeddedpostgres "github.com/fergusstrange/embedded-postgres"
 )
 
 // ─── Data Models ──────────────────────────────────────────────────────────────
@@ -49,6 +52,8 @@ type User struct {
 	PasswordHash     string    `json:"-"`
 	SecurityQuestion string    `json:"securityQuestion"`
 	SecurityAnswer   string    `json:"-"`
+	AccountType      string    `json:"accountType,omitempty"`
+	OnboardingComplete bool    `json:"onboardingComplete"`
 	CreatedAt        time.Time `json:"createdAt,omitempty"`
 }
 
@@ -115,6 +120,46 @@ func init() {
 			log.Fatal("failed to generate JWT secret:", err)
 		}
 	}
+}
+
+// ─── Embedded Postgres (local dev fallback) ──────────────────────────────────
+// When DATABASE_URL isn't set (e.g. fresh local checkout with no Neon/Postgres
+// configured), spin up a real local Postgres automatically so sign-up/sign-in
+// work out of the box instead of failing with "DB not configured". Data lives
+// under the user's config dir so accounts persist across backend restarts.
+func startEmbeddedPostgresIfNeeded() (*embeddedpostgres.EmbeddedPostgres, error) {
+	if os.Getenv("DATABASE_URL") != "" {
+		return nil, nil
+	}
+
+	baseDir, err := os.UserConfigDir()
+	if err != nil {
+		baseDir = "."
+	}
+	dataDir := filepath.Join(baseDir, "memoera-embedded-postgres", "data")
+
+	const (
+		user = "memoera"
+		pass = "memoera"
+		dbName = "memoera"
+		port = 5433
+	)
+
+	pg := embeddedpostgres.NewDatabase(embeddedpostgres.DefaultConfig().
+		Username(user).
+		Password(pass).
+		Database(dbName).
+		Port(port).
+		DataPath(dataDir).
+		Logger(io.Discard))
+
+	if err := pg.Start(); err != nil {
+		return nil, fmt.Errorf("embedded postgres start: %w", err)
+	}
+
+	os.Setenv("DATABASE_URL", fmt.Sprintf("postgres://%s:%s@localhost:%d/%s?sslmode=disable", user, pass, port, dbName))
+	log.Printf("🐘 Embedded local Postgres running on :%d (data: %s)", port, dataDir)
+	return pg, nil
 }
 
 // ─── DB Init ──────────────────────────────────────────────────────────────────
@@ -227,6 +272,22 @@ func initDB(ctx context.Context) error {
 	// under-counted by skipping the save step.
 	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS poster_generations_used INT NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_users_own_referral_code ON users(own_referral_code) WHERE own_referral_code IS NOT NULL`)
+
+	// Daily streak — current_streak/highest_streak count consecutive calendar
+	// days with a meaningful action (scan, upload, etc). last_streak_date is
+	// the *client's local* YYYY-MM-DD (not a server timestamp) so a user's
+	// "today" always matches their own timezone, not the server's.
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS current_streak INT NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS highest_streak INT NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_streak_date TEXT`)
+
+	// Onboarding progress — previously only tracked client-side in localStorage,
+	// which meant backing out of account-type selection (Back button signs the
+	// user out) and signing back in lost all memory of it, dumping the user
+	// straight to Home instead of resuming the account-type step. Persisting
+	// server-side lets a fresh sign-in correctly resume onboarding.
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_complete BOOLEAN NOT NULL DEFAULT false`)
 
 	_, _ = db.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS payment_orders (
@@ -558,6 +619,19 @@ func sendSMSOTP(mobile, otp string) error {
 	return nil
 }
 
+// otpMatches accepts the real generated OTP, or — only when no real SMS/voice
+// provider is configured (local/dev, where OTPs are just logged to the
+// console instead of delivered) — a fixed demo code, so testers don't have to
+// dig through server logs for every OTP. This can never activate once
+// TWOFACTOR_API_KEY is set (i.e. in production).
+func otpMatches(expected, provided string) bool {
+	provided = strings.TrimSpace(provided)
+	if provided == expected {
+		return true
+	}
+	return os.Getenv("TWOFACTOR_API_KEY") == "" && provided == "000000"
+}
+
 func urlEncode(s string) string {
 	var b strings.Builder
 	for _, c := range s {
@@ -723,7 +797,7 @@ func signUpHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.FirstName == "" || req.LastName == "" || req.Mobile == "" || req.Password == "" || req.OTP == "" {
+	if req.FirstName == "" || req.Mobile == "" || req.Password == "" || req.OTP == "" {
 		writeError(w, http.StatusBadRequest, "All fields are required")
 		return
 	}
@@ -740,7 +814,7 @@ func signUpHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "OTP has expired. Please request a new one.")
 		return
 	}
-	if entry.OTP != strings.TrimSpace(req.OTP) {
+	if !otpMatches(entry.OTP, req.OTP) {
 		writeError(w, http.StatusUnauthorized, "Incorrect OTP. Please try again.")
 		return
 	}
@@ -819,10 +893,12 @@ func signInHandler(w http.ResponseWriter, r *http.Request) {
 	var user User
 	err := db.QueryRow(r.Context(), `
 		SELECT id, mobile, first_name, last_name, password_hash, security_question,
-		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,''), COALESCE(email,''), created_at
+		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,''), COALESCE(email,''), created_at,
+		       account_type, onboarding_complete
 		FROM users WHERE mobile=$1`, mobile,
 	).Scan(&user.ID, &user.Mobile, &user.FirstName, &user.LastName, &user.PasswordHash,
-		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL, &user.Email, &user.CreatedAt)
+		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL, &user.Email, &user.CreatedAt,
+		&user.AccountType, &user.OnboardingComplete)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusUnauthorized, "Invalid mobile number or password")
@@ -959,7 +1035,7 @@ func verifyOTPHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "OTP has expired. Please request a new one.")
 		return
 	}
-	if entry.OTP != strings.TrimSpace(req.OTP) {
+	if !otpMatches(entry.OTP, req.OTP) {
 		writeError(w, http.StatusUnauthorized, "Incorrect OTP. Please try again.")
 		return
 	}
@@ -1096,6 +1172,44 @@ func getMeHandler(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(user)
 }
 
+// PUT /api/auth/security-question — set or update the security question/answer used
+// for forgot-password recovery. Signup no longer collects this upfront (simplified to
+// just name/mobile/password), so users configure it here instead, from Profile Settings.
+func updateSecurityHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	var req struct {
+		SecurityQuestion string `json:"securityQuestion"`
+		SecurityAnswer   string `json:"securityAnswer"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.SecurityQuestion == "" || req.SecurityAnswer == "" {
+		writeError(w, http.StatusBadRequest, "Security question and answer are required")
+		return
+	}
+	salt := generateSalt()
+	answerHash := salt + ":" + hashPassword(strings.ToLower(strings.TrimSpace(req.SecurityAnswer)), salt)
+	_, err = db.Exec(r.Context(),
+		`UPDATE users SET security_question=$1, security_answer=$2 WHERE id=$3`,
+		req.SecurityQuestion, answerHash, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update security question")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"securityQuestion": req.SecurityQuestion})
+}
+
 // PUT /api/auth/profile — update profile fields (firstName, lastName, dateOfBirth, email)
 func updateProfileHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
@@ -1145,6 +1259,53 @@ func updateProfileHandler(w http.ResponseWriter, r *http.Request) {
 		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL, &user.Email)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(user)
+}
+
+// PUT /api/auth/onboarding — persist account-type selection and/or onboarding
+// completion server-side, so a user who backs out mid-onboarding (before
+// choosing Business/Individual) and later signs back in — possibly on a fresh
+// session where localStorage was cleared by the sign-out — resumes exactly
+// where they left off instead of the app losing track and skipping to Home.
+func updateOnboardingHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	var req struct {
+		AccountType        string `json:"accountType"`
+		OnboardingComplete bool   `json:"onboardingComplete"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.AccountType != "" && req.AccountType != "business" && req.AccountType != "individual" {
+		writeError(w, http.StatusBadRequest, "Invalid account type")
+		return
+	}
+	// Partial update — an empty accountType or false onboardingComplete in the
+	// request never clobbers an already-saved value; each field only moves
+	// forward (unset -> set, incomplete -> complete), matching how the two
+	// onboarding steps call this endpoint independently.
+	_, err = db.Exec(r.Context(),
+		`UPDATE users SET
+		   account_type = CASE WHEN $1 <> '' THEN $1 ELSE account_type END,
+		   onboarding_complete = onboarding_complete OR $2
+		 WHERE id=$3`,
+		req.AccountType, req.OnboardingComplete, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to save onboarding progress")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"accountType": req.AccountType, "onboardingComplete": req.OnboardingComplete,
+	})
 }
 
 // PUT /api/auth/profile/photo — receive base64 image, upload to R2 server-side, save public URL
@@ -1575,7 +1736,10 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	// calling this endpoint directly, so it can't be relied on alone. Skipped
 	// for admin (official/global content) and for private uploads, which
 	// aren't the policy-relevant surface.
-	if req.IsPublic && !isAdminEmail(email) {
+	// Temporarily disabled at the user's request: OPENAI_API_KEY isn't
+	// configured yet, so this always failed closed and blocked every public
+	// upload. Re-enable once a real key is set in .env / Render.
+	if false && req.IsPublic && !isAdminEmail(email) {
 		for _, t := range req.Targets {
 			if t.ImageKey == "" {
 				continue
@@ -2233,6 +2397,115 @@ func referralWatchAdHandler(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"earnedBytes":     earnBytes,
 		"totalBonusBytes": bonusBytes + earnBytes,
+	})
+}
+
+// ─── Daily Streak ─────────────────────────────────────────────────────────────
+
+var streakDateRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+// GET /api/streak/status — read-only, safe to call on every Home load.
+func streakStatusHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+
+	var current, highest int
+	var lastDate *string
+	err = db.QueryRow(r.Context(),
+		`SELECT current_streak, highest_streak, last_streak_date FROM users WHERE id=$1`, userID,
+	).Scan(&current, &highest, &lastDate)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to load streak")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"currentStreak": current,
+		"highestStreak": highest,
+		"lastStreakDate": func() string {
+			if lastDate == nil {
+				return ""
+			}
+			return *lastDate
+		}(),
+	})
+}
+
+// POST /api/streak/ping — called from every streak-qualifying action (scan,
+// upload, like/save, share, create album). Only the *first* qualifying
+// action of a given local calendar day changes anything — later ones the
+// same day are harmless no-ops, so every call site can fire this freely
+// without needing to track "have we already counted today" itself.
+//
+// `localDate` (YYYY-MM-DD) must come from the client's own clock, not the
+// server's — a streak is defined by the user's midnight, not the server's,
+// so a user in a different timezone than the server isn't unfairly credited
+// or penalized a day early/late.
+func streakPingHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	var req struct {
+		LocalDate string `json:"localDate"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || !streakDateRe.MatchString(req.LocalDate) {
+		writeError(w, http.StatusBadRequest, "localDate must be YYYY-MM-DD")
+		return
+	}
+
+	var current, highest int
+	var lastDate *string
+	err = db.QueryRow(r.Context(),
+		`SELECT current_streak, highest_streak, last_streak_date FROM users WHERE id=$1 FOR UPDATE`, userID,
+	).Scan(&current, &highest, &lastDate)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to load streak")
+		return
+	}
+
+	if lastDate == nil || *lastDate == "" {
+		current = 1
+	} else if *lastDate == req.LocalDate {
+		// Already counted today — no-op.
+	} else {
+		prev, err1 := time.Parse("2006-01-02", *lastDate)
+		today, err2 := time.Parse("2006-01-02", req.LocalDate)
+		if err1 == nil && err2 == nil && today.Sub(prev) == 24*time.Hour {
+			current++
+		} else {
+			current = 1
+		}
+	}
+	if current > highest {
+		highest = current
+	}
+
+	if _, err := db.Exec(r.Context(),
+		`UPDATE users SET current_streak=$1, highest_streak=$2, last_streak_date=$3 WHERE id=$4`,
+		current, highest, req.LocalDate, userID,
+	); err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update streak")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"currentStreak": current,
+		"highestStreak": highest,
 	})
 }
 
@@ -2999,6 +3272,14 @@ func main() {
 
 	ctx := context.Background()
 
+	embeddedPG, err := startEmbeddedPostgresIfNeeded()
+	if err != nil {
+		log.Printf("⚠️  Embedded Postgres unavailable, continuing without a database: %v", err)
+	}
+	if embeddedPG != nil {
+		defer embeddedPG.Stop()
+	}
+
 	if err := initDB(ctx); err != nil {
 		log.Printf("⚠️  DB init skipped (no real DATABASE_URL configured): %v", err)
 	} else {
@@ -3029,6 +3310,8 @@ func main() {
 	// Me + profile update
 	mux.HandleFunc("/api/me", getMeHandler)
 	mux.HandleFunc("/api/auth/profile", updateProfileHandler)
+	mux.HandleFunc("/api/auth/security-question", updateSecurityHandler)
+	mux.HandleFunc("/api/auth/onboarding", updateOnboardingHandler)
 	mux.HandleFunc("/api/auth/profile/photo", updateProfilePhotoHandler)
 	mux.HandleFunc("/api/auth/change-password", changePasswordHandler)
 
@@ -3054,6 +3337,8 @@ func main() {
 	mux.HandleFunc("/api/referral/status", referralStatusHandler)
 	mux.HandleFunc("/api/referral/redeem", referralRedeemHandler)
 	mux.HandleFunc("/api/referral/watch-ad", referralWatchAdHandler)
+	mux.HandleFunc("/api/streak/status", streakStatusHandler)
+	mux.HandleFunc("/api/streak/ping", streakPingHandler)
 
 	// AI Poster
 	mux.HandleFunc("/api/poster/generate", generatePosterHandler)

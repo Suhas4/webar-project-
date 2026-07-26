@@ -2,10 +2,28 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import CameraCapture from './CameraCapture.jsx';
 import VideoEditorScreen from './VideoEditorScreen.jsx';
+import UploadDropZone from './UploadDropZone.jsx';
 
 const hiddenInput = {
   position: 'absolute', width: 0, height: 0, opacity: 0, pointerEvents: 'none',
 };
+
+function RecordVideoIcon() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={TEAL} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2.5" y="6" width="13" height="12" rx="2.5" />
+      <path d="M15.5 10.5 21 7.5v9l-5.5-3z" />
+    </svg>
+  );
+}
+
+function FilesIcon() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={TEAL} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+    </svg>
+  );
+}
 
 // VideoPickerSheet — file picker for video overlay only
 function VideoPickerSheet({ onFile, onClose }) {
@@ -24,13 +42,13 @@ function VideoPickerSheet({ onFile, onClose }) {
         <label style={sheet.optionBtn}>
           <input type="file" accept="video/mp4,video/webm,video/*"
             capture="environment" style={hiddenInput} onChange={handleChange} onClick={(e) => { e.target.value = ''; }} />
-          <span style={sheet.optionIcon}>📷</span>
+          <span style={sheet.optionIcon}><RecordVideoIcon /></span>
           <div><p style={sheet.optionLabel}>Record Video</p><p style={sheet.optionHint}>Record with camera</p></div>
         </label>
         <label style={sheet.optionBtn}>
           <input type="file" accept="video/mp4,video/webm,video/*"
             style={hiddenInput} onChange={handleChange} onClick={(e) => { e.target.value = ''; }} />
-          <span style={sheet.optionIcon}>📁</span>
+          <span style={sheet.optionIcon}><FilesIcon /></span>
           <div><p style={sheet.optionLabel}>Files</p><p style={sheet.optionHint}>Choose from device</p></div>
         </label>
         <button style={sheet.cancelBtn} onClick={onClose}>Cancel</button>
@@ -250,64 +268,34 @@ export default function TargetCard({ index, data, onChange, onRemove, showValida
 
       {/* Marker Image */}
       <p style={styles.fieldLabel}>Marker Image<span style={styles.fieldHint}> — the image your camera will detect</span></p>
-      <div style={{
-          ...styles.dropZone,
-          ...(imageDragOver ? styles.dropZoneActive : {}),
-          ...(imageMissing ? styles.dropZoneError : {}),
-          height: data.imagePreviewUrl ? 'auto' : 80,
-          padding: data.imagePreviewUrl ? 8 : '0 16px',
-        }}
+      <UploadDropZone
+        title="Tap to upload"
+        hint="JPG, PNG (Max 50MB)"
+        error={imageMissing ? 'Image required' : ''}
+        dragOver={imageDragOver}
+        preview={data.imagePreviewUrl}
+        fileName={data.imageFile?.name}
         onClick={() => setShowImagePicker(true)}
         onDragOver={(e) => { e.preventDefault(); setImageDragOver(true); }}
         onDragLeave={() => setImageDragOver(false)}
         onDrop={handleImageDrop}
-        role="button" tabIndex={0}
-        onKeyDown={(e) => e.key === 'Enter' && setShowImagePicker(true)}>
-        {data.imagePreviewUrl ? (
-          <div style={styles.imagePreviewRow}>
-            <img src={data.imagePreviewUrl} alt="Marker preview" style={styles.imagePreview} />
-            <div style={styles.imagePreviewInfo}>
-              <span style={styles.fileName}>{data.imageFile?.name}</span>
-              <span style={styles.changeLink}>Tap to change</span>
-            </div>
-          </div>
-        ) : (
-          <div style={styles.dropZoneContent}>
-            <span style={styles.dropZoneIcon}>🖼️</span>
-            <span style={styles.dropZoneText}>{imageMissing ? 'Image required' : 'Tap to select image'}</span>
-          </div>
-        )}
-      </div>
+      />
 
       {/* Video Overlay */}
       <p style={{ ...styles.fieldLabel, marginTop: 16 }}>Video Overlay<span style={styles.fieldHint}> — plays when marker is detected</span></p>
-      <div style={{
-          ...styles.dropZone,
-          ...(videoDragOver ? styles.dropZoneActive : {}),
-          ...(videoMissing ? styles.dropZoneError : {}),
-          height: 80,
-        }}
+      <UploadDropZone
+        title="Tap to upload"
+        hint="MP4, WebM (Max 100MB)"
+        error={videoMissing ? 'Video required' : ''}
+        dragOver={videoDragOver}
+        preview={data.videoFile ? <span style={{ fontSize: 40 }}>🎬</span> : null}
+        fileName={data.videoName}
+        fileMeta={data.videoSize}
         onClick={() => setShowVideoPicker(true)}
         onDragOver={(e) => { e.preventDefault(); setVideoDragOver(true); }}
         onDragLeave={() => setVideoDragOver(false)}
         onDrop={handleVideoDrop}
-        role="button" tabIndex={0}
-        onKeyDown={(e) => e.key === 'Enter' && setShowVideoPicker(true)}>
-        {data.videoFile ? (
-          <div style={styles.dropZoneContent}>
-            <span style={styles.dropZoneIcon}>🎬</span>
-            <div>
-              <p style={{ ...styles.fileName, margin: 0 }}>{data.videoName}</p>
-              <p style={{ ...styles.fieldHint, margin: 0 }}>{data.videoSize} · Tap to change</p>
-            </div>
-          </div>
-        ) : (
-          <div style={styles.dropZoneContent}>
-            <span style={styles.dropZoneIcon}>🎬</span>
-            <span style={styles.dropZoneText}>{videoMissing ? 'Video required' : 'Tap to select video'}</span>
-          </div>
-        )}
-      </div>
+      />
     </div>
   );
 }

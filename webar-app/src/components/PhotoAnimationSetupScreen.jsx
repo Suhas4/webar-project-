@@ -5,6 +5,7 @@ import { saveTargets } from '../hooks/useArStorage.js';
 import { rebuildPublicMindInBackground } from '../utils/rebuildPublicMind.js';
 import { assessMarkerQuality } from '../utils/assessMarkerQuality.js';
 import UploadProgressOverlay from './UploadProgressOverlay.jsx';
+import UploadDropZone from './UploadDropZone.jsx';
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const TEAL = "#00C9A7";
@@ -319,12 +320,12 @@ function SheetRow({ icon, label, sub, onClick, accent }) {
 }
 
 // ── Main screen ──────────────────────────────────────────────────────────────
-export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = false }) {
-  const [markerFile,    setMarkerFile]    = useState(null);
-  const [markerPreview, setMarkerPreview] = useState(null);
+export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = false, sharedImageFile, sharedImagePreviewUrl, sharedLabel }) {
+  const [markerFile,    setMarkerFile]    = useState(sharedImageFile || null);
+  const [markerPreview, setMarkerPreview] = useState(sharedImagePreviewUrl || null);
   const [frameFiles,    setFrameFiles]    = useState([]);
   const [framePreviews, setFramePreviews] = useState([]);
-  const [animName,      setAnimName]      = useState('My AR Animation');
+  const [animName,      setAnimName]      = useState(sharedLabel || 'My AR Animation');
   const [state,         setState]         = useState('idle');
   const [progress,      setProgress]      = useState(0);
   const [error,         setError]         = useState('');
@@ -559,23 +560,12 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
           <div style={{ fontSize:11, color:'rgba(255,255,255,0.4)', fontFamily:FONT, marginBottom:10 }}>
             This is the photo people scan with the camera to trigger the animation
           </div>
-          <div onClick={() => setMarkerSheet(true)}
-            style={{ borderRadius:16, border:`2px dashed ${markerPreview ? TEAL+'66' : 'rgba(255,255,255,0.18)'}`,
-              background: markerPreview ? 'rgba(0,201,167,0.05)' : 'rgba(255,255,255,0.03)',
-              overflow:'hidden', cursor:'pointer', minHeight:120,
-              display:'flex', alignItems:'center', justifyContent:'center' }}>
-            {markerPreview ? (
-              <img src={markerPreview} alt="Marker"
-                style={{ width:'100%', maxHeight:180, objectFit:'contain', display:'block', padding:8 }} />
-            ) : (
-              <div style={{ textAlign:'center', padding:24 }}>
-                <div style={{ fontSize:28, marginBottom:8 }}>🎯</div>
-                <div style={{ fontSize:12, color:TEAL, fontWeight:700, fontFamily:FONT }}>
-                  Tap to pick marker photo
-                </div>
-              </div>
-            )}
-          </div>
+          <UploadDropZone
+            title="Tap to upload"
+            hint="JPG, PNG (Max 50MB)"
+            preview={markerPreview}
+            onClick={() => setMarkerSheet(true)}
+          />
           {markerPreview && (
             <button onClick={() => setMarkerSheet(true)}
               style={{ marginTop:8, background:'transparent', border:'none',
@@ -593,11 +583,11 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
             Pick photos, a video, or a Memoera sample — they play as a slideshow when scanned
           </div>
           <div onClick={() => setFrameSheet(true)}
-            style={{ borderRadius:16, border:`2px dashed ${frameFiles.length ? GOLD+'66' : 'rgba(255,255,255,0.18)'}`,
-              background: frameFiles.length ? 'rgba(201,168,76,0.05)' : 'rgba(255,255,255,0.03)',
-              cursor:'pointer', minHeight:100,
+            style={{ borderRadius:20, border:`2px dashed ${GOLD}`,
+              background: frameFiles.length ? 'rgba(201,168,76,0.08)' : '#0E3833',
+              cursor:'pointer', minHeight:frameFiles.length ? 100 : 160,
               display:'flex', alignItems:'center', justifyContent:'center',
-              flexWrap:'wrap', gap:8, padding: frameFiles.length ? 10 : 0 }}>
+              flexWrap:'wrap', gap:8, padding: frameFiles.length ? 10 : '32px 20px' }}>
             {frameFiles.length ? (
               <>
                 {framePreviews.map((src, i) => (
@@ -613,11 +603,10 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
                 )}
               </>
             ) : (
-              <div style={{ textAlign:'center', padding:24 }}>
-                <div style={{ fontSize:28, marginBottom:8 }}>🎞️</div>
-                <div style={{ fontSize:12, color:GOLD, fontWeight:700, fontFamily:FONT }}>
-                  Tap to pick frames
-                </div>
+              <div style={{ textAlign:'center', display:'flex', flexDirection:'column', alignItems:'center', gap:10 }}>
+                <span style={{ fontSize:56 }}>🎞️</span>
+                <span style={{ fontSize:19, fontWeight:700, color:'#ffffff', fontFamily:FONT }}>Tap to upload</span>
+                <span style={{ fontSize:13, fontWeight:600, color:'rgba(255,255,255,0.65)', fontFamily:FONT }}>Photos, video, or a sample</span>
               </div>
             )}
           </div>

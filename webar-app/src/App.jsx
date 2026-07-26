@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, Suspense, lazy } from 'react';
 import { COMPILER_URL } from './hooks/loadMindARCompiler.js';
+import { API_BASE } from './config/api.js';
 
 // Maps each view to the view that "Back" should navigate to
 const BACK_MAP = {
@@ -13,13 +14,29 @@ const BACK_MAP = {
   'collection':  'gallery',
   'premium':     'home',
   'refer':       'home',
-  'goal-select': 'home',
-  'upload-type': 'goal-select',
-  'setup':       'upload-type',
-  'url-setup':   'upload-type',
-  'model-setup': 'upload-type',
-  'anim-setup':  'upload-type',
+  'streak':      'home',
+  'image-upload': 'home',
+  'setup':       'image-upload',
+  'url-setup':   'image-upload',
+  'model-setup': 'image-upload',
+  'anim-setup':  'image-upload',
+  'doc-setup':   'image-upload',
   'admin':       'home',
+  // Onboarding (account type → category → details → complete) now has an
+  // on-screen Back button on every step, mirroring these same targets — kept
+  // in sync so the hardware back button / edge-swipe gesture behaves the
+  // same way instead of falling through to the isAuthenticated-fallback of
+  // 'home' (the bug that used to bounce users out of setup entirely).
+  // account-type is the exception: its on-screen Back intentionally signs the
+  // user out (there's nowhere earlier to return to), which is too destructive
+  // to risk on an accidental gesture/hardware-back press, so that one is a
+  // self-mapping no-op instead.
+  'account-type':        'account-type',
+  'account-confirm':     'account-type',
+  'business-category':   'account-confirm',
+  'business-details':    'business-category',
+  'business-complete':   'business-details',
+  'individual-complete': 'account-confirm',
 };
 
 // Critical-path screens — needed for the very first paint, kept in the main bundle
@@ -29,6 +46,7 @@ import VideoOverlay      from './components/VideoOverlay.jsx';
 import GuestScanScreen, { invalidateGuestCache } from './components/GuestScanScreen.jsx';
 import PublicArView       from './components/PublicArView.jsx';
 import CameraPermissionPrimer from './components/CameraPermissionPrimer.jsx';
+import TermsGateModal from './components/TermsGateModal.jsx';
 
 // Everything below is only needed after navigation — lazy-load so the
 // initial bundle (and time-to-interactive) stays small.
@@ -46,15 +64,23 @@ const HelloScreen              = lazy(() => import('./components/HelloScreen.jsx
 const ProfileScreen            = lazy(() => import('./components/ProfileScreen.jsx'));
 const GalleryScreen            = lazy(() => import('./components/GalleryScreen.jsx'));
 const SettingsScreen           = lazy(() => import('./components/SettingsScreen.jsx'));
+const AccountTypeScreen        = lazy(() => import('./components/AccountTypeScreen.jsx'));
+const AccountConfirmScreen     = lazy(() => import('./components/AccountConfirmScreen.jsx'));
+const BusinessCategoryScreen   = lazy(() => import('./components/BusinessCategoryScreen.jsx'));
+const BusinessDetailsScreen    = lazy(() => import('./components/BusinessDetailsScreen.jsx'));
+const BusinessDeniedScreen     = lazy(() => import('./components/BusinessDeniedScreen.jsx'));
+const SetupCompleteScreen      = lazy(() => import('./components/SetupCompleteScreen.jsx'));
+const ImageUploadScreen        = lazy(() => import('./components/ImageUploadScreen.jsx'));
 const GoalSelectScreen         = lazy(() => import('./components/GoalSelectScreen.jsx'));
-const UploadTypeScreen         = lazy(() => import('./components/UploadTypeScreen.jsx'));
 const UrlSetupScreen           = lazy(() => import('./components/UrlSetupScreen.jsx'));
 const PremiumScreen            = lazy(() => import('./components/PremiumScreen.jsx'));
 const ReferFriendScreen        = lazy(() => import('./components/ReferFriendScreen.jsx'));
+const StreakScreen             = lazy(() => import('./components/StreakScreen.jsx'));
 const ChatBotWidget            = lazy(() => import('./components/ChatBotWidget.jsx'));
 const AdminScreen              = lazy(() => import('./components/AdminScreen.jsx'));
 
 import { loadTargets, loadPublicTargets } from './hooks/useArStorage.js';
+import { pingStreak } from './utils/streak.js';
 import { initAdMob } from './services/AdMobService.js';
 import { startCameraWarm, stopWarmStream } from './hooks/cameraWarmup.js';
 import { startBackgroundPublicCompile } from './hooks/backgroundCompilePublic.js';
@@ -79,6 +105,10 @@ export default function App() {
   const [scanHint,      setScanHint]      = useState(false);
   const [pendingAR,     setPendingAR]     = useState(null);
   const [guestScanError, setGuestScanError] = useState('');
+  // Session-only Terms & Conditions demo gate — 'scan' before the camera
+  // opens, 'signup' right after account creation. No persistence by design.
+  const [pendingTermsGate, setPendingTermsGate] = useState(null);
+  const termsAgreedRef           = useRef(false);
   const pendingARRef             = useRef(null);
   const activeBlobUrlsRef        = useRef([]);
   // Tracks which screen a scan was launched from ('home' or 'hello') so the
@@ -91,6 +121,14 @@ export default function App() {
   useEffect(() => { appViewRef.current = appView; }, [appView]);
   const [videoOverlay,       setVideoOverlay]       = useState(null);
   const [selectedVisibility, setSelectedVisibility] = useState('private');
+  const [forcedContentType, setForcedContentType] = useState(null);
+  const [sharedImageFile, setSharedImageFile] = useState(null);
+  const [sharedImagePreviewUrl, setSharedImagePreviewUrl] = useState(null);
+  const [sharedLabel, setSharedLabel] = useState('');
+  const [pendingAccountType, setPendingAccountType] = useState(null);
+  const [businessCategoryChoice, setBusinessCategoryChoice] = useState('');
+  const [settingsInitialSection, setSettingsInitialSection] = useState(null);
+  const [galleryQuery, setGalleryQuery] = useState('');
 
   // Pull-to-refresh (global — all views except AR scanners)
   const ptrStartY   = useRef(-1);
@@ -287,6 +325,7 @@ export default function App() {
 
     setTargets(t); setMindFileUrl(m);
     setAppView('ar');
+    pingStreak();
   }, []);
 
   // Silently register the user in the festival backend so they receive future greeting blasts
@@ -304,15 +343,116 @@ export default function App() {
     }).catch(() => { /* non-critical — fail silently */ });
   }, []);
 
-  const handleSignIn  = useCallback((user) => { setCurrentUser(user); registerUserForGreetings(user); setAppView('home'); }, [registerUserForGreetings]);
-  const handleSignUp  = useCallback((user) => { setCurrentUser(user); registerUserForGreetings(user); setVideoOverlay({ src: '/right-mark.mp4', next: 'welcome-hand' }); }, [registerUserForGreetings]);
+  // Best-effort server-side save of onboarding progress (account type chosen /
+  // onboarding finished). Previously this only lived in localStorage, which is
+  // wiped by sign-out — so a user who backed out of account-type selection
+  // (Back there intentionally signs out, since there's no earlier step to
+  // return to) and later signed back in had no record of being mid-onboarding,
+  // and nextViewAfterAuth below would fall through to 'home' instead of
+  // resuming account-type selection. Persisting to the backend fixes that.
+  const persistOnboarding = useCallback((fields) => {
+    const token = localStorage.getItem('memoera_token');
+    if (!token) return;
+    fetch(`${API_BASE}/api/auth/onboarding`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(fields),
+    }).catch(() => { /* best-effort — local state already updated */ });
+  }, []);
+
+  // First-time post-signup onboarding: business accounts pick a category and
+  // fill in business details before landing on the shared "all set" screen;
+  // individual accounts go straight to that screen. Returning users who
+  // already finished this (onboardingComplete) skip straight to home. Users
+  // who signed up but never chose Business/Individual (backed out early)
+  // resume exactly at that step instead of skipping ahead.
+  const nextViewAfterAuth = useCallback((user) => {
+    if (user?.onboardingComplete) return 'home';
+    if (user?.accountType === 'business') return 'business-category';
+    if (user?.accountType === 'individual') return 'individual-complete';
+    return 'account-type';
+  }, []);
+
+  const handleSignIn  = useCallback((user) => {
+    setCurrentUser(user);
+    registerUserForGreetings(user);
+    setAppView(nextViewAfterAuth(user));
+  }, [registerUserForGreetings, nextViewAfterAuth]);
+  const handleSignUp  = useCallback((user) => {
+    setCurrentUser(user);
+    registerUserForGreetings(user);
+    setPendingTermsGate('signup');
+  }, [registerUserForGreetings]);
   const handleOtpFail = useCallback(() => { setVideoOverlay({ src: '/x-mark.mp4', next: 'signup' }); }, []);
+
+  const handleAccountType = useCallback((accountType) => {
+    setPendingAccountType(accountType);
+    setAppView('account-confirm');
+  }, []);
+
+  // The user's mobile is already verified by OTP during signup — no need for
+  // a second activation code/OTP step here, so Continue finalizes the
+  // account type directly.
+  const handleAccountConfirm = useCallback(() => {
+    // Guard against continuing with no account type chosen (e.g. reached via
+    // a back/forward glitch) — AccountConfirmScreen already shows a "please
+    // choose" message in this case, but never let Continue silently save an
+    // undefined accountType.
+    if (pendingAccountType !== 'business' && pendingAccountType !== 'individual') {
+      setAppView('account-type');
+      return;
+    }
+    setCurrentUser((prev) => {
+      const updated = { ...prev, accountType: pendingAccountType };
+      localStorage.setItem('memoera_user', JSON.stringify(updated));
+      return updated;
+    });
+    persistOnboarding({ accountType: pendingAccountType, onboardingComplete: false });
+    setVideoOverlay({ src: '/right-mark.mp4', next: 'welcome-hand' });
+  }, [pendingAccountType, persistOnboarding]);
+
+  const handleBusinessCategory = useCallback((category) => {
+    setBusinessCategoryChoice(category);
+    setAppView('business-details');
+  }, []);
+
+  const handleBusinessDetails = useCallback((details) => {
+    setCurrentUser((prev) => {
+      const updated = { ...prev, business: { category: businessCategoryChoice, ...details } };
+      localStorage.setItem('memoera_user', JSON.stringify(updated));
+      return updated;
+    });
+    setAppView(details?.gstin?.trim().toLowerCase() === 'deny' ? 'business-denied' : 'business-complete');
+  }, [businessCategoryChoice]);
+
+  const finishOnboarding = useCallback(() => {
+    setCurrentUser((prev) => {
+      const updated = { ...prev, onboardingComplete: true };
+      localStorage.setItem('memoera_user', JSON.stringify(updated));
+      persistOnboarding({ accountType: updated.accountType || '', onboardingComplete: true });
+      return updated;
+    });
+  }, [persistOnboarding]);
+
+  const handleGoToDashboard = useCallback(() => {
+    finishOnboarding();
+    setAppView('home');
+  }, [finishOnboarding]);
+
+  const handleCreateFirstMemory = useCallback(() => {
+    finishOnboarding();
+    setAppView('goal-select');
+  }, [finishOnboarding]);
 
   const handleVideoOverlayDone = useCallback(() => {
     setVideoOverlay((v) => {
       if (!v) return null;
       if (v.next === 'welcome-hand') return { src: '/welcome-hand.mp4', next: 'home' };
-      if (v.next === 'home')     { setTimeout(() => setAppView('home'),    0); return null; }
+      if (v.next === 'home') {
+        const target = nextViewAfterAuth(currentUser);
+        setTimeout(() => setAppView(target), 0);
+        return null;
+      }
       if (v.next === 'signup')   { setTimeout(() => setAppView('signup'),  0); return null; }
       if (v.next === 'gallery')  { setTimeout(() => setAppView('gallery'), 0); return null; }
       if (v.next === 'ar-ready') {
@@ -324,7 +464,7 @@ export default function App() {
       }
       return null;
     });
-  }, [launchAR]);
+  }, [launchAR, currentUser, nextViewAfterAuth]);
 
   // After upload: bust caches + play video + launch AR
   const handleStart = useCallback(({ targets: t, mindFileUrl: m }) => {
@@ -350,18 +490,45 @@ export default function App() {
   }, [launchAR]);
 
   const triggerScan = useCallback((origin) => {
+    if (!termsAgreedRef.current) {
+      scanOriginRef.current = origin;
+      setPendingTermsGate('scan');
+      return;
+    }
     scanOriginRef.current = origin;
     setGuestScanError('');
     setGuestScanLoading(true);
   }, []);
 
-  const handleGoalPrivate      = useCallback(() => { setSelectedVisibility('private'); setAppView('upload-type'); }, []);
-  const handleGoalPublic       = useCallback(() => { setSelectedVisibility('public');  setAppView('upload-type'); }, []);
-  const handleUploadPhotoVideo     = useCallback(() => { setAppView('setup'); }, []);
-  const handleUploadPhotoUrl       = useCallback(() => { setAppView('url-setup'); }, []);
-  const handleUploadPhoto3D        = useCallback(() => { setAppView('model-setup'); }, []);
-  const handleUploadPhotoAnimation = useCallback(() => { setAppView('anim-setup'); }, []);
-  const handleUploadPhotoDocument  = useCallback(() => { setAppView('doc-setup'); }, []);
+  const handleTermsAgree = useCallback(() => {
+    termsAgreedRef.current = true;
+    const gate = pendingTermsGate;
+    setPendingTermsGate(null);
+    if (gate === 'scan') {
+      setGuestScanError('');
+      setGuestScanLoading(true);
+    } else if (gate === 'signup') {
+      setAppView('account-type');
+    }
+  }, [pendingTermsGate]);
+
+  const handleTermsCancel = useCallback(() => {
+    setPendingTermsGate(null);
+  }, []);
+
+  // Used by the admin "Upload Global" shortcut to jump straight into the
+  // Create wizard pre-set to Public (the wizard's own Visibility step still
+  // lets admin flip it back to Private if they change their mind).
+  const handleGoalPublic = useCallback(() => { setSelectedVisibility('public'); setAppView('image-upload'); }, []);
+
+  const CONTENT_TYPE_VIEWS = { video: 'setup', url: 'url-setup', '3d': 'model-setup', animation: 'anim-setup', document: 'doc-setup' };
+  const handleContentSelect = useCallback(({ imageFile, imagePreviewUrl, label, visibility }, type) => {
+    setSharedImageFile(imageFile);
+    setSharedImagePreviewUrl(imagePreviewUrl);
+    setSharedLabel(label || '');
+    setSelectedVisibility(visibility === 'public' ? 'public' : 'private');
+    setAppView(CONTENT_TYPE_VIEWS[type] || 'setup');
+  }, []);
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -383,9 +550,23 @@ export default function App() {
       />
     );
   } else if (appView === 'signin') {
-    mainScreen = <SignInScreen onSuccess={handleSignIn} onGoForgotPassword={() => setAppView('forgot')} />;
+    mainScreen = <SignInScreen onSuccess={handleSignIn} onGoForgotPassword={() => setAppView('forgot')} onBack={() => setAppView('hello')} />;
   } else if (appView === 'signup') {
     mainScreen = <SignUpScreen onSuccess={handleSignUp} onBack={() => setAppView('hello')} onOtpFail={handleOtpFail} />;
+  } else if (appView === 'account-type') {
+    mainScreen = <AccountTypeScreen onSelect={handleAccountType} onLogin={() => setAppView('signin')} onBack={handleSignOut} />;
+  } else if (appView === 'account-confirm') {
+    mainScreen = <AccountConfirmScreen accountType={pendingAccountType} onContinue={handleAccountConfirm} onBack={() => setAppView('account-type')} onNoSelection={() => setAppView('account-type')} />;
+  } else if (appView === 'business-category') {
+    mainScreen = <BusinessCategoryScreen onContinue={handleBusinessCategory} onBack={() => setAppView('account-confirm')} />;
+  } else if (appView === 'business-details') {
+    mainScreen = <BusinessDetailsScreen onContinue={handleBusinessDetails} onBack={() => setAppView('business-category')} />;
+  } else if (appView === 'business-complete') {
+    mainScreen = <SetupCompleteScreen accountType="business" onCreateMemory={handleCreateFirstMemory} onGoToDashboard={handleGoToDashboard} onBack={() => setAppView('business-details')} />;
+  } else if (appView === 'business-denied') {
+    mainScreen = <BusinessDeniedScreen onRetry={() => setAppView('business-details')} onGoToDashboard={handleGoToDashboard} onBack={() => setAppView('business-details')} />;
+  } else if (appView === 'individual-complete') {
+    mainScreen = <SetupCompleteScreen accountType="individual" onCreateMemory={handleCreateFirstMemory} onGoToDashboard={handleGoToDashboard} onBack={() => setAppView('account-confirm')} />;
   } else if (appView === 'forgot') {
     mainScreen = <ForgotPasswordScreen onBack={() => setAppView('signin')} onSuccess={handleSignIn} />;
   } else if (appView === 'welcome') {
@@ -393,47 +574,58 @@ export default function App() {
   } else if (appView === 'profile') {
     mainScreen = <ProfileScreen user={currentUser} onBack={() => setAppView('home')} onUserUpdate={(u) => { setCurrentUser(u); localStorage.setItem('memoera_user', JSON.stringify(u)); }} />;
   } else if (appView === 'gallery') {
-    mainScreen = <GalleryScreen onBack={() => setAppView('home')} onCollection={() => setAppView('collection')} />;
+    mainScreen = <GalleryScreen onBack={() => setAppView('home')} onCollection={() => setAppView('collection')} initialQuery={galleryQuery} />;
   } else if (appView === 'collection') {
     mainScreen = <CollectionScreen onBack={() => setAppView('gallery')} />;
   } else if (appView === 'settings') {
-    mainScreen = <SettingsScreen onBack={() => setAppView('home')} onProfile={() => setAppView('profile')} />;
+    mainScreen = <SettingsScreen onBack={() => setAppView('home')} onProfile={() => setAppView('profile')} initialSection={settingsInitialSection} />;
   } else if (appView === 'premium') {
     mainScreen = <PremiumScreen onBack={() => setAppView('home')} user={currentUser} />;
   } else if (appView === 'refer') {
     mainScreen = <ReferFriendScreen onBack={() => setAppView('home')} user={currentUser} />;
+  } else if (appView === 'streak') {
+    mainScreen = <StreakScreen onBack={() => setAppView('home')} />;
   } else if (appView === 'goal-select') {
-    mainScreen = <GoalSelectScreen onPrivate={handleGoalPrivate} onPublic={handleGoalPublic} onBack={() => setAppView('home')} />;
-  } else if (appView === 'upload-type') {
     mainScreen = (
-      <UploadTypeScreen
-        onPhotoVideo={handleUploadPhotoVideo}
-        onPhotoUrl={handleUploadPhotoUrl}
-        onPhoto3D={handleUploadPhoto3D}
-        onPhotoAnimation={handleUploadPhotoAnimation}
-        onPhotoDocument={handleUploadPhotoDocument}
-        onBack={() => setAppView('goal-select')}
+      <GoalSelectScreen
+        onContinue={(v) => { setSelectedVisibility(v); setAppView('image-upload'); }}
+        onBack={() => { setForcedContentType(null); setAppView('home'); }}
+      />
+    );
+  } else if (appView === 'image-upload') {
+    mainScreen = (
+      <ImageUploadScreen
+        onSelectContent={handleContentSelect}
+        onBack={() => { setForcedContentType(null); setAppView('home'); }}
         visibility={selectedVisibility}
+        initialContentType={forcedContentType}
       />
     );
   } else if (appView === 'anim-setup') {
     mainScreen = (
       <PhotoAnimationSetupScreen
         onStart={handleStart}
-        onBack={() => setAppView('upload-type')}
+        onBack={() => setAppView('image-upload')}
         isPublic={selectedVisibility === 'public'}
+        sharedImageFile={sharedImageFile}
+        sharedImagePreviewUrl={sharedImagePreviewUrl}
+        sharedLabel={sharedLabel}
       />
     );
   } else if (appView === 'url-setup') {
-    mainScreen = <UrlSetupScreen onStart={handleStart} onSignOut={handleSignOut} isPublic={selectedVisibility === 'public'} />;
+    mainScreen = <UrlSetupScreen onStart={handleStart} onBack={() => setAppView('image-upload')} onSignOut={handleSignOut} isPublic={selectedVisibility === 'public'}
+      sharedImageFile={sharedImageFile} sharedImagePreviewUrl={sharedImagePreviewUrl} sharedLabel={sharedLabel} />;
   } else if (appView === 'model-setup') {
-    mainScreen = <Model3DSetupScreen onStart={handleStart} onSignOut={handleSignOut} isPublic={selectedVisibility === 'public'} />;
+    mainScreen = <Model3DSetupScreen onStart={handleStart} onBack={() => setAppView('image-upload')} onSignOut={handleSignOut} isPublic={selectedVisibility === 'public'}
+      sharedImageFile={sharedImageFile} sharedImagePreviewUrl={sharedImagePreviewUrl} sharedLabel={sharedLabel} />;
   } else if (appView === 'doc-setup') {
-    mainScreen = <DocumentSetupScreen onStart={handleStart} onSignOut={handleSignOut} isPublic={selectedVisibility === 'public'} />;
+    mainScreen = <DocumentSetupScreen onStart={handleStart} onBack={() => setAppView('image-upload')} onSignOut={handleSignOut} isPublic={selectedVisibility === 'public'}
+      sharedImageFile={sharedImageFile} sharedImagePreviewUrl={sharedImagePreviewUrl} sharedLabel={sharedLabel} />;
   } else if (appView === 'setup') {
     mainScreen = (
       <SetupScreen onStart={handleStart} onLaunchSaved={null} initialCards={null}
-        onSignOut={handleSignOut} user={currentUser} isPublic={selectedVisibility === 'public'} />
+        onBack={() => setAppView('image-upload')} onSignOut={handleSignOut} user={currentUser} isPublic={selectedVisibility === 'public'}
+        sharedImageFile={sharedImageFile} sharedImagePreviewUrl={sharedImagePreviewUrl} sharedLabel={sharedLabel} />
     );
   } else if (appView === 'admin') {
     mainScreen = (
@@ -447,15 +639,18 @@ export default function App() {
     mainScreen = !localStorage.getItem('memoera_token') ? null : (
       <>
         <HomeScreen
-          onUpload={() => setAppView('goal-select')}
-          onGallery={() => setVideoOverlay({ src: '/review-our-album.mp4', next: 'gallery' })}
-          onSettings={() => setAppView('settings')}
+          onUpload={() => { setForcedContentType(null); setAppView('goal-select'); }}
+          onGallery={() => { setGalleryQuery(''); setVideoOverlay({ src: '/review-our-album.mp4', next: 'gallery' }); }}
+          onSearch={(q) => { setGalleryQuery(q); setVideoOverlay({ src: '/review-our-album.mp4', next: 'gallery' }); }}
+          onSettings={(section) => { setSettingsInitialSection(section || null); setAppView('settings'); }}
           onPremium={() => setAppView('premium')}
           onRefer={() => setAppView('refer')}
+          onStreak={() => setAppView('streak')}
           onCollection={() => setAppView('collection')}
           onAdmin={() => setAppView('admin')}
           onSignOut={handleSignOut}
           onScan={() => triggerScan('home')}
+          onAnimation={() => { setForcedContentType('animation'); setAppView('goal-select'); }}
           user={currentUser}
         />
         <Suspense fallback={null}>
@@ -480,6 +675,10 @@ export default function App() {
         {mainScreen}
       </Suspense>
 
+      {pendingTermsGate && (
+        <TermsGateModal onAgree={handleTermsAgree} onCancel={handleTermsCancel} />
+      )}
+
       {/* Instant "Tap to Scan" — invisible until ready; works identically whether
           triggered from the pre-login Hello screen or the signed-in Home screen */}
       {guestScanLoading && (
@@ -487,7 +686,7 @@ export default function App() {
           silent
           onReady={(data) => { setGuestScanLoading(false); handleGuestReady(data); }}
           onBack={() => setGuestScanLoading(false)}
-          onError={(msg) => setGuestScanError(msg || 'Could not start scanning. Please try again.')}
+          onError={(msg) => { setGuestScanLoading(false); setGuestScanError(msg || 'Could not start scanning. Please try again.'); }}
           prefetchedTargets={prefetchedPublicTargetsRef.current}
         />
       )}
@@ -508,6 +707,23 @@ export default function App() {
           onAllow={() => setScanHint(false)}
           onDismiss={() => { setGuestScanLoading(false); setScanHint(false); }}
         />
+      )}
+
+      {/* Scan-failure toast — the Home screen (unlike HelloScreen) has nowhere
+          inline to show guestScanError, so a failed "Tap to Scan" from Home
+          used to fail completely silently (tap → nothing → back where you
+          started). Surface it here instead. */}
+      {guestScanError && appView !== 'hello' && (
+        <div style={{ position: 'fixed', left: 16, right: 16, bottom: 28, zIndex: 9999,
+          background: 'rgba(20,10,10,0.92)', border: '1px solid rgba(255,107,107,0.4)',
+          borderRadius: 14, padding: '14px 16px', display: 'flex', alignItems: 'flex-start', gap: 10,
+          fontFamily: "'Outfit', sans-serif", boxShadow: '0 8px 24px rgba(0,0,0,0.35)' }}>
+          <span style={{ fontSize: 18, flexShrink: 0 }}>⚠️</span>
+          <span style={{ color: '#fff', fontSize: 13.5, lineHeight: 1.4, flex: 1 }}>{guestScanError}</span>
+          <button onClick={() => setGuestScanError('')}
+            style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)',
+              fontSize: 15, cursor: 'pointer', flexShrink: 0, padding: 0 }}>✕</button>
+        </div>
       )}
 
       {/* Global pull-to-refresh indicator — hidden on AR scanner views */}
