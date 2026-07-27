@@ -664,7 +664,9 @@ export default function App() {
   } else if (appView === 'profile') {
     mainScreen = <ProfileScreen user={currentUser} onBack={() => setAppView('home')}
       onUserUpdate={(u) => { setCurrentUser(u); localStorage.setItem('memoera_user', JSON.stringify(u)); }}
-      onSwitchToBusiness={handleSwitchToBusiness} />;
+      onSwitchToBusiness={handleSwitchToBusiness}
+      onGallery={() => setAppView('gallery')}
+      onDashboard={() => setAppView('seller-dashboard')} />;
   } else if (appView === 'gallery') {
     mainScreen = <GalleryScreen onBack={() => setAppView('home')} onCollection={() => setAppView('collection')} initialQuery={galleryQuery} />;
   } else if (appView === 'collection') {

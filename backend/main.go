@@ -6,9 +6,13 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/tls"
+	"encoding/base32"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -18,6 +22,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/smtp"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -56,6 +61,22 @@ type User struct {
 	AccountType      string    `json:"accountType,omitempty"`
 	OnboardingComplete bool    `json:"onboardingComplete"`
 	CreatedAt        time.Time `json:"createdAt,omitempty"`
+	// Populated by /api/me only — the Profile screen needs these to render
+	// verification state and the Business Information card. Sign-in/sign-up
+	// responses leave them at zero values.
+	EmailVerified    bool      `json:"emailVerified"`
+	TwoFactorEnabled bool      `json:"twoFactorEnabled"`
+	NotifyEmail      bool      `json:"notifyEmail"`
+	NotifyMarketing  bool      `json:"notifyMarketing"`
+	BusinessName     string    `json:"businessName,omitempty"`
+	BusinessAddress  string    `json:"businessAddress,omitempty"`
+	BusinessPhone    string    `json:"businessPhone,omitempty"`
+	BusinessEmail    string    `json:"businessEmail,omitempty"`
+	BusinessWebsite  string    `json:"businessWebsite,omitempty"`
+	BusinessInstagram string   `json:"businessInstagram,omitempty"`
+	BusinessGstin    string    `json:"businessGstin,omitempty"`
+	BusinessCategory string    `json:"businessCategory,omitempty"`
+	BusinessHours    string    `json:"businessHours,omitempty"`
 }
 
 type SignUpRequest struct {
@@ -363,6 +384,40 @@ func initDB(ctx context.Context) error {
 	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS business_website TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS business_instagram TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS business_gstin TEXT NOT NULL DEFAULT ''`)
+	// Shown on the redesigned Profile screen's Business Information card.
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS business_category TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS business_hours TEXT NOT NULL DEFAULT ''`)
+
+	// Email verification. Mobile is already proven by the signup OTP, but email
+	// is free-text and unverified, so the Profile screen offers a "Verify Now"
+	// flow that reuses the existing sendEmailOTP transport.
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verify_code TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verify_expires TIMESTAMPTZ`)
+
+	// TOTP two-factor auth (RFC 6238). The secret is only honoured once
+	// twofa_enabled flips true, so a half-finished setup can't lock anyone out.
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS twofa_secret TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS twofa_enabled BOOLEAN NOT NULL DEFAULT false`)
+
+	// Notification preferences surfaced in the Profile "Preferences" card.
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_email BOOLEAN NOT NULL DEFAULT true`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_marketing BOOLEAN NOT NULL DEFAULT false`)
+
+	// Recent sign-ins, so "Security & Login" can show real session history
+	// instead of a placeholder. Only coarse UA-derived labels are stored — no
+	// raw IP — since this is displayed back to the user, not used for security
+	// decisions. Trimmed to the newest 10 rows per user on each new sign-in.
+	_, _ = db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS login_activity (
+			id         BIGSERIAL PRIMARY KEY,
+			user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			browser    TEXT NOT NULL DEFAULT '',
+			platform   TEXT NOT NULL DEFAULT '',
+			is_mobile  BOOLEAN NOT NULL DEFAULT false,
+			created_at TIMESTAMPTZ DEFAULT NOW()
+		)`)
+	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_login_activity_user ON login_activity(user_id, created_at DESC)`)
 
 	_, _ = db.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS payment_orders (
@@ -991,9 +1046,71 @@ func signInHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	recordLogin(r, user.ID)
+
 	token := makeToken(user.Mobile)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(AuthResponse{Token: token, User: user})
+}
+
+// Best-effort sign-in audit for the Profile screen's "Recent Login Activity"
+// list. Deliberately stores only coarse UA-derived labels (no IP, no full user
+// agent) because this is user-facing history, not a security control — and
+// never blocks or fails the sign-in it's recording.
+func recordLogin(r *http.Request, userID int64) {
+	browser, platform, isMobile := parseUserAgent(r.UserAgent())
+	ctx := r.Context()
+	if _, err := db.Exec(ctx,
+		`INSERT INTO login_activity (user_id, browser, platform, is_mobile) VALUES ($1,$2,$3,$4)`,
+		userID, browser, platform, isMobile); err != nil {
+		log.Printf("[loginActivity] insert failed for user %d: %v", userID, err)
+		return
+	}
+	// Keep only the 10 most recent rows per user so the table can't grow without bound.
+	_, _ = db.Exec(ctx, `
+		DELETE FROM login_activity
+		WHERE user_id = $1 AND id NOT IN (
+			SELECT id FROM login_activity WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10
+		)`, userID)
+}
+
+// Crude but sufficient UA classification — enough to render "Chrome on Android"
+// style labels. Order matters: Edge/Opera/Samsung UAs all also contain
+// "Chrome", and Chrome's UA also contains "Safari".
+func parseUserAgent(ua string) (browser, platform string, isMobile bool) {
+	switch {
+	case strings.Contains(ua, "Edg/"):
+		browser = "Edge"
+	case strings.Contains(ua, "OPR/"), strings.Contains(ua, "Opera"):
+		browser = "Opera"
+	case strings.Contains(ua, "SamsungBrowser"):
+		browser = "Samsung Internet"
+	case strings.Contains(ua, "Firefox"):
+		browser = "Firefox"
+	case strings.Contains(ua, "Chrome"):
+		browser = "Chrome"
+	case strings.Contains(ua, "Safari"):
+		browser = "Safari"
+	default:
+		browser = "App"
+	}
+	switch {
+	case strings.Contains(ua, "Android"):
+		platform, isMobile = "Android", true
+	case strings.Contains(ua, "iPhone"):
+		platform, isMobile = "iPhone", true
+	case strings.Contains(ua, "iPad"):
+		platform, isMobile = "iPad", true
+	case strings.Contains(ua, "Windows"):
+		platform = "Windows"
+	case strings.Contains(ua, "Mac OS X"), strings.Contains(ua, "Macintosh"):
+		platform = "macOS"
+	case strings.Contains(ua, "Linux"):
+		platform = "Linux"
+	default:
+		platform = "Unknown device"
+	}
+	return browser, platform, isMobile
 }
 
 // Step 1: POST /api/auth/forgot-password — takes mobile, returns security question
@@ -1235,10 +1352,20 @@ func getMeHandler(w http.ResponseWriter, r *http.Request) {
 	var user User
 	err = db.QueryRow(r.Context(), `
 		SELECT id, mobile, first_name, last_name, security_question,
-		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,''), COALESCE(email,''), created_at
+		       COALESCE(date_of_birth,''), COALESCE(profile_photo_url,''), COALESCE(email,''), created_at,
+		       account_type, onboarding_complete,
+		       email_verified, twofa_enabled, notify_email, notify_marketing,
+		       business_name, business_address, business_phone, business_email,
+		       business_website, business_instagram, business_gstin,
+		       business_category, business_hours
 		FROM users WHERE id=$1`, userID,
 	).Scan(&user.ID, &user.Mobile, &user.FirstName, &user.LastName,
-		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL, &user.Email, &user.CreatedAt)
+		&user.SecurityQuestion, &user.DateOfBirth, &user.ProfilePhotoURL, &user.Email, &user.CreatedAt,
+		&user.AccountType, &user.OnboardingComplete,
+		&user.EmailVerified, &user.TwoFactorEnabled, &user.NotifyEmail, &user.NotifyMarketing,
+		&user.BusinessName, &user.BusinessAddress, &user.BusinessPhone, &user.BusinessEmail,
+		&user.BusinessWebsite, &user.BusinessInstagram, &user.BusinessGstin,
+		&user.BusinessCategory, &user.BusinessHours)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "User not found")
 		return
@@ -1425,6 +1552,11 @@ func saveBusinessDetailsHandler(w http.ResponseWriter, r *http.Request) {
 		Website         string `json:"website"`
 		Instagram       string `json:"instagram"`
 		Gstin           string `json:"gstin"`
+		// Pointers: the signup-time BusinessDetailsScreen doesn't collect these,
+		// so an omitted field must leave whatever Profile already saved intact
+		// rather than blanking it.
+		Category *string `json:"category"`
+		Hours    *string `json:"hours"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1433,15 +1565,289 @@ func saveBusinessDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	_, err = db.Exec(r.Context(), `
 		UPDATE users SET
 			business_name = $1, business_address = $2, business_phone = $3,
-			business_email = $4, business_website = $5, business_instagram = $6, business_gstin = $7
-		WHERE id = $8`,
-		req.BusinessName, req.BusinessAddress, req.Phone, req.Email, req.Website, req.Instagram, req.Gstin, userID)
+			business_email = $4, business_website = $5, business_instagram = $6, business_gstin = $7,
+			business_category = COALESCE($8, business_category),
+			business_hours    = COALESCE($9, business_hours)
+		WHERE id = $10`,
+		req.BusinessName, req.BusinessAddress, req.Phone, req.Email, req.Website, req.Instagram, req.Gstin,
+		req.Category, req.Hours, userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save business details")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// ── Profile screen: email verification, 2FA, login history, preferences ──────
+
+// GET /api/auth/login-activity — the caller's own recent sign-ins, newest first.
+func loginActivityHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	rows, err := db.Query(r.Context(), `
+		SELECT browser, platform, is_mobile, created_at
+		FROM login_activity WHERE user_id=$1 ORDER BY created_at DESC LIMIT 10`, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load login activity")
+		return
+	}
+	defer rows.Close()
+
+	type entry struct {
+		Browser   string    `json:"browser"`
+		Platform  string    `json:"platform"`
+		IsMobile  bool      `json:"isMobile"`
+		CreatedAt time.Time `json:"createdAt"`
+	}
+	list := []entry{}
+	for rows.Next() {
+		var e entry
+		if err := rows.Scan(&e.Browser, &e.Platform, &e.IsMobile, &e.CreatedAt); err != nil {
+			continue
+		}
+		list = append(list, e)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"activity": list})
+}
+
+// PUT /api/preferences — notification toggles from the Profile Preferences card.
+func updatePreferencesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	var req struct {
+		NotifyEmail     *bool `json:"notifyEmail"`
+		NotifyMarketing *bool `json:"notifyMarketing"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	_, err = db.Exec(r.Context(), `
+		UPDATE users SET
+			notify_email     = COALESCE($1, notify_email),
+			notify_marketing = COALESCE($2, notify_marketing)
+		WHERE id = $3`, req.NotifyEmail, req.NotifyMarketing, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save preferences")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// POST /api/auth/email/send-code — mails a 6-digit code to the caller's saved
+// email address, valid for 15 minutes.
+func sendEmailVerifyCodeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	var email, firstName string
+	var verified bool
+	if err := db.QueryRow(r.Context(),
+		`SELECT COALESCE(email,''), first_name, email_verified FROM users WHERE id=$1`, userID,
+	).Scan(&email, &firstName, &verified); err != nil {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if email == "" {
+		writeError(w, http.StatusBadRequest, "Add an email address to your profile first")
+		return
+	}
+	if verified {
+		writeError(w, http.StatusBadRequest, "Email is already verified")
+		return
+	}
+
+	otp := generateOTP()
+	if _, err := db.Exec(r.Context(),
+		`UPDATE users SET email_verify_code=$1, email_verify_expires=$2 WHERE id=$3`,
+		otp, time.Now().Add(15*time.Minute), userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to store verification code")
+		return
+	}
+	if err := sendEmailOTP(email, otp, firstName); err != nil {
+		log.Printf("[emailVerify] send failed for user %d: %v", userID, err)
+		writeError(w, http.StatusInternalServerError, "Could not send the verification email")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"sent": true})
+}
+
+// POST /api/auth/email/verify — confirms the code from send-code.
+func verifyEmailCodeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	var stored string
+	var expires *time.Time
+	if err := db.QueryRow(r.Context(),
+		`SELECT email_verify_code, email_verify_expires FROM users WHERE id=$1`, userID,
+	).Scan(&stored, &expires); err != nil {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if stored == "" || expires == nil || time.Now().After(*expires) {
+		writeError(w, http.StatusBadRequest, "That code has expired — please request a new one")
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(stored), []byte(strings.TrimSpace(req.Code))) != 1 {
+		writeError(w, http.StatusBadRequest, "Incorrect code")
+		return
+	}
+	if _, err := db.Exec(r.Context(),
+		`UPDATE users SET email_verified=true, email_verify_code='', email_verify_expires=NULL WHERE id=$1`,
+		userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to verify email")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"verified": true})
+}
+
+// /api/auth/2fa — POST starts setup (returns a secret + otpauth:// URL for the
+// authenticator app), PUT confirms it with a generated code and switches it on,
+// DELETE turns it off. The secret is never honoured until twofa_enabled is true,
+// so abandoning setup halfway can't lock anyone out.
+func twoFactorHandler(w http.ResponseWriter, r *http.Request) {
+	userID, mobile, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodPost:
+		secret, err := generateTOTPSecret()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to generate secret")
+			return
+		}
+		if _, err := db.Exec(r.Context(),
+			`UPDATE users SET twofa_secret=$1, twofa_enabled=false WHERE id=$2`, secret, userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to start 2FA setup")
+			return
+		}
+		otpauth := fmt.Sprintf("otpauth://totp/Memoera:%s?secret=%s&issuer=Memoera&digits=6&period=30",
+			url.PathEscape(mobile), secret)
+		_ = json.NewEncoder(w).Encode(map[string]string{"secret": secret, "otpauthUrl": otpauth})
+
+	case http.MethodPut:
+		var req struct {
+			Code string `json:"code"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		var secret string
+		if err := db.QueryRow(r.Context(), `SELECT twofa_secret FROM users WHERE id=$1`, userID).Scan(&secret); err != nil {
+			writeError(w, http.StatusNotFound, "user not found")
+			return
+		}
+		if secret == "" {
+			writeError(w, http.StatusBadRequest, "Start 2FA setup first")
+			return
+		}
+		if !verifyTOTP(secret, strings.TrimSpace(req.Code)) {
+			writeError(w, http.StatusBadRequest, "That code didn't match — check your authenticator app")
+			return
+		}
+		if _, err := db.Exec(r.Context(), `UPDATE users SET twofa_enabled=true WHERE id=$1`, userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to enable 2FA")
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]bool{"enabled": true})
+
+	case http.MethodDelete:
+		if _, err := db.Exec(r.Context(),
+			`UPDATE users SET twofa_enabled=false, twofa_secret='' WHERE id=$1`, userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to disable 2FA")
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]bool{"enabled": false})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// ── TOTP (RFC 6238, SHA-1 / 6 digits / 30s) ─────────────────────────────────
+// Implemented against the stdlib rather than pulling in a dependency — the
+// algorithm is small and this is the only place it's needed.
+
+func generateTOTPSecret() (string, error) {
+	buf := make([]byte, 20) // 160-bit, the RFC 4226 recommendation
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(buf), nil
+}
+
+// Accepts the current 30-second step plus one step either side, so a slightly
+// out-of-sync device clock doesn't reject an otherwise correct code.
+func verifyTOTP(secret, code string) bool {
+	if len(code) != 6 {
+		return false
+	}
+	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(secret))
+	if err != nil {
+		return false
+	}
+	step := time.Now().Unix() / 30
+	for _, s := range []int64{step - 1, step, step + 1} {
+		if subtle.ConstantTimeCompare([]byte(totpAt(key, s)), []byte(code)) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func totpAt(key []byte, step int64) string {
+	var msg [8]byte
+	binary.BigEndian.PutUint64(msg[:], uint64(step))
+	mac := hmac.New(sha1.New, key)
+	mac.Write(msg[:])
+	sum := mac.Sum(nil)
+	offset := sum[len(sum)-1] & 0x0f
+	trunc := binary.BigEndian.Uint32(sum[offset:offset+4]) & 0x7fffffff
+	return fmt.Sprintf("%06d", trunc%1000000)
 }
 
 // GET /api/business/by-target?targetId=123 — public, no auth: lets anyone who
@@ -3907,6 +4313,11 @@ func main() {
 	mux.HandleFunc("/api/me", getMeHandler)
 	mux.HandleFunc("/api/auth/profile", updateProfileHandler)
 	mux.HandleFunc("/api/auth/security-question", updateSecurityHandler)
+	mux.HandleFunc("/api/auth/login-activity", loginActivityHandler)
+	mux.HandleFunc("/api/auth/email/send-code", sendEmailVerifyCodeHandler)
+	mux.HandleFunc("/api/auth/email/verify", verifyEmailCodeHandler)
+	mux.HandleFunc("/api/auth/2fa", twoFactorHandler)
+	mux.HandleFunc("/api/preferences", updatePreferencesHandler)
 	mux.HandleFunc("/api/auth/onboarding", updateOnboardingHandler)
 	mux.HandleFunc("/api/business/details", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
