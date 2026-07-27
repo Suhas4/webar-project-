@@ -119,9 +119,11 @@ export default function App() {
   const [scanHint,      setScanHint]      = useState(false);
   const [pendingAR,     setPendingAR]     = useState(null);
   const [guestScanError, setGuestScanError] = useState('');
-  // Terms & Conditions gate — 'scan' before the camera opens, 'signup' right
-  // after account creation. Agreement is persisted so a user only has to
-  // accept once, ever, on this device — not on every scan/signup.
+  // Terms & Conditions gate — 'scan' before the camera opens, 'signup' before
+  // the signup form (and therefore before any account is created — declining
+  // here must never leave a live, unconsented account behind). Agreement is
+  // persisted so a user only has to accept once, ever, on this device — not
+  // on every scan/signup.
   const [pendingTermsGate, setPendingTermsGate] = useState(null);
   const termsAgreedRef           = useRef(localStorage.getItem('memoera_terms_agreed') === 'true');
   const pendingARRef             = useRef(null);
@@ -405,15 +407,27 @@ export default function App() {
     setAppView(nextViewAfterAuth(user));
   }, [registerUserForGreetings, nextViewAfterAuth]);
   const handleSignUp  = useCallback((user) => {
+    // Terms are now gated BEFORE the account is created (see
+    // handleCreateAccountTapped) — by the time signup succeeds here the
+    // user has already agreed, so this just continues onboarding.
     setCurrentUser(user);
     registerUserForGreetings(user);
+    setAppView('account-type');
+  }, [registerUserForGreetings]);
+  const handleOtpFail = useCallback(() => { setVideoOverlay({ src: '/x-mark.mp4', next: 'signup' }); }, []);
+
+  // Gates entry to the signup form itself on having agreed to Terms &
+  // Conditions — previously the account was fully created (token stored,
+  // signed in) before the user ever saw the T&C prompt, and declining just
+  // stranded them with a live, unconsented account. Now nothing is created
+  // until they've agreed.
+  const handleCreateAccountTapped = useCallback(() => {
     if (termsAgreedRef.current) {
-      setAppView('account-type');
+      setAppView('signup');
     } else {
       setPendingTermsGate('signup');
     }
-  }, [registerUserForGreetings]);
-  const handleOtpFail = useCallback(() => { setVideoOverlay({ src: '/x-mark.mp4', next: 'signup' }); }, []);
+  }, []);
 
   const handleAccountType = useCallback((accountType) => {
     setPendingAccountType(accountType);
@@ -572,7 +586,7 @@ export default function App() {
       setGuestScanError('');
       setGuestScanLoading(true);
     } else if (gate === 'signup') {
-      setAppView('account-type');
+      setAppView('signup');
     }
   }, [pendingTermsGate]);
 
@@ -606,7 +620,7 @@ export default function App() {
   } else if (appView === 'hello') {
     mainScreen = (
       <HelloScreen
-        onCreateAccount={() => setAppView('signup')}
+        onCreateAccount={handleCreateAccountTapped}
         onExisting={() => setAppView('signin')}
         onGuestScan={() => triggerScan('hello')}
         errorMsg={guestScanError}
