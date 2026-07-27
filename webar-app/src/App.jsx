@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef, Suspense, lazy } from 'react';
 import { COMPILER_URL } from './hooks/loadMindARCompiler.js';
+import { deferUntilIdleAfterLoad } from './utils/deferIdle.js';
 import { API_BASE } from './config/api.js';
 
 // Maps each view to the view that "Back" should navigate to
@@ -165,65 +166,67 @@ export default function App() {
   // Initialise AdMob SDK as early as possible
   useEffect(() => { initAdMob(); }, []);
 
-  // Preload video overlay assets — deferred until the browser is idle so this
-  // video doesn't compete with the initial app load/interactivity.
-  useEffect(() => {
-    const preload = () => {
-      const VIDEOS = ['/right-mark.mp4', '/x-mark.mp4', '/wings-to-memories.mp4', '/welcome-hand.mp4'];
-      VIDEOS.forEach((src) => {
-        const v = document.createElement('video');
-        v.src = src; v.preload = 'auto'; v.muted = true; v.load();
-      });
-    };
-    if ('requestIdleCallback' in window) {
-      const id = window.requestIdleCallback(preload, { timeout: 5000 });
-      return () => window.cancelIdleCallback(id);
-    }
-    const t = setTimeout(preload, 3000);
-    return () => clearTimeout(t);
-  }, []);
+  // Preload video overlay assets (~510 KB) once the page has finished loading.
+  // See deferUntilIdleAfterLoad — a bare requestIdleCallback fired early enough
+  // that these four videos were downloading before first contentful paint.
+  useEffect(() => deferUntilIdleAfterLoad(() => {
+    const VIDEOS = ['/right-mark.mp4', '/x-mark.mp4', '/wings-to-memories.mp4', '/welcome-hand.mp4'];
+    VIDEOS.forEach((src) => {
+      const v = document.createElement('video');
+      v.src = src; v.preload = 'auto'; v.muted = true; v.load();
+    });
+  }), []);
 
-  // Preload BOTH MindAR scripts when idle so scans open instantly
+  // Warm the AR libraries (~6 MB across MindAR, A-Frame and Three.js) so that
+  // tapping Scan opens the camera instantly instead of stalling on a multi-MB
+  // fetch.
+  //
+  // This MUST stay off the critical path. Previously it ran the moment Home
+  // mounted and fetched each A-Frame/MindAR file twice — once via
+  // <link rel=prefetch> and again via fetch() as a "belt and suspenders"
+  // fallback — so ~7.7 MB competed with the app's own bundle and first API
+  // calls. Measured on a simulated 4G phone that pushed first contentful paint
+  // to 8.4s and made every screen feel slow to open. Now it waits for the
+  // browser to go idle, issues exactly one request per file, and skips
+  // entirely when the user is on a metered or slow connection.
   useEffect(() => {
     if (appView !== 'hello' && appView !== 'home') return;
+    if (window.__arLibsPreloaded) return;
 
-    // 1. Compiler — used during "Setting up..." phase
-    if (!window.MINDAR?.IMAGE?.Compiler) {
-      import(/* @vite-ignore */ COMPILER_URL).catch(() => {});
-    }
+    // Respect Data Saver and slow links — a 6 MB speculative download is far
+    // more harmful than a slower first scan for these users.
+    const conn = navigator.connection;
+    if (conn?.saveData || /(^|-)(2g|slow-2g)$/.test(conn?.effectiveType || '')) return;
 
-    // 2. Three.js tracker — used by ARScene after compilation; pre-load so it's cached
-    if (!window.MINDAR?.IMAGE?.MindARThree && !document.getElementById('mindar-three-preload')) {
-      const s = document.createElement('script');
-      s.id   = 'mindar-three-preload';
-      s.type = 'module';
-      s.src  = 'https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js';
-      s.crossOrigin = 'anonymous';
-      document.head.appendChild(s);
-    }
-
-    // 3. A-Frame + MindAR's AR runtime (~3 MB combined) — these are what the
-    //    /ar-scanner.html iframe actually loads when "Tap to Scan" is pressed.
-    //    Warm the HTTP cache now so that load is instant instead of a fresh
-    //    multi-MB fetch at the moment the user is waiting for the camera.
-    if (!window.__arLibsPreloaded) {
+    let cancelled = false;
+    const warm = () => {
+      if (cancelled || window.__arLibsPreloaded) return;
       window.__arLibsPreloaded = true;
-      // ar-scanner.html itself is marked no-cache (so edits during development
-      // always reach users) — but the browser can still cache it and revalidate
-      // with a fast 304 instead of a full re-fetch. Warming it now means that
-      // revalidation round-trip happens while the user is still on Home, not
-      // while they're staring at the scan screen.
+
+      // 1. Compiler — used during the "Setting up…" phase.
+      if (!window.MINDAR?.IMAGE?.Compiler) {
+        import(/* @vite-ignore */ COMPILER_URL).catch(() => {});
+      }
+
+      // NOTE: the MindAR *Three.js* tracker (mindar-image-three.prod.js) used to
+      // be preloaded here too. It is only consumed by useMindAR.js via
+      // ARScene.jsx — and ARScene is not rendered anywhere; scanning goes
+      // through the A-Frame build inside the /ar-scanner.html iframe instead.
+      // Preloading it pulled its own copy of controller-*.js and three.module.js
+      // from jsdelivr on every app open (~630 KB) for a code path that never
+      // runs, and duplicated the controller chunk we already serve from /libs.
+
+      // 2. A-Frame + MindAR's AR runtime — what the /ar-scanner.html iframe
+      //    actually loads. One low-priority fetch each, straight into the HTTP
+      //    cache. ar-scanner.html is no-cache but still revalidates with a fast
+      //    304, so warming it moves that round-trip off the scan path.
       ['/libs/aframe.min.js', '/libs/mindar-image-aframe.prod.js', '/ar-scanner.html'].forEach((href) => {
-        const link = document.createElement('link');
-        link.rel  = 'prefetch';
-        link.as   = href.endsWith('.html') ? 'document' : 'script';
-        link.href = href;
-        document.head.appendChild(link);
-        // Belt-and-suspenders: some WebViews ignore prefetch hints, so also
-        // issue a real fetch to force the file into HTTP cache.
-        fetch(href, { mode: 'no-cors' }).catch(() => {});
+        fetch(href, { mode: 'no-cors', cache: 'force-cache', priority: 'low' }).catch(() => {});
       });
-    }
+    };
+
+    const cancel = deferUntilIdleAfterLoad(warm);
+    return () => { cancelled = true; cancel(); };
   }, [appView]);
 
   // Pre-warm camera as early as possible — even on splash so it's ready by hello's guest scan

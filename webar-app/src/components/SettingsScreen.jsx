@@ -166,6 +166,8 @@ export default function SettingsScreen({ onBack, onProfile, initialSection }) {
           <Divider colors={colors} />
           <ToggleRow label={tr.pushNotifications || 'Push Notifications'} hint={tr.hintPushNotif}
             value={pushNotif} onChange={v => toggle('memoera_push_notif', v, setPushNotif)} colors={colors} />
+          <Divider colors={colors} />
+          <NotificationPermissionRow colors={colors} />
         </AccordionCard>
         )}
 
@@ -408,6 +410,70 @@ function RowButton({ label, icon, hint, onPress, colors, right }) {
       </div>
       {right ?? <span style={{ fontSize: 16, color: colors.textMuted }}>›</span>}
     </button>
+  );
+}
+
+// The two toggles above are app-level preferences stored in localStorage — they
+// can't do anything if the OS itself has notifications blocked. This row shows
+// the real permission state and is the only way to actually request it.
+// Uses the Web Notification API, which the Android WebView honours, so it needs
+// no extra Capacitor plugin.
+function NotificationPermissionRow({ colors }) {
+  const supported = typeof window !== 'undefined' && 'Notification' in window;
+  const [status, setStatus] = useState(() => (supported ? Notification.permission : 'unsupported'));
+  const [busy, setBusy] = useState(false);
+
+  // Permission can change from Android's app-settings screen while we're
+  // backgrounded, so re-read it whenever the user returns to the app.
+  useEffect(() => {
+    if (!supported) return;
+    const sync = () => { if (!document.hidden) setStatus(Notification.permission); };
+    document.addEventListener('visibilitychange', sync);
+    return () => document.removeEventListener('visibilitychange', sync);
+  }, [supported]);
+
+  const request = async () => {
+    if (!supported || busy) return;
+    setBusy(true);
+    try {
+      setStatus(await Notification.requestPermission());
+    } catch {
+      setStatus(Notification.permission);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const meta = {
+    granted:  { text: 'Allowed',      color: TEAL,   hint: 'Memoera can show notifications on this device.' },
+    denied:   { text: 'Blocked',      color: '#FF6B6B', hint: 'Blocked for this app. Re-enable it in your device Settings › Apps › Memoera › Notifications.' },
+    default:  { text: 'Not asked',    color: colors.textMuted, hint: 'Allow notifications so streak reminders and festival greetings can reach you.' },
+    unsupported: { text: 'Unavailable', color: colors.textMuted, hint: 'This device or browser does not support notifications.' },
+  }[status] || { text: status, color: colors.textMuted, hint: '' };
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 6px' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: colors.text, fontFamily: FONT }}>
+          Notification Permissions
+        </div>
+        <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: FONT, marginTop: 2, lineHeight: 1.45 }}>
+          {meta.hint}
+        </div>
+      </div>
+      {status === 'default' ? (
+        <button onClick={request} disabled={busy} style={{
+          flexShrink: 0, background: 'transparent', border: `1px solid ${TEAL}`, color: TEAL,
+          borderRadius: 20, padding: '7px 15px', fontSize: 12, fontWeight: 700,
+          fontFamily: FONT, cursor: 'pointer',
+        }}>{busy ? '…' : 'Allow'}</button>
+      ) : (
+        <span style={{
+          flexShrink: 0, fontSize: 11.5, fontWeight: 700, color: meta.color, fontFamily: FONT,
+          border: `1px solid ${meta.color}55`, borderRadius: 20, padding: '5px 12px',
+        }}>{meta.text}</span>
+      )}
+    </div>
   );
 }
 
