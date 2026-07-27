@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { loadTargets, clearTargets, saveTargets } from "../hooks/useArStorage.js";
+import { API_BASE } from "../config/api.js";
 import { loadAnimationById, deleteAnimation } from "../hooks/usePhotoAnimations.js";
 import { loadMindARCompiler } from "../hooks/loadMindARCompiler.js";
 import { rebuildPublicMindInBackground } from "../utils/rebuildPublicMind.js";
@@ -33,8 +34,11 @@ export default function GalleryScreen({ onBack, onCollection, initialQuery }) {
   const [deleting, setDeleting]     = useState(false);
   const [fixing, setFixing]         = useState(false);
   const [fixStatus, setFixStatus]   = useState('');
-  const [playingVideo, setPlayingVideo] = useState(null);
+  const [playingVideo, setPlayingVideo] = useState(null); // the target object, not just the url
   const [playingImage, setPlayingImage] = useState(null);
+  const [videoLiked, setVideoLiked] = useState(false);
+  const [videoSaved, setVideoSaved] = useState(false);
+  const [videoToast, setVideoToast] = useState('');
   const [viewing3D, setViewing3D]   = useState(null);
   const [viewingAnim, setViewingAnim] = useState(null);
   const [animLoading, setAnimLoading] = useState(null); // target index being loaded
@@ -48,6 +52,44 @@ export default function GalleryScreen({ onBack, onCollection, initialQuery }) {
       setLoading(false);
     }).catch(() => setLoading(false));
   }, []);
+
+  const toggleVideoInteraction = async (kind) => {
+    const t = playingVideo;
+    if (!t?.id) return;
+    const token = localStorage.getItem('memoera_token');
+    if (!token) { setVideoToast('Sign in to ' + kind + ' this.'); setTimeout(() => setVideoToast(''), 3000); return; }
+    const active = kind === 'like' ? !videoLiked : !videoSaved;
+    if (kind === 'like') setVideoLiked(active); else setVideoSaved(active);
+    try {
+      const res = await fetch(`${API_BASE}/api/targets/interaction`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ targetId: t.id, kind, active }),
+      });
+      if (!res.ok) throw new Error();
+      if (active) { setVideoToast(kind === 'save' ? 'Saved!' : 'Liked!'); setTimeout(() => setVideoToast(''), 2500); }
+    } catch {
+      if (kind === 'like') setVideoLiked(!active); else setVideoSaved(!active);
+      setVideoToast("Couldn't " + kind + " this — please try again.");
+      setTimeout(() => setVideoToast(''), 3000);
+    }
+  };
+
+  const shareVideo = async () => {
+    const t = playingVideo;
+    const text = `Check out "${t?.label || 'this memory'}" on Memoera!`;
+    const url = 'https://memoera.in';
+    if (navigator.share) {
+      try { await navigator.share({ title: 'Memoera', text, url }); return; } catch { /* cancelled */ }
+    }
+    try {
+      await navigator.clipboard.writeText(`${text} ${url}`);
+      setVideoToast('Link copied!');
+    } catch {
+      setVideoToast("Couldn't share — please try again.");
+    }
+    setTimeout(() => setVideoToast(''), 2500);
+  };
 
   const handleDeleteAll = async () => {
     if (!window.confirm(`Delete all ${targets.length} target${targets.length !== 1 ? 's' : ''}? This cannot be undone.`)) return;
@@ -199,8 +241,30 @@ export default function GalleryScreen({ onBack, onCollection, initialQuery }) {
   if (playingVideo) {
     return (
       <div style={s.videoScreen}>
-        <button onClick={() => setPlayingVideo(null)} style={s.closeBtn}>← Back</button>
-        <video src={playingVideo} autoPlay controls playsInline style={s.fullVideo} />
+        <button onClick={() => { setPlayingVideo(null); setVideoLiked(false); setVideoSaved(false); }} style={s.closeBtn}>← Back</button>
+        <video src={playingVideo.videoUrl} autoPlay controls playsInline style={s.fullVideo} />
+
+        <div style={s.actionRail}>
+          <button onClick={() => toggleVideoInteraction('like')}
+            style={{ ...s.actionBtnRail, background: videoLiked ? 'rgba(255,60,90,0.25)' : 'rgba(0,0,0,0.4)', borderColor: videoLiked ? '#ff3c5a' : 'rgba(255,255,255,0.3)', color: videoLiked ? '#ff3c5a' : '#fff' }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 21s-7.5-4.8-10-9.3C.4 8.6 1.7 5 5.2 4.2c2-.5 4 .3 5.2 2 .3.4.9.4 1.2 0 1.2-1.7 3.2-2.5 5.2-2 3.5.8 4.8 4.4 3.2 7.5C19.5 16.2 12 21 12 21z" opacity={videoLiked ? 1 : 0.18}/><path d="M12 21s-7.5-4.8-10-9.3C.4 8.6 1.7 5 5.2 4.2c2-.5 4 .3 5.2 2 .3.4.9.4 1.2 0 1.2-1.7 3.2-2.5 5.2-2 3.5.8 4.8 4.4 3.2 7.5C19.5 16.2 12 21 12 21z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          </button>
+          <button onClick={() => toggleVideoInteraction('save')}
+            style={{ ...s.actionBtnRail, background: videoSaved ? 'rgba(201,168,76,0.25)' : 'rgba(0,0,0,0.4)', borderColor: videoSaved ? GOLD : 'rgba(255,255,255,0.3)', color: videoSaved ? GOLD : '#fff' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill={videoSaved ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 3h12a1 1 0 0 1 1 1v16l-7-4-7 4V4a1 1 0 0 1 1-1Z"/></svg>
+          </button>
+          <button onClick={shareVideo} style={{ ...s.actionBtnRail, background: 'rgba(0,0,0,0.4)', borderColor: 'rgba(255,255,255,0.3)', color: '#fff' }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="10.6" x2="15.4" y2="6.4"/><line x1="8.6" y1="13.4" x2="15.4" y2="17.6"/></svg>
+          </button>
+        </div>
+
+        {playingVideo.urlLink && (
+          <button onClick={() => window.open(playingVideo.urlLink, '_blank', 'noopener')} style={s.buyNowBtn}>
+            🛒 Buy Now
+          </button>
+        )}
+
+        {videoToast && <div style={s.videoToast}>{videoToast}</div>}
       </div>
     );
   }
@@ -348,7 +412,7 @@ export default function GalleryScreen({ onBack, onCollection, initialQuery }) {
                     <button style={s.actionBtn} onClick={() => setViewing3D(t.urlLink)}>🧊</button>
                   )}
                   {t.videoUrl && t.targetType !== "glb" && t.targetType !== "animation" && t.targetType !== "document" && (
-                    <button style={s.actionBtn} onClick={() => setPlayingVideo(t.videoUrl)}>▶</button>
+                    <button style={s.actionBtn} onClick={() => setPlayingVideo(t)}>▶</button>
                   )}
                   {t.targetType === "url" && t.urlLink && (
                     <button style={{ ...s.actionBtn, background: "rgba(201,168,76,0.12)", borderColor: GOLD + "55", color: GOLD }}
@@ -465,6 +529,10 @@ const s = {
   imageScreen:  { position: "fixed", inset: 0, background: "#000", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 1000 },
   closeBtn:     { position: "absolute", top: 20, left: 20, zIndex: 10, background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 20, color: "#fff", fontSize: 14, fontFamily: FONT, padding: "8px 18px", cursor: "pointer" },
   fullVideo:    { width: "100%", height: "100%", objectFit: "contain" },
+  actionRail:   { position: "absolute", top: "50%", right: 14, transform: "translateY(-50%)", zIndex: 10, display: "flex", flexDirection: "column", gap: 14 },
+  actionBtnRail:{ width: 48, height: 48, borderRadius: "50%", border: "1.5px solid", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)" },
+  buyNowBtn:    { position: "absolute", left: "50%", bottom: 28, transform: "translateX(-50%)", zIndex: 10, background: `linear-gradient(135deg, ${TEAL}, #00E5CC)`, border: "none", borderRadius: 50, color: "#040D0B", fontSize: 14, fontWeight: 700, fontFamily: FONT, padding: "12px 28px", cursor: "pointer", boxShadow: "0 6px 20px rgba(0,201,167,0.4)" },
+  videoToast:   { position: "absolute", left: "50%", bottom: 90, transform: "translateX(-50%)", zIndex: 11, background: "rgba(0,0,0,0.85)", color: "#fff", fontFamily: FONT, fontSize: 13, padding: "10px 18px", borderRadius: 20, whiteSpace: "nowrap" },
   imageZoomWrap:{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, boxSizing: "border-box" },
   fullImage:    { maxWidth: "100%", maxHeight: "100%", objectFit: "contain", borderRadius: 12 },
   imageCaption: { position: "absolute", bottom: 32, left: 0, right: 0, textAlign: "center", fontSize: 12, color: "rgba(255,255,255,0.4)", fontFamily: FONT, padding: "0 24px" },

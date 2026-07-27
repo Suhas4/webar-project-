@@ -157,7 +157,7 @@
     }
     #fs-report-btn:disabled { opacity: 0.6; cursor: default; }
 
-    /* Like / Save / Share — vertical rail, middle-right of the video overlay */
+    /* Like / Share — vertical rail, middle-right of the video overlay */
     #fs-action-rail {
       position: absolute; top: 50%; right: 14px; z-index: 10000;
       transform: translateY(-50%);
@@ -172,7 +172,20 @@
     }
     .fs-action-btn:active { transform: scale(0.9); }
     .fs-action-btn.liked   { background: rgba(255,60,90,0.25);  border-color: #ff3c5a; color: #ff3c5a; }
-    .fs-action-btn.saved   { background: rgba(201,168,76,0.25); border-color: #C9A84C; color: #C9A84C; }
+
+    /* "Buy Now" / "Shop Now" — bottom-center CTA on the video overlay, opens
+       the scanned content's business-details card (name, address, phone to
+       call) if the uploader is a business account. */
+    #fs-buy-btn {
+      position: absolute; left: 50%; bottom: 28px; z-index: 10000;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, #00C9A7, #00E5CC);
+      border: none; border-radius: 50px;
+      color: #04211d; font-size: 14px; font-weight: 700; font-family: inherit;
+      padding: 12px 28px; cursor: pointer;
+      box-shadow: 0 6px 20px rgba(0,201,167,0.4);
+    }
+    #fs-buy-btn:active { transform: translateX(-50%) scale(0.96); }
 
     /* Video loader spinner */
     #fs-loader {
@@ -286,13 +299,11 @@
       <button id="fs-like-btn" class="fs-action-btn" onclick="toggleLike()" title="Like">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 21s-7.5-4.8-10-9.3C.4 8.6 1.7 5 5.2 4.2c2-.5 4 .3 5.2 2 .3.4.9.4 1.2 0 1.2-1.7 3.2-2.5 5.2-2 3.5.8 4.8 4.4 3.2 7.5C19.5 16.2 12 21 12 21z" opacity="0.18"/><path d="M12 21s-7.5-4.8-10-9.3C.4 8.6 1.7 5 5.2 4.2c2-.5 4 .3 5.2 2 .3.4.9.4 1.2 0 1.2-1.7 3.2-2.5 5.2-2 3.5.8 4.8 4.4 3.2 7.5C19.5 16.2 12 21 12 21z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
-      <button id="fs-save-btn" class="fs-action-btn" onclick="toggleSave()" title="Save">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12a1 1 0 0 1 1 1v16l-7-4-7 4V4a1 1 0 0 1 1-1Z"/></svg>
-      </button>
       <button id="fs-share-btn" class="fs-action-btn" onclick="shareCurrentVideoTarget()" title="Share">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="10.6" x2="15.4" y2="6.4"/><line x1="8.6" y1="13.4" x2="15.4" y2="17.6"/></svg>
       </button>
     </div>
+    <button id="fs-buy-btn" onclick="buyNowTapped()">🛍️ Buy Now</button>
     <video id="fs-video" playsinline webkit-playsinline style="visibility:hidden"></video>
     <div id="fs-loader">
       <div id="fs-loader-ring"></div>
@@ -354,9 +365,8 @@
     var needTargetLost    = false; // true after reload: require camera to leave target first
     var videoLandscape    = false; // tracks the forced orientation state
     var foundTargets      = {};    // targetIndex -> target data, while currently detected
-    var currentVideoTarget = null; // { id, label } of the target whose video is currently in the fullscreen overlay — used by the Report/Like/Save/Share buttons
+    var currentVideoTarget = null; // { id, label } of the target whose video is currently in the fullscreen overlay — used by the Report/Like/Share/Buy Now buttons
     var likedState = false; // whether the CURRENT video is liked — reset each time a new one opens (see openFullscreen)
-    var savedState = false; // ditto, for saved
     var diag               = {};   // diagnostic state surfaced on the error screen
 
     // ── Track the scene's 'renderstart' event from the EARLIEST possible
@@ -682,7 +692,7 @@
 
       var reportBtn = document.getElementById('fs-report-btn');
       if (reportBtn) { reportBtn.disabled = false; reportBtn.textContent = '🚩 Report'; }
-      likedState = false; savedState = false;
+      likedState = false;
       updateActionButtonsUI();
 
       backBtn.style.display  = 'none';
@@ -831,14 +841,12 @@
 
     function updateActionButtonsUI() {
       var likeBtn = document.getElementById('fs-like-btn');
-      var saveBtn = document.getElementById('fs-save-btn');
       if (likeBtn) likeBtn.classList.toggle('liked', likedState);
-      if (saveBtn) saveBtn.classList.toggle('saved', savedState);
     }
 
-    // Like/Save need the viewer's own auth token, which this static iframe
-    // has no way to fetch on its own — delegated to the parent React app,
-    // same pattern as Report/openDocument above.
+    // Like needs the viewer's own auth token, which this static iframe has
+    // no way to fetch on its own — delegated to the parent React app, same
+    // pattern as Report/openDocument above.
     function toggleLike() {
       if (!currentVideoTarget || !currentVideoTarget.id) return;
       likedState = !likedState;
@@ -848,12 +856,13 @@
         '*'
       );
     }
-    function toggleSave() {
+    // Tells the parent app to show this content's business-details card
+    // (name, address, phone to call) — parent fetches it since this static
+    // iframe has no direct API access of its own.
+    function buyNowTapped() {
       if (!currentVideoTarget || !currentVideoTarget.id) return;
-      savedState = !savedState;
-      updateActionButtonsUI();
       window.parent.postMessage(
-        { type: 'ar-save-target', targetId: currentVideoTarget.id, active: savedState },
+        { type: 'ar-buy-now', targetId: currentVideoTarget.id, label: currentVideoTarget.label || '' },
         '*'
       );
     }
@@ -895,8 +904,6 @@
         openFullscreen(t.videoUrl, true);
       } else if (t.targetType === 'animation' && t.urlLink) {
         window.parent.postMessage({ type: 'ar-animation-triggered', animId: t.urlLink, label: t.label || '' }, '*');
-      } else if (t.targetType === 'catalog' && t.urlLink) {
-        window.parent.postMessage({ type: 'ar-catalog-triggered', catalogId: t.urlLink, label: t.label || '' }, '*');
       } else if (t.targetType === 'document' && t.urlLink) {
         openDocument({ url: t.urlLink, category: docCategory(t.urlLink), previewUrl: t.previewUrl || '', fileName: t.fileName || '' });
       } else if (t.urlLink && /\.(glb|gltf|obj|fbx)/i.test(t.urlLink)) {
@@ -1043,28 +1050,6 @@
               needTargetLost = false;
               urlBadge.classList.remove('visible');
               window.parent.postMessage({ type: 'ar-animation-lost' }, '*');
-            });
-          })(t.urlLink, t.label || '');
-
-        } else if (t.targetType === 'catalog' && t.urlLink) {
-          // Catalog target — tell parent to open the browsable item list overlay
-          var catalogPlane = document.createElement('a-plane');
-          catalogPlane.setAttribute('width',   '0.01');
-          catalogPlane.setAttribute('height',  '0.01');
-          catalogPlane.setAttribute('opacity', '0');
-          entity.appendChild(catalogPlane);
-
-          (function(catalogId, catalogLabel) {
-            entity.addEventListener('targetFound', function() {
-              urlBadge.textContent = '👆 Tap to reopen';
-              urlBadge.classList.add('visible');
-              if (Date.now() - lastCloseTime < 3000) return;
-              if (needTargetLost) return;
-              window.parent.postMessage({ type: 'ar-catalog-triggered', catalogId: catalogId, label: catalogLabel }, '*');
-            });
-            entity.addEventListener('targetLost', function() {
-              needTargetLost = false;
-              urlBadge.classList.remove('visible');
             });
           })(t.urlLink, t.label || '');
 

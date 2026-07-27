@@ -11,3 +11,10 @@ services:
       - key: FRONTEND_ORIGIN
         value: https://memoera.in
       # PORT is injected automatically by Render — do not add it here
+      # Razorpay live keys — sync: false means Render won't store/overwrite
+      # these from this file; set the actual values once in the dashboard
+      # (Render → webar-backend → Environment) and never commit them here.
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
+        sync: false

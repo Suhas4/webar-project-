@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
+import { jsPDF } from 'jspdf';
 import { COMPILER_URL } from '../hooks/loadMindARCompiler.js';
-import { saveCatalog } from '../hooks/useCatalog.js';
 import { saveTargets } from '../hooks/useArStorage.js';
 import { rebuildPublicMindInBackground } from '../utils/rebuildPublicMind.js';
 import { assessMarkerQuality } from '../utils/assessMarkerQuality.js';
@@ -15,12 +15,109 @@ function emptyItem() {
   return { id: Date.now() + Math.random().toString(36).slice(2), title: '', price: '', description: '', urlLink: '', imageFile: null, imagePreview: null };
 }
 
-function ItemCard({ item, index, onChange, onRemove, onPickImage }) {
+// Resize + re-encode to a JPEG data URL so large phone photos don't bloat the
+// generated PDF — mirrors the same approach used for Photo Animation frames.
+async function imageFileToDataURL(file, maxW = 900) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxW / img.width);
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve({ dataUrl: canvas.toDataURL('image/jpeg', 0.82), w, h });
+    };
+    img.src = url;
+  });
+}
+
+// Builds a simple catalog PDF — one item per section, photo + name + price +
+// description — so scanning the cover photo can just open a document instead
+// of needing its own AR overlay/viewer.
+async function generateCatalogPdf(name, items) {
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 40;
+  let y = margin;
+
+  doc.setFontSize(22);
+  doc.setFont(undefined, 'bold');
+  doc.text(name || 'Catalog', margin, y);
+  y += 34;
+  doc.setFontSize(10);
+  doc.setFont(undefined, 'normal');
+  doc.setTextColor(120);
+  doc.text(`${items.length} item${items.length !== 1 ? 's' : ''}`, margin, y);
+  doc.setTextColor(20);
+  y += 26;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const imgMaxW = pageW - margin * 2;
+    const imgMaxH = 240;
+    let imgH = 0;
+
+    if (item.imageFile) {
+      const { dataUrl, w, h } = await imageFileToDataURL(item.imageFile);
+      const scale = Math.min(imgMaxW / w, imgMaxH / h, 1);
+      const drawW = w * scale;
+      const drawH = h * scale;
+      if (y + drawH + 90 > pageH - margin) { doc.addPage(); y = margin; }
+      doc.addImage(dataUrl, 'JPEG', margin, y, drawW, drawH);
+      imgH = drawH;
+    } else if (y + 90 > pageH - margin) {
+      doc.addPage(); y = margin;
+    }
+
+    y += imgH + 16;
+    doc.setFontSize(14);
+    doc.setFont(undefined, 'bold');
+    doc.text(item.title || `Item ${i + 1}`, margin, y);
+    if (item.price) {
+      doc.setTextColor(0, 150, 130);
+      doc.text(item.price, pageW - margin, y, { align: 'right' });
+      doc.setTextColor(20);
+    }
+    y += 18;
+    if (item.description) {
+      doc.setFontSize(11);
+      doc.setFont(undefined, 'normal');
+      const lines = doc.splitTextToSize(item.description, pageW - margin * 2);
+      doc.text(lines, margin, y);
+      y += lines.length * 14;
+    }
+    if (item.urlLink) {
+      doc.setFontSize(10);
+      doc.setTextColor(0, 120, 220);
+      doc.textWithLink(item.urlLink, margin, y + 4, { url: item.urlLink });
+      doc.setTextColor(20);
+      y += 18;
+    }
+    y += 24;
+    if (i < items.length - 1) {
+      doc.setDrawColor(225);
+      doc.line(margin, y - 12, pageW - margin, y - 12);
+    }
+  }
+
+  const blob = doc.output('blob');
+  blob.name = `${(name || 'catalog').replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.pdf`;
+  return blob;
+}
+
+function ItemCard({ item, index, onChange, onRemove, onPickImage, canRemove }) {
   return (
     <div style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:16, padding:14, display:'flex', flexDirection:'column', gap:10 }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
         <span style={{ fontSize:12, fontWeight:700, color:GOLD, letterSpacing:'0.06em' }}>ITEM {index + 1}</span>
-        <button onClick={onRemove} style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.4)', fontSize:12, cursor:'pointer' }}>Remove</button>
+        {canRemove && (
+          <button onClick={onRemove} style={{ background:'transparent', border:'none', color:'rgba(255,255,255,0.4)', fontSize:12, cursor:'pointer' }}>Remove</button>
+        )}
       </div>
 
       <div onClick={onPickImage} style={{ cursor:'pointer', borderRadius:12, overflow:'hidden', height:110,
@@ -54,7 +151,6 @@ export default function CatalogSetupScreen({ onStart, onBack, isPublic = false }
   const [state,   setState]   = useState('idle');
   const [progress,setProgress]= useState(0);
   const [error,   setError]   = useState('');
-  const [markerSheet, setMarkerSheet] = useState(false);
   const markerInputRef = useRef(null);
   const itemImageRefs   = useRef({});
 
@@ -82,20 +178,30 @@ export default function CatalogSetupScreen({ onStart, onBack, isPublic = false }
     const input = itemImageRefs.current[id];
     input?.click();
   };
+  // Uploading a photo for the last item in the list immediately opens up the
+  // next item's card — a guided one-at-a-time flow instead of requiring a
+  // separate "+ Add Item" tap after every photo.
   const onItemImageChosen = (id, e) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
-    updateItem(id, { imageFile: file, imagePreview: URL.createObjectURL(file) });
+    setItems((prev) => {
+      const next = prev.map((it) => (it.id === id ? { ...it, imageFile: file, imagePreview: URL.createObjectURL(file) } : it));
+      const isLast = prev[prev.length - 1]?.id === id;
+      return isLast ? [...next, emptyItem()] : next;
+    });
   };
 
-  const canCreate = catalogName.trim() && markerFile && items.every((it) => it.imageFile && it.title.trim());
+  const filledItems = items.filter((it) => it.imageFile);
+  const canCreate = catalogName.trim() && markerFile && filledItems.length > 0 && filledItems.every((it) => it.title.trim());
 
   const handleCreate = useCallback(async () => {
     if (!canCreate) return;
     setState('compiling'); setProgress(0); setError('');
     try {
-      const catalogId = await saveCatalog(catalogName.trim(), items, (pct) => setProgress(Math.round(pct * 0.3)));
+      const name = catalogName.trim();
+      const pdfBlob = await generateCatalogPdf(name, filledItems);
+      setProgress(10);
 
       const markerBuf  = await markerFile.arrayBuffer();
       const markerBlob = new Blob([markerBuf], { type: markerFile.type || 'image/jpeg' });
@@ -116,22 +222,21 @@ export default function CatalogSetupScreen({ onStart, onBack, isPublic = false }
       let lastPct = -1;
       await compiler.compileImageTargets([markerImg], (prog) => {
         const pct = Math.min(100, Math.round(prog * 100));
-        if (pct !== lastPct) { lastPct = pct; setProgress(30 + Math.round(pct * 0.3)); return new Promise((r) => setTimeout(r, 0)); }
+        if (pct !== lastPct) { lastPct = pct; setProgress(10 + Math.round(pct * 0.4)); return new Promise((r) => setTimeout(r, 0)); }
       });
       URL.revokeObjectURL(markerObjUrl);
       const mindBuffer = await compiler.exportData();
 
-      setState('uploading'); setProgress(60);
-      const label       = catalogName.trim();
-      const targetsMeta = [{ label, planeWidth:1, planeHeight:0.5625, planeOffsetY:0, targetType:'catalog', urlLink:String(catalogId) }];
+      setState('uploading'); setProgress(55);
+      const targetsMeta = [{ label: name, planeWidth:1, planeHeight:0.5625, planeOffsetY:0, targetType:'document', urlLink:'', fileName: pdfBlob.name }];
       const freshMarkerBlob = new Blob([await markerFile.arrayBuffer()], { type: markerFile.type || 'image/jpeg' });
-      await saveTargets(targetsMeta, mindBuffer, null, [freshMarkerBlob], (pct) => setProgress(60 + Math.round(pct * 0.3)), isPublic);
+      await saveTargets(targetsMeta, mindBuffer, null, [freshMarkerBlob], (pct) => setProgress(55 + Math.round(pct * 0.35)), isPublic, [pdfBlob]);
 
       setState('finalizing'); setProgress(95);
 
       const mindUrl  = URL.createObjectURL(new Blob([mindBuffer], { type:'application/octet-stream' }));
-      const arTargets = [{ label, targetIndex:0, planeWidth:1, planeHeight:0.5625, planeOffsetY:0,
-        targetType:'catalog', urlLink:String(catalogId), videoUrl:'', isPublic }];
+      const arTargets = [{ label: name, targetIndex:0, planeWidth:1, planeHeight:0.5625, planeOffsetY:0,
+        targetType:'document', urlLink:URL.createObjectURL(pdfBlob), fileName: pdfBlob.name, previewUrl:'', videoUrl:'', isPublic }];
       onStart({ targets: arTargets, mindFileUrl: mindUrl });
 
       if (isPublic) rebuildPublicMindInBackground();
@@ -139,7 +244,7 @@ export default function CatalogSetupScreen({ onStart, onBack, isPublic = false }
       setState('error');
       setError(err.message || 'Failed to create catalog. Please try again.');
     }
-  }, [canCreate, catalogName, items, markerFile, onStart, isPublic]);
+  }, [canCreate, catalogName, filledItems, markerFile, onStart, isPublic]);
 
   const isWorking = ['compiling','uploading','finalizing'].includes(state);
 
@@ -163,7 +268,7 @@ export default function CatalogSetupScreen({ onStart, onBack, isPublic = false }
         <div>
           <div style={{ fontSize:18, fontWeight:700, color:'#fff', fontFamily:FONT }}>Create Catalog</div>
           <div style={{ fontSize:11, color:'rgba(255,255,255,0.45)', fontFamily:FONT, marginTop:2 }}>
-            Scan the cover photo → browse all your items
+            Scan the cover photo → opens your catalog as a PDF
           </div>
         </div>
       </div>
@@ -186,15 +291,19 @@ export default function CatalogSetupScreen({ onStart, onBack, isPublic = false }
 
         <div>
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
-            <div style={labelStyle}>Items ({items.length})</div>
+            <div style={labelStyle}>Items ({filledItems.length})</div>
             <button onClick={addItem} style={{ background:'rgba(0,201,167,0.15)', border:`1px solid ${TEAL}55`,
               borderRadius:20, color:TEAL, fontSize:12, fontWeight:700, fontFamily:FONT, padding:'6px 14px', cursor:'pointer' }}>
               + Add Item
             </button>
           </div>
-          <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+          <div style={{ fontSize:11, color:'rgba(255,255,255,0.35)', fontFamily:FONT, marginBottom:2 }}>
+            Add a photo for each item — the next item's card appears automatically
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:12, marginTop: 10 }}>
             {items.map((item, i) => (
               <ItemCard key={item.id} item={item} index={i}
+                canRemove={items.length > 1}
                 onChange={(patch) => updateItem(item.id, patch)}
                 onRemove={() => removeItem(item.id)}
                 onPickImage={() => pickItemImage(item.id)} />
@@ -218,7 +327,7 @@ export default function CatalogSetupScreen({ onStart, onBack, isPublic = false }
         </button>
         {!canCreate && !isWorking && (
           <div style={{ textAlign:'center', fontSize:11, color:'rgba(255,255,255,0.3)', fontFamily:FONT }}>
-            Add a catalog name, a cover photo, and a photo + name for every item
+            Add a catalog name, a cover photo, and a photo + name for at least one item
           </div>
         )}
       </div>
