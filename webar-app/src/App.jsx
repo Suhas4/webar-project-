@@ -29,6 +29,7 @@ const BACK_MAP = {
   'nfc-clear':    'nfc',
   'nfc-history':  'nfc',
   'catalog-setup': 'home',
+  'seller-dashboard': 'home',
   // Onboarding (account type → category → details → complete) now has an
   // on-screen Back button on every step, mirroring these same targets — kept
   // in sync so the hardware back button / edge-swipe gesture behaves the
@@ -69,6 +70,7 @@ const NfcReadScreen            = lazy(() => import('./components/NfcReadScreen.j
 const NfcClearScreen           = lazy(() => import('./components/NfcClearScreen.jsx'));
 const NfcHistoryScreen         = lazy(() => import('./components/NfcHistoryScreen.jsx'));
 const CatalogSetupScreen       = lazy(() => import('./components/CatalogSetupScreen.jsx'));
+const SellerDashboardScreen    = lazy(() => import('./components/SellerDashboardScreen.jsx'));
 const SetupScreen              = lazy(() => import('./components/SetupScreen.jsx'));
 const SignInScreen             = lazy(() => import('./components/SignInScreen.jsx'));
 const SignUpScreen             = lazy(() => import('./components/SignUpScreen.jsx'));
@@ -747,6 +749,8 @@ export default function App() {
     mainScreen = <NfcHistoryScreen onBack={() => setAppView('nfc')} />;
   } else if (appView === 'catalog-setup') {
     mainScreen = <CatalogSetupScreen onStart={handleStart} onBack={() => setAppView('home')} isPublic={selectedVisibility === 'public'} />;
+  } else if (appView === 'seller-dashboard') {
+    mainScreen = <SellerDashboardScreen onBack={() => setAppView('home')} />;
   } else if (appView === 'home') {
     mainScreen = !localStorage.getItem('memoera_token') ? null : (
       <>
@@ -764,6 +768,7 @@ export default function App() {
             setSelectedVisibility('private');
             setAppView('catalog-setup');
           }}
+          onDashboard={() => setAppView('seller-dashboard')}
           onLiked={() => setAppView('liked')}
           onAdmin={() => setAppView('admin')}
           onSignOut={handleSignOut}
