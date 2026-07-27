@@ -173,20 +173,6 @@
     .fs-action-btn:active { transform: scale(0.9); }
     .fs-action-btn.liked   { background: rgba(255,60,90,0.25);  border-color: #ff3c5a; color: #ff3c5a; }
 
-    /* "Buy Now" / "Shop Now" — bottom-center CTA on the video overlay, opens
-       the scanned content's business-details card (name, address, phone to
-       call) if the uploader is a business account. */
-    #fs-buy-btn {
-      position: absolute; left: 50%; bottom: 28px; z-index: 10000;
-      transform: translateX(-50%);
-      background: linear-gradient(135deg, #00C9A7, #00E5CC);
-      border: none; border-radius: 50px;
-      color: #04211d; font-size: 14px; font-weight: 700; font-family: inherit;
-      padding: 12px 28px; cursor: pointer;
-      box-shadow: 0 6px 20px rgba(0,201,167,0.4);
-    }
-    #fs-buy-btn:active { transform: translateX(-50%) scale(0.96); }
-
     /* Video loader spinner */
     #fs-loader {
       position: absolute; inset: 0; z-index: 10002;
@@ -303,7 +289,6 @@
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.6" y1="10.6" x2="15.4" y2="6.4"/><line x1="8.6" y1="13.4" x2="15.4" y2="17.6"/></svg>
       </button>
     </div>
-    <button id="fs-buy-btn" onclick="buyNowTapped()">🛍️ Buy Now</button>
     <video id="fs-video" playsinline webkit-playsinline style="visibility:hidden"></video>
     <div id="fs-loader">
       <div id="fs-loader-ring"></div>
@@ -853,16 +838,6 @@
       updateActionButtonsUI();
       window.parent.postMessage(
         { type: 'ar-like-target', targetId: currentVideoTarget.id, active: likedState },
-        '*'
-      );
-    }
-    // Tells the parent app to show this content's business-details card
-    // (name, address, phone to call) — parent fetches it since this static
-    // iframe has no direct API access of its own.
-    function buyNowTapped() {
-      if (!currentVideoTarget || !currentVideoTarget.id) return;
-      window.parent.postMessage(
-        { type: 'ar-buy-now', targetId: currentVideoTarget.id, label: currentVideoTarget.label || '' },
         '*'
       );
     }
