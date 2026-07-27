@@ -38,7 +38,7 @@ const authHeaders = () => ({
   Authorization: "Bearer " + (localStorage.getItem("memoera_token") || ""),
 });
 
-export default function ProfileScreen({ user, onBack, onUserUpdate, onSwitchToBusiness, onGallery, onDashboard }) {
+export default function ProfileScreen({ user, onBack, onUserUpdate, onSwitchToBusiness, onGallery }) {
   const { colors, theme } = useTheme();
   const { tr, lang } = useLanguage();
 
@@ -269,11 +269,6 @@ export default function ProfileScreen({ user, onBack, onUserUpdate, onSwitchToBu
               <BrochureIcon color={colors.text} /> <span>My Brochures</span>
             </button>
           )}
-          {onDashboard && (
-            <button onClick={onDashboard} className="prf-navitem" style={{ color: colors.text }}>
-              <ChartIcon color={colors.text} /> <span>Analytics</span>
-            </button>
-          )}
           <button onClick={() => setEditPrefs(true)} className="prf-navitem" style={{ color: colors.text }}>
             <BellIcon color={colors.text} /> <span>Notifications</span>
           </button>
@@ -309,12 +304,7 @@ export default function ProfileScreen({ user, onBack, onUserUpdate, onSwitchToBu
                         <span style={st.chipGold}>Verified Business</span>
                         <span style={{ ...st.chipPlain, color: colors.text, borderColor: colors.border }}>Business Account</span>
                       </>
-                    : <>
-                        <span style={{ ...st.chipPlain, color: colors.text, borderColor: colors.border }}>Individual Account</span>
-                        {onSwitchToBusiness && (
-                          <button onClick={onSwitchToBusiness} style={st.chipAction}>Switch to Business →</button>
-                        )}
-                      </>}
+                    : <span style={{ ...st.chipPlain, color: colors.text, borderColor: colors.border }}>Individual Account</span>}
                 </div>
 
                 <div style={{ ...st.handle, color: colors.textMuted }}>{handle}</div>
@@ -409,6 +399,29 @@ export default function ProfileScreen({ user, onBack, onUserUpdate, onSwitchToBu
                     : null} />
               </>
             )}
+          </SectionCard>
+
+          {/* Account Type — the only place an Individual can upgrade to a
+              Business account, which is what unlocks the Seller Dashboard and
+              product listings. */}
+          <SectionCard colors={colors} icon={<BuildingIcon color={TEAL} />} title="Account Type">
+            <div style={st.acctRow}>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ ...st.acctCurrent, color: colors.text }}>
+                  {isBusiness ? "Business Account" : "Individual Account"}
+                </div>
+                <div style={{ ...st.secSub, color: colors.textMuted, marginTop: 4 }}>
+                  {isBusiness
+                    ? "You can publish product listings and appear to buyers who tap Buy Now on your scanned products."
+                    : "Switch to a Business account to list products, set prices and let buyers contact you directly from a scan."}
+                </div>
+              </div>
+              {!isBusiness && onSwitchToBusiness && (
+                <button onClick={onSwitchToBusiness} style={st.switchBtn}>
+                  Switch to Business →
+                </button>
+              )}
+            </div>
           </SectionCard>
 
           {/* Business Information — business accounts only */}
@@ -855,7 +868,6 @@ function ShieldIcon({ color = "#fff" }) { return <svg {...sv({ stroke: color })}
 function GearIcon({ color = "#fff" }) { return <svg {...sv({ stroke: color })}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 9 19.4a1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 9a1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z" /></svg>; }
 function LinkIcon({ color = "#fff" }) { return <svg {...sv({ stroke: color })}><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" /><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" /></svg>; }
 function BellIcon({ color = "#fff" }) { return <svg {...sv({ stroke: color })}><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>; }
-function ChartIcon({ color = "#fff" }) { return <svg {...sv({ stroke: color })}><path d="M4 20V10M10 20V4M16 20v-7M22 20H2" /></svg>; }
 function BrochureIcon({ color = "#fff" }) { return <svg {...sv({ stroke: color })}><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M9 3v18M13 8h4M13 12h4" /></svg>; }
 function BackIcon() { return <svg {...sv({ stroke: "currentColor" })}><path d="M19 12H5M12 19l-7-7 7-7" /></svg>; }
 function PencilIcon() { return <svg {...sv({ stroke: "currentColor", width: 14, height: 14 })}><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>; }
@@ -867,11 +879,15 @@ function PhoneIcon({ color = "#fff" }) { return <svg {...sv({ stroke: color, wid
 function CancelIcon() { return <svg {...sv({ stroke: "currentColor", width: 16, height: 16 })}><circle cx="12" cy="12" r="10" /><path d="M15 9l-6 6M9 9l6 6" /></svg>; }
 function SaveIcon() { return <svg {...sv({ stroke: "#2b1002", width: 16, height: 16 })}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><path d="M17 21v-8H7v8M7 3v5h8" /></svg>; }
 function CheckCircle() { return <span style={st.checkCircle}>✓</span>; }
+// A slim gold ring with a fine check, rather than the chunky scalloped
+// social-media style seal this replaced. The "Verified Business" chip sits
+// directly below the name, so this only needs to be a quiet accent.
 function VerifiedBadge() {
   return (
-    <svg width="24" height="24" viewBox="0 0 24 24" aria-label="Verified" role="img">
-      <path fill={TEAL} d="M12 1.5l2.4 1.8 3-.3 1 2.8 2.6 1.5-.9 2.9.9 2.9-2.6 1.5-1 2.8-3-.3L12 22.5l-2.4-1.8-3 .3-1-2.8L3 16.7l.9-2.9L3 10.9l2.6-1.5 1-2.8 3 .3z" />
-      <path fill="none" stroke="#04211d" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M8.5 12.2l2.3 2.3 4.7-4.7" />
+    <svg width="21" height="21" viewBox="0 0 24 24" aria-label="Verified" role="img" style={{ flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="10" fill="none" stroke={GOLD} strokeWidth="1.6" opacity="0.85" />
+      <path fill="none" stroke={GOLD} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"
+        d="M7.8 12.3l2.8 2.8 5.6-5.9" />
     </svg>
   );
 }
@@ -1052,8 +1068,6 @@ const st = {
     border: `1px solid ${GOLD}66`, borderRadius: 8, padding: "6px 12px", fontFamily: FONT },
   chipPlain: { fontSize: 11.5, fontWeight: 600, background: "transparent",
     border: "1px solid", borderRadius: 8, padding: "6px 12px", fontFamily: FONT },
-  chipAction: { fontSize: 11.5, fontWeight: 700, color: TEAL, background: "rgba(0,201,167,0.12)",
-    border: `1px solid ${TEAL}66`, borderRadius: 8, padding: "6px 12px", fontFamily: FONT, cursor: "pointer" },
   handle: { fontSize: 14, fontFamily: FONT, marginTop: 10 },
   metaLabel: { fontSize: 10.5, fontWeight: 700, letterSpacing: "0.1em", fontFamily: FONT, marginTop: 14 },
   idBox: { display: "inline-flex", alignItems: "center", gap: 10, marginTop: 6,
@@ -1098,6 +1112,12 @@ const st = {
     border: `1px solid ${GOLD}88`, borderRadius: 8, padding: "7px 13px", fontFamily: FONT, cursor: "pointer" },
   tagBtnTeal: { fontSize: 11.5, fontWeight: 700, color: TEAL, background: "transparent",
     border: `1px solid ${TEAL}88`, borderRadius: 8, padding: "7px 13px", fontFamily: FONT, cursor: "pointer" },
+
+  acctRow: { display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", padding: "2px 0" },
+  acctCurrent: { fontSize: 15, fontWeight: 800, fontFamily: FONT, letterSpacing: "-0.01em" },
+  switchBtn: { flexShrink: 0, background: `linear-gradient(135deg,${TEAL},#00E5CC)`, border: "none",
+    borderRadius: 12, color: "#04211d", cursor: "pointer", fontSize: 13.5, fontWeight: 800,
+    fontFamily: FONT, padding: "12px 20px" },
 
   secRow: { display: "flex", alignItems: "center", gap: 14, padding: "13px 0", borderBottom: "1px solid" },
   secTitle: { fontSize: 13.5, fontWeight: 700, fontFamily: FONT },

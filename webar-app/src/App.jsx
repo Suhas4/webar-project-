@@ -506,6 +506,11 @@ export default function App() {
     setAppView('business-category');
   }, []);
 
+  // Seller Dashboard is for listing products against a business, so its entry
+  // points only appear on Business accounts. Individuals get the "Switch to
+  // Business" option in Profile instead.
+  const isBusinessAccount = currentUser?.accountType === 'business';
+
   const finishOnboarding = useCallback(() => {
     setCurrentUser((prev) => {
       const updated = { ...prev, onboardingComplete: true };
@@ -668,8 +673,7 @@ export default function App() {
     mainScreen = <ProfileScreen user={currentUser} onBack={() => setAppView('home')}
       onUserUpdate={(u) => { setCurrentUser(u); localStorage.setItem('memoera_user', JSON.stringify(u)); }}
       onSwitchToBusiness={handleSwitchToBusiness}
-      onGallery={() => setAppView('gallery')}
-      onDashboard={() => setAppView('seller-dashboard')} />;
+      onGallery={() => setAppView('gallery')} />;
   } else if (appView === 'gallery') {
     mainScreen = <GalleryScreen onBack={() => setAppView('home')} onCollection={() => setAppView('collection')} initialQuery={galleryQuery} />;
   } else if (appView === 'collection') {
@@ -773,7 +777,7 @@ export default function App() {
             setSelectedVisibility('private');
             setAppView('catalog-setup');
           }}
-          onDashboard={() => setAppView('seller-dashboard')}
+          onDashboard={isBusinessAccount ? () => setAppView('seller-dashboard') : undefined}
           onLiked={() => setAppView('liked')}
           onAdmin={() => setAppView('admin')}
           onSignOut={handleSignOut}
