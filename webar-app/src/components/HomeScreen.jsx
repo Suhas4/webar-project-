@@ -43,7 +43,9 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
   const isDark = theme === 'dark';
 
   const PROFILE_MENU_LABELS = {
-    account: tr.accountSection, notifications: tr.notificationsSection, ar: tr.arSettingsSection,
+    // Not tr.notificationsSection: that string is also the Settings screen's own
+    // section heading, and this entry is specifically about the OS permission.
+    account: tr.accountSection, notifications: 'Notification Permissions', ar: tr.arSettingsSection,
     theme: tr.themeSection, subscription: tr.subscriptionSection,
     refer: tr.referAFriend, support: tr.supportSection, about: tr.aboutUsSection,
   };
@@ -321,11 +323,11 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
               <div style={{ ...styles.dropdown, right: 'auto', left: 0, width: 230,
                 background: colors.bgSolid, border: `1px solid ${colors.border}` }}>
 
-                {/* Brightness — the theme toggle that used to sit in the header */}
+                {/* Mode — the theme toggle that used to sit in the header */}
                 <button onClick={toggleTheme}
                   style={{ ...styles.menuItem, color: colors.text, borderBottom: `1px solid ${colors.border}` }}>
                   {isDark ? <SunIcon size={16} color={colors.text} /> : <MoonIcon size={15} color={colors.text} />}
-                  Brightness
+                  Mode
                   <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
                     color: colors.accent, background: `${colors.accent}1e`, borderRadius: 20, padding: '3px 8px' }}>
                     {isDark ? 'DARK' : 'LIGHT'}
