@@ -416,17 +416,16 @@ export default function App() {
   }, [registerUserForGreetings]);
   const handleOtpFail = useCallback(() => { setVideoOverlay({ src: '/x-mark.mp4', next: 'signup' }); }, []);
 
-  // Gates entry to the signup form itself on having agreed to Terms &
-  // Conditions — previously the account was fully created (token stored,
-  // signed in) before the user ever saw the T&C prompt, and declining just
-  // stranded them with a live, unconsented account. Now nothing is created
-  // until they've agreed.
+  // Gates entry to the signup form itself on agreeing to Terms & Conditions —
+  // previously the account was fully created (token stored, signed in)
+  // before the user ever saw the T&C prompt, and declining just stranded
+  // them with a live, unconsented account. Now nothing is created until
+  // they've agreed. Unlike the 'scan' gate (which only asks once ever per
+  // device, via termsAgreedRef), signup always shows this prompt — every
+  // new account creation is its own consent event, regardless of whether
+  // this device saw it before for a different signup or for scanning.
   const handleCreateAccountTapped = useCallback(() => {
-    if (termsAgreedRef.current) {
-      setAppView('signup');
-    } else {
-      setPendingTermsGate('signup');
-    }
+    setPendingTermsGate('signup');
   }, []);
 
   const handleAccountType = useCallback((accountType) => {
