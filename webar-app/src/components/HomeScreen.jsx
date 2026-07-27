@@ -35,7 +35,7 @@ const PROMO_CARDS = [
   { key: 'streak',    eyebrow: 'Milestone', title: 'Keep your streak', body: null, variant: 'warm' },
 ];
 
-export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium, onSignOut, onRefer, onStreak, onCollection, onLiked, onAdmin, onScan, onSearch, onAnimation, onNfc, onCatalog, user }) {
+export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium, onSignOut, onRefer, onStreak, onCollection, onLiked, onAdmin, onScan, onSearch, onAnimation, onNfc, onCatalog, onDashboard, user }) {
   const { lang, setLang } = useLanguage();
   const { theme, toggleTheme, colors } = useTheme();
   const tr = { ...T.en, ...(T[lang] || {}) };
@@ -486,6 +486,9 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
           )}
           {onCatalog && (
             <NavBtn className="home-feature" icon={<CatalogNavIcon size={39} color="#fff" />} bg="linear-gradient(135deg,#6366F1,#8B85F8)" label="Catalog" labelColor={colors.text} onClick={onCatalog} />
+          )}
+          {onDashboard && (
+            <NavBtn className="home-feature" icon={<DashboardNavIcon size={39} color="#fff" />} bg="linear-gradient(135deg,#FF7A45,#FFB199)" label="Dashboard" labelColor={colors.text} onClick={onDashboard} />
           )}
           <NavBtn className="home-feature" icon={<ShareIcon size={48} color="#fff" />} bg="linear-gradient(135deg,#00C9A7,#00E5CC)" label={tr.navShare || 'Share'} labelColor={colors.text} onClick={handleShare} />
         </div>
@@ -1001,6 +1004,15 @@ function CatalogNavIcon({ size = 34, color = '#fff' }) {
       <rect x="13" y="3"  width="8" height="8" rx="2" />
       <rect x="3"  y="13" width="8" height="8" rx="2" />
       <rect x="13" y="13" width="8" height="8" rx="2" />
+    </svg>
+  );
+}
+function DashboardNavIcon({ size = 34, color = '#fff' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} stroke="none">
+      <rect x="3"  y="12" width="5" height="9" rx="1.5" />
+      <rect x="9.5" y="6"  width="5" height="15" rx="1.5" />
+      <rect x="16" y="2"  width="5" height="19" rx="1.5" />
     </svg>
   );
 }

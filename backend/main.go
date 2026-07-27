@@ -302,6 +302,27 @@ func initDB(ctx context.Context) error {
 	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_catalog_items_catalog ON catalog_items(catalog_id, position)`)
 	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_catalogs_user ON catalogs(user_id)`)
 
+	// Seller Dashboard / "Buy Now" marketplace — many sellers can each list
+	// their own price+contact against the SAME scanned target/marker (unlike
+	// ar_targets.user_id, which is just whoever uploaded that AR content).
+	// Scanning a product and tapping Buy Now shows every seller listed here
+	// for that target, cheapest first — Memoera never handles payment, this
+	// is purely a directory connecting buyer to seller (call/WhatsApp).
+	_, _ = db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS product_listings (
+			id          BIGSERIAL PRIMARY KEY,
+			target_id   BIGINT NOT NULL REFERENCES ar_targets(id) ON DELETE CASCADE,
+			seller_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			price       TEXT NOT NULL DEFAULT '',
+			moq         TEXT NOT NULL DEFAULT '',
+			unit        TEXT NOT NULL DEFAULT '',
+			notes       TEXT NOT NULL DEFAULT '',
+			created_at  TIMESTAMPTZ DEFAULT NOW(),
+			UNIQUE (target_id, seller_id)
+		)`)
+	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_product_listings_target ON product_listings(target_id)`)
+	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_product_listings_seller ON product_listings(seller_id)`)
+
 	// Real storage quota / plan / referral bonus tracking (server-authoritative —
 	// previously these were only simulated client-side in localStorage).
 	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS own_referral_code TEXT`)
@@ -1362,6 +1383,27 @@ func updateOnboardingHandler(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GET /api/business/mine — the caller's own saved business contact info, so
+// the Seller Dashboard can tell whether they still need to fill it in
+// before publishing their first listing (name/phone come from wherever the
+// account already saved them — signup, Switch to Business, or Dashboard's
+// own quick-setup form).
+func getMyBusinessDetailsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	var name, phone string
+	_ = db.QueryRow(r.Context(), `SELECT business_name, business_phone FROM users WHERE id=$1`, userID).Scan(&name, &phone)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"businessName": name, "phone": phone})
+}
+
 // PUT /api/business/details — persists the caller's own business contact
 // info (BusinessDetailsScreen.jsx), used both at signup and when switching
 // Individual -> Business from Profile.
@@ -1430,6 +1472,186 @@ func getBusinessByTargetHandler(w http.ResponseWriter, r *http.Request) {
 		"businessName": name, "businessAddress": address, "phone": phone,
 		"email": email, "website": website, "instagram": instagram,
 	})
+}
+
+// PUT /api/listings — a seller publishes (or updates) their price/contact
+// listing against an existing AR target/marker. Upserted on (target_id,
+// seller_id) so re-submitting just updates price/moq/notes instead of
+// erroring or duplicating.
+func upsertListingHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	sellerID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	var req struct {
+		TargetID int64  `json:"targetId"`
+		Price    string `json:"price"`
+		Moq      string `json:"moq"`
+		Unit     string `json:"unit"`
+		Notes    string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.TargetID == 0 {
+		writeError(w, http.StatusBadRequest, "a valid targetId is required")
+		return
+	}
+	if strings.TrimSpace(req.Price) == "" {
+		writeError(w, http.StatusBadRequest, "price is required")
+		return
+	}
+	var exists bool
+	_ = db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM ar_targets WHERE id=$1)`, req.TargetID).Scan(&exists)
+	if !exists {
+		writeError(w, http.StatusNotFound, "that product/marker no longer exists")
+		return
+	}
+	_, err = db.Exec(r.Context(), `
+		INSERT INTO product_listings (target_id, seller_id, price, moq, unit, notes)
+		VALUES ($1,$2,$3,$4,$5,$6)
+		ON CONFLICT (target_id, seller_id) DO UPDATE SET
+			price = $3, moq = $4, unit = $5, notes = $6`,
+		req.TargetID, sellerID, req.Price, req.Moq, req.Unit, req.Notes)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save listing")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// GET /api/listings/mine — the signed-in seller's own listings, with enough
+// target context (label/image) to render "My Listings" in the Dashboard.
+func myListingsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	sellerID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	rows, err := db.Query(r.Context(), `
+		SELECT l.id, l.target_id, COALESCE(t.label,''), COALESCE(t.image_key,''), l.price, l.moq, l.unit, l.notes
+		FROM product_listings l JOIN ar_targets t ON t.id = l.target_id
+		WHERE l.seller_id = $1 ORDER BY l.created_at DESC`, sellerID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load listings")
+		return
+	}
+	defer rows.Close()
+
+	type Listing struct {
+		ID       int64  `json:"id"`
+		TargetID int64  `json:"targetId"`
+		Label    string `json:"label"`
+		ImageURL string `json:"imageUrl"`
+		Price    string `json:"price"`
+		Moq      string `json:"moq"`
+		Unit     string `json:"unit"`
+		Notes    string `json:"notes"`
+	}
+	var out []Listing
+	for rows.Next() {
+		var l Listing
+		var imageKey string
+		if err := rows.Scan(&l.ID, &l.TargetID, &l.Label, &imageKey, &l.Price, &l.Moq, &l.Unit, &l.Notes); err != nil {
+			continue
+		}
+		l.ImageURL = fileURL(imageKey)
+		out = append(out, l)
+	}
+	if out == nil {
+		out = []Listing{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"listings": out})
+}
+
+// DELETE /api/listings?id=123 — remove one of the caller's own listings.
+func deleteListingHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	sellerID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	id, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	if err != nil || id == 0 {
+		writeError(w, http.StatusBadRequest, "a valid id is required")
+		return
+	}
+	tag, err := db.Exec(r.Context(), `DELETE FROM product_listings WHERE id=$1 AND seller_id=$2`, id, sellerID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete listing")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "listing not found")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// GET /api/listings/by-target?targetId=123 — public: every seller who's
+// listed a price against this scanned product, cheapest first. This is what
+// "Buy Now" shows — Memoera is just the directory, never the payment/escrow.
+func listingsByTargetHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	targetID, err := strconv.ParseInt(r.URL.Query().Get("targetId"), 10, 64)
+	if err != nil || targetID == 0 {
+		writeError(w, http.StatusBadRequest, "a valid targetId is required")
+		return
+	}
+	rows, err := db.Query(r.Context(), `
+		SELECT COALESCE(u.business_name,''), u.business_phone, l.price, l.moq, l.unit, l.notes, u.account_type
+		FROM product_listings l JOIN users u ON u.id = l.seller_id
+		WHERE l.target_id = $1 AND u.business_phone <> ''
+		ORDER BY NULLIF(regexp_replace(l.price, '[^0-9.]', '', 'g'), '')::numeric ASC NULLS LAST, l.created_at ASC`, targetID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load sellers")
+		return
+	}
+	defer rows.Close()
+
+	type Seller struct {
+		BusinessName string `json:"businessName"`
+		Phone        string `json:"phone"`
+		Price        string `json:"price"`
+		Moq          string `json:"moq"`
+		Unit         string `json:"unit"`
+		Notes        string `json:"notes"`
+		Verified     bool   `json:"verified"`
+	}
+	var out []Seller
+	for rows.Next() {
+		var s Seller
+		var accountType string
+		if err := rows.Scan(&s.BusinessName, &s.Phone, &s.Price, &s.Moq, &s.Unit, &s.Notes, &accountType); err != nil {
+			continue
+		}
+		if s.BusinessName == "" {
+			s.BusinessName = "Seller"
+		}
+		s.Verified = accountType == "business"
+		out = append(out, s)
+	}
+	if out == nil {
+		out = []Seller{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"sellers": out})
 }
 
 // PUT /api/auth/profile/photo — receive base64 image, upload to R2 server-side, save public URL
@@ -3686,8 +3908,25 @@ func main() {
 	mux.HandleFunc("/api/auth/profile", updateProfileHandler)
 	mux.HandleFunc("/api/auth/security-question", updateSecurityHandler)
 	mux.HandleFunc("/api/auth/onboarding", updateOnboardingHandler)
-	mux.HandleFunc("/api/business/details", saveBusinessDetailsHandler)
+	mux.HandleFunc("/api/business/details", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			getMyBusinessDetailsHandler(w, r)
+			return
+		}
+		saveBusinessDetailsHandler(w, r)
+	})
 	mux.HandleFunc("/api/business/by-target", getBusinessByTargetHandler)
+	mux.HandleFunc("/api/listings", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPut:
+			upsertListingHandler(w, r)
+		case http.MethodDelete:
+			deleteListingHandler(w, r)
+		default:
+			myListingsHandler(w, r)
+		}
+	})
+	mux.HandleFunc("/api/listings/by-target", listingsByTargetHandler)
 	mux.HandleFunc("/api/auth/profile/photo", updateProfilePhotoHandler)
 	mux.HandleFunc("/api/auth/change-password", changePasswordHandler)
 

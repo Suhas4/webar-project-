@@ -31,7 +31,7 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
   const [spaceGlbUrl, setSpaceGlbUrl] = useState(null);
   const [spaceGlbEffect, setSpaceGlbEffect] = useState('popIn');
   const [animOverlay, setAnimOverlay] = useState(null); // { title, frames }
-  const [businessOverlay, setBusinessOverlay] = useState(null); // { status: 'loading'|'ready'|'unavailable', details }
+  const [businessOverlay, setBusinessOverlay] = useState(null); // { status: 'loading'|'ready'|'unavailable', sellers }
   const [reportToast, setReportToast] = useState(null); // brief confirmation text — reporting, liking/saving, or sharing content
   const iframeRef      = useRef(null);
   const bufferRef      = useRef(null);
@@ -137,14 +137,15 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
           .catch(() => { setReportToast("Couldn't " + kind + " this — please try again."); setTimeout(() => setReportToast(null), 3500); });
       }
       if (e.data?.type === 'ar-buy-now' && e.data?.targetId) {
-        setBusinessOverlay({ status: 'loading', details: null });
-        fetch(`${API_BASE}/api/business/by-target?targetId=${e.data.targetId}`)
+        setBusinessOverlay({ status: 'loading', sellers: null });
+        fetch(`${API_BASE}/api/listings/by-target?targetId=${e.data.targetId}`)
           .then(async (res) => {
-            if (!res.ok) { setBusinessOverlay({ status: 'unavailable', details: null }); return; }
-            const details = await res.json();
-            setBusinessOverlay({ status: 'ready', details });
+            if (!res.ok) { setBusinessOverlay({ status: 'unavailable', sellers: null }); return; }
+            const data = await res.json();
+            const sellers = data.sellers || [];
+            setBusinessOverlay(sellers.length ? { status: 'ready', sellers } : { status: 'unavailable', sellers: null });
           })
-          .catch(() => setBusinessOverlay({ status: 'unavailable', details: null }));
+          .catch(() => setBusinessOverlay({ status: 'unavailable', sellers: null }));
       }
       if (e.data?.type === 'ar-share-target') {
         const label = e.data.label || 'this memory';
@@ -228,7 +229,7 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
       {businessOverlay && (
         <BusinessDetailsOverlay
           status={businessOverlay.status}
-          details={businessOverlay.details}
+          sellers={businessOverlay.sellers}
           onClose={() => setBusinessOverlay(null)}
         />
       )}
