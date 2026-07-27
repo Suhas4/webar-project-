@@ -53,7 +53,7 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
   const [storagePct,       setStoragePct]       = useState(null);
   const [notifOpen,  setNotifOpen]  = useState(false);
   const [langMenuOpen, setLangMenuOpen] = useState(false);
-  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [brandMenuOpen, setBrandMenuOpen] = useState(false);
   const [streakCount, setStreakCount] = useState(0);
   const [toastMsg, setToastMsg] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -306,18 +306,48 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
 
         {/* ── Header — brand mark + utility controls ── */}
         <div style={styles.header}>
-          <div style={styles.brandRow}>
-            <div style={{ ...styles.brandMark, background: colors.surfaceHigh, border: `1px solid ${colors.border}` }}>
+          <div style={{ ...styles.brandRow, position: 'relative' }}>
+            <button className="home-icon-btn" onClick={() => { setBrandMenuOpen(o => !o); setLangMenuOpen(false); setNotifOpen(false); }}
+              title="Menu" aria-label="Menu" aria-expanded={brandMenuOpen}
+              style={{ ...styles.brandMark, background: colors.surfaceHigh, border: `1px solid ${colors.border}`,
+                padding: 0, cursor: 'pointer' }}>
               <img src="/logo-icon.png" alt="Memoera" style={styles.brandMarkImg} />
-            </div>
+              {user?.profilePhotoUrl && (
+                <img src={user.profilePhotoUrl} alt="" style={styles.brandAvatar} />
+              )}
+            </button>
+
+            {brandMenuOpen && (
+              <div style={{ ...styles.dropdown, right: 'auto', left: 0, width: 230,
+                background: colors.bgSolid, border: `1px solid ${colors.border}` }}>
+
+                {/* Brightness — the theme toggle that used to sit in the header */}
+                <button onClick={toggleTheme}
+                  style={{ ...styles.menuItem, color: colors.text, borderBottom: `1px solid ${colors.border}` }}>
+                  {isDark ? <SunIcon size={16} color={colors.text} /> : <MoonIcon size={15} color={colors.text} />}
+                  Brightness
+                  <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700, letterSpacing: '.06em',
+                    color: colors.accent, background: `${colors.accent}1e`, borderRadius: 20, padding: '3px 8px' }}>
+                    {isDark ? 'DARK' : 'LIGHT'}
+                  </span>
+                </button>
+
+                {/* Profile options — moved here from the header avatar button */}
+                {PROFILE_MENU_KEYS.map((item) => (
+                  <button key={item.key}
+                    onClick={() => { setBrandMenuOpen(false); item.section ? onSettings(item.section) : onRefer(); }}
+                    style={{ ...styles.menuItem, color: colors.text }}>
+                    <span style={{ fontSize: 15 }}>{item.icon}</span> {PROFILE_MENU_LABELS[item.key]}
+                  </button>
+                ))}
+                <button onClick={() => { setBrandMenuOpen(false); onSignOut(); }} style={{ ...styles.menuItem, color: DANGER }}>
+                  <PowerIcon color={DANGER} /> {tr.signOut}
+                </button>
+              </div>
+            )}
           </div>
 
           <div style={styles.headerControls}>
-            <button className="home-icon-btn" onClick={toggleTheme} title="Toggle theme"
-              style={{ ...styles.iconBtn, background: colors.surfaceHigh, border: `1px solid ${colors.border}` }}>
-              {isDark ? <SunIcon size={16} color={colors.text} /> : <MoonIcon size={15} color={colors.text} />}
-            </button>
-
             <div style={{ position: 'relative' }}>
               <button className="home-icon-btn" onClick={() => setLangMenuOpen(o => !o)} title="Language" aria-label="Language"
                 style={{ ...styles.iconBtn, background: colors.surfaceHigh, border: `1px solid ${colors.border}` }}>
@@ -385,28 +415,6 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
               )}
             </div>
 
-            <div style={{ position: 'relative' }}>
-              <button className="home-icon-btn" onClick={() => setProfileMenuOpen(o => !o)} title="Profile menu" aria-label="Profile menu"
-                style={{ ...styles.iconBtn, borderRadius: '50%', background: colors.surfaceHigh, border: `1px solid ${colors.border}` }}>
-                {user?.profilePhotoUrl
-                  ? <img src={user.profilePhotoUrl} alt="" style={{ width: 22, height: 22, borderRadius: '50%', objectFit: 'cover' }} />
-                  : <ProfileIcon size={16} color={colors.text} />}
-              </button>
-              {profileMenuOpen && (
-                <div style={{ ...styles.dropdown, width: 200, background: colors.bgSolid, border: `1px solid ${colors.border}` }}>
-                  {PROFILE_MENU_KEYS.map((item) => (
-                    <button key={item.key}
-                      onClick={() => { setProfileMenuOpen(false); item.section ? onSettings(item.section) : onRefer(); }}
-                      style={{ ...styles.menuItem, color: colors.text }}>
-                      <span style={{ fontSize: 15 }}>{item.icon}</span> {PROFILE_MENU_LABELS[item.key]}
-                    </button>
-                  ))}
-                  <button onClick={() => { setProfileMenuOpen(false); onSignOut(); }} style={{ ...styles.menuItem, color: DANGER }}>
-                    <PowerIcon color={DANGER} /> {tr.signOut}
-                  </button>
-                </div>
-              )}
-            </div>
           </div>
         </div>
 
@@ -1016,7 +1024,6 @@ function DashboardNavIcon({ size = 34, color = '#fff' }) {
     </svg>
   );
 }
-function ProfileIcon({ size = 22, color = '#555' }) { return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-3.6 3.1-6 8-6s8 2.4 8 6"/></svg>; }
 // Fully filled — zero stroke — a solid arrow-into-tray glyph, no disconnected
 // outline segments or visible gaps to the badge background behind it.
 function ShareIcon({ size = 32, color = '#555' }) {
@@ -1089,8 +1096,12 @@ const styles = {
     display:'flex',alignItems:'center',justifyContent:'space-between',gap:10 },
   brandRow: { display:'flex',alignItems:'center',gap:10,minWidth:0 },
   brandMark: { width:44,height:44,borderRadius:14,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',
-    boxShadow:'inset 0 1px 0 rgba(255,255,255,.14)' },
+    position:'relative',boxShadow:'inset 0 1px 0 rgba(255,255,255,.14)' },
   brandMarkImg: { width:'70%',height:'70%',objectFit:'contain' },
+  // Small avatar tucked on the logo button, so the profile menu it now opens
+  // is still recognisable as "yours" at a glance.
+  brandAvatar: { position:'absolute',bottom:-2,right:-2,width:17,height:17,borderRadius:'50%',
+    objectFit:'cover',border:'2px solid rgba(0,0,0,.35)' },
   brandName: { fontFamily:FONT,fontWeight:800,letterSpacing:'-.02em',fontSize:15 },
 
   headerControls: { display:'flex',alignItems:'center',gap:8,flexShrink:0 },
