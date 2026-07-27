@@ -130,6 +130,11 @@ export default function App() {
   // AR viewer's back button returns there instead of always landing on 'hello'.
   const scanOriginRef            = useRef('home');
   const prefetchedPublicTargetsRef = useRef(null);
+  // True while the business-category/details screens are being reused for an
+  // existing user switching account type from Profile, rather than the
+  // first-time signup flow — changes what happens on completion (straight
+  // back to Profile, no "welcome" fanfare/dashboard screen).
+  const switchingAccountTypeRef  = useRef(false);
 
   const [cloudTargets,       setCloudTargets]       = useState(null);
   const appViewRef = useRef(appView);
@@ -266,7 +271,13 @@ export default function App() {
       const isAuthenticated = !!localStorage.getItem('memoera_token');
       const current  = appViewRef.current;
       const fallback = isAuthenticated ? 'home' : 'hello';
-      const target = BACK_MAP[current] ?? fallback;
+      // These two screens are reused for an existing user switching account
+      // type from Profile (not just first-time signup) — the hardware back
+      // button should return to Profile in that case, not the signup step.
+      const switchBackTarget = switchingAccountTypeRef.current &&
+        (current === 'business-category' || current === 'business-details') ? 'profile' : null;
+      if (switchBackTarget) switchingAccountTypeRef.current = false;
+      const target = switchBackTarget ?? BACK_MAP[current] ?? fallback;
       setVideoOverlay(null);
       pendingARRef.current = null;
       // Pre-warm camera immediately so HelloScreen gets it instantly on return
@@ -436,13 +447,46 @@ export default function App() {
   }, []);
 
   const handleBusinessDetails = useCallback((details) => {
+    const isDenied = details?.gstin?.trim().toLowerCase() === 'deny';
     setCurrentUser((prev) => {
-      const updated = { ...prev, business: { category: businessCategoryChoice, ...details } };
+      const updated = { ...prev, business: { category: businessCategoryChoice, ...details },
+        ...(switchingAccountTypeRef.current && !isDenied ? { accountType: 'business' } : {}) };
       localStorage.setItem('memoera_user', JSON.stringify(updated));
       return updated;
     });
-    setAppView(details?.gstin?.trim().toLowerCase() === 'deny' ? 'business-denied' : 'business-complete');
-  }, [businessCategoryChoice]);
+    // Persist so anyone scanning this business's AR content later can see
+    // how to reach them (via the scanner's "Buy Now" business-details card) —
+    // previously this only ever lived in localStorage on the owner's device.
+    if (!isDenied) {
+      const token = localStorage.getItem('memoera_token');
+      if (token) {
+        fetch(`${API_BASE}/api/business/details`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(details),
+        }).catch(() => {});
+      }
+    }
+    if (switchingAccountTypeRef.current) {
+      if (!isDenied) {
+        persistOnboarding({ accountType: 'business', onboardingComplete: true });
+        switchingAccountTypeRef.current = false;
+      }
+      setAppView(isDenied ? 'business-denied' : 'profile');
+      return;
+    }
+    setAppView(isDenied ? 'business-denied' : 'business-complete');
+  }, [businessCategoryChoice, persistOnboarding]);
+
+  // Lets an existing Individual account apply to switch to Business from
+  // Profile — reuses the same category/details screens as first-time signup,
+  // but switchingAccountTypeRef makes handleBusinessDetails land back on
+  // Profile directly instead of the signup "all set" dashboard screen.
+  const handleSwitchToBusiness = useCallback(() => {
+    switchingAccountTypeRef.current = true;
+    setBusinessCategoryChoice(null);
+    setAppView('business-category');
+  }, []);
 
   const finishOnboarding = useCallback(() => {
     setCurrentUser((prev) => {
@@ -578,13 +622,24 @@ export default function App() {
   } else if (appView === 'account-confirm') {
     mainScreen = <AccountConfirmScreen accountType={pendingAccountType} onContinue={handleAccountConfirm} onBack={() => setAppView('account-type')} onNoSelection={() => setAppView('account-type')} />;
   } else if (appView === 'business-category') {
-    mainScreen = <BusinessCategoryScreen onContinue={handleBusinessCategory} onBack={() => setAppView('account-confirm')} />;
+    mainScreen = <BusinessCategoryScreen onContinue={handleBusinessCategory}
+      onBack={() => {
+        const wasSwitching = switchingAccountTypeRef.current;
+        switchingAccountTypeRef.current = false;
+        setAppView(wasSwitching ? 'profile' : 'account-confirm');
+      }} />;
   } else if (appView === 'business-details') {
     mainScreen = <BusinessDetailsScreen onContinue={handleBusinessDetails} onBack={() => setAppView('business-category')} />;
   } else if (appView === 'business-complete') {
     mainScreen = <SetupCompleteScreen accountType="business" onCreateMemory={handleCreateFirstMemory} onGoToDashboard={handleGoToDashboard} onBack={() => setAppView('business-details')} />;
   } else if (appView === 'business-denied') {
-    mainScreen = <BusinessDeniedScreen onRetry={() => setAppView('business-details')} onGoToDashboard={handleGoToDashboard} onBack={() => setAppView('business-details')} />;
+    mainScreen = <BusinessDeniedScreen
+      onRetry={() => setAppView('business-details')}
+      onGoToDashboard={() => {
+        if (switchingAccountTypeRef.current) { switchingAccountTypeRef.current = false; setAppView('profile'); return; }
+        handleGoToDashboard();
+      }}
+      onBack={() => setAppView(switchingAccountTypeRef.current ? 'profile' : 'business-details')} />
   } else if (appView === 'individual-complete') {
     mainScreen = <SetupCompleteScreen accountType="individual" onCreateMemory={handleCreateFirstMemory} onGoToDashboard={handleGoToDashboard} onBack={() => setAppView('account-confirm')} />;
   } else if (appView === 'forgot') {
@@ -592,7 +647,9 @@ export default function App() {
   } else if (appView === 'welcome') {
     mainScreen = <WelcomeScreen onDone={() => setAppView('home')} user={currentUser} />;
   } else if (appView === 'profile') {
-    mainScreen = <ProfileScreen user={currentUser} onBack={() => setAppView('home')} onUserUpdate={(u) => { setCurrentUser(u); localStorage.setItem('memoera_user', JSON.stringify(u)); }} />;
+    mainScreen = <ProfileScreen user={currentUser} onBack={() => setAppView('home')}
+      onUserUpdate={(u) => { setCurrentUser(u); localStorage.setItem('memoera_user', JSON.stringify(u)); }}
+      onSwitchToBusiness={handleSwitchToBusiness} />;
   } else if (appView === 'gallery') {
     mainScreen = <GalleryScreen onBack={() => setAppView('home')} onCollection={() => setAppView('collection')} initialQuery={galleryQuery} />;
   } else if (appView === 'collection') {
@@ -745,6 +802,7 @@ export default function App() {
           onBack={() => setGuestScanLoading(false)}
           onError={(msg) => { setGuestScanLoading(false); setGuestScanError(msg || 'Could not start scanning. Please try again.'); }}
           prefetchedTargets={prefetchedPublicTargetsRef.current}
+          includeOwnTargets={hasToken}
         />
       )}
 

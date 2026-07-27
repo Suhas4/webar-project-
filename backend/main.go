@@ -331,6 +331,17 @@ func initDB(ctx context.Context) error {
 	// server-side lets a fresh sign-in correctly resume onboarding.
 	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS account_type TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_complete BOOLEAN NOT NULL DEFAULT false`)
+	// Business contact details — filled in by BusinessDetailsScreen.jsx (during
+	// signup or a later Individual->Business switch from Profile). Exposed
+	// read-only to anyone scanning that business's AR content via the "Buy
+	// Now"/"Shop Now" button, so a stranger can see how to reach them.
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS business_name TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS business_address TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS business_phone TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS business_email TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS business_website TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS business_instagram TEXT NOT NULL DEFAULT ''`)
+	_, _ = db.Exec(ctx, `ALTER TABLE users ADD COLUMN IF NOT EXISTS business_gstin TEXT NOT NULL DEFAULT ''`)
 
 	_, _ = db.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS payment_orders (
@@ -1348,6 +1359,76 @@ func updateOnboardingHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"accountType": req.AccountType, "onboardingComplete": req.OnboardingComplete,
+	})
+}
+
+// PUT /api/business/details — persists the caller's own business contact
+// info (BusinessDetailsScreen.jsx), used both at signup and when switching
+// Individual -> Business from Profile.
+func saveBusinessDetailsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	var req struct {
+		BusinessName    string `json:"businessName"`
+		BusinessAddress string `json:"businessAddress"`
+		Phone           string `json:"phone"`
+		Email           string `json:"email"`
+		Website         string `json:"website"`
+		Instagram       string `json:"instagram"`
+		Gstin           string `json:"gstin"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	_, err = db.Exec(r.Context(), `
+		UPDATE users SET
+			business_name = $1, business_address = $2, business_phone = $3,
+			business_email = $4, business_website = $5, business_instagram = $6, business_gstin = $7
+		WHERE id = $8`,
+		req.BusinessName, req.BusinessAddress, req.Phone, req.Email, req.Website, req.Instagram, req.Gstin, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save business details")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// GET /api/business/by-target?targetId=123 — public, no auth: lets anyone who
+// scans a business account's AR content and taps "Buy Now"/"Shop Now" see how
+// to reach that business (name, address, phone for calling, etc).
+func getBusinessByTargetHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	targetID, err := strconv.ParseInt(r.URL.Query().Get("targetId"), 10, 64)
+	if err != nil || targetID == 0 {
+		writeError(w, http.StatusBadRequest, "a valid targetId is required")
+		return
+	}
+	var name, address, phone, email, website, instagram string
+	err = db.QueryRow(r.Context(), `
+		SELECT u.business_name, u.business_address, u.business_phone, u.business_email, u.business_website, u.business_instagram
+		FROM ar_targets t JOIN users u ON u.id = t.user_id
+		WHERE t.id = $1 AND u.account_type = 'business' AND u.business_name <> ''`, targetID,
+	).Scan(&name, &address, &phone, &email, &website, &instagram)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "No business details available for this content.")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"businessName": name, "businessAddress": address, "phone": phone,
+		"email": email, "website": website, "instagram": instagram,
 	})
 }
 
@@ -3605,6 +3686,8 @@ func main() {
 	mux.HandleFunc("/api/auth/profile", updateProfileHandler)
 	mux.HandleFunc("/api/auth/security-question", updateSecurityHandler)
 	mux.HandleFunc("/api/auth/onboarding", updateOnboardingHandler)
+	mux.HandleFunc("/api/business/details", saveBusinessDetailsHandler)
+	mux.HandleFunc("/api/business/by-target", getBusinessByTargetHandler)
 	mux.HandleFunc("/api/auth/profile/photo", updateProfilePhotoHandler)
 	mux.HandleFunc("/api/auth/change-password", changePasswordHandler)
 

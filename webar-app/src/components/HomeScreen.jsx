@@ -474,9 +474,6 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
               bg="linear-gradient(135deg,#00C9A7,#00E5CC)" label="NFC" labelColor={colors.text}
               onClick={onNfc} />
           )}
-          {onCollection && (
-            <NavBtn className="home-feature" icon={<SavedNavIcon size={39} color="#fff" />} bg="linear-gradient(135deg,#FEAE3B,#FFC768)" label={tr.navSaved || 'Saved'} labelColor={colors.text} onClick={onCollection} />
-          )}
           {onLiked && (
             <NavBtn className="home-feature" icon={<HeartIcon size={48} color="#fff" />} bg="linear-gradient(135deg,#ff3c5a,#ff7a90)" label="Liked" labelColor={colors.text} onClick={onLiked} />
           )}
@@ -1004,13 +1001,6 @@ function CatalogNavIcon({ size = 34, color = '#fff' }) {
       <rect x="13" y="3"  width="8" height="8" rx="2" />
       <rect x="3"  y="13" width="8" height="8" rx="2" />
       <rect x="13" y="13" width="8" height="8" rx="2" />
-    </svg>
-  );
-}
-function SavedNavIcon({ size = 34, color = '#fff' }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} stroke="none">
-      <path d="M6 3.5h12a1 1 0 0 1 1 1v16a.5.5 0 0 1-.77.42L12 16.3l-6.23 4.62A.5.5 0 0 1 5 20.5v-16a1 1 0 0 1 1-1z" />
     </svg>
   );
 }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { loadPublicTargets, uploadPublicCombinedMind } from "../hooks/useArStorage.js";
+import { loadPublicTargets, loadTargets, uploadPublicCombinedMind } from "../hooks/useArStorage.js";
 import { getCachedPublicMind, setCachedPublicMind } from "../hooks/useMindCache.js";
 import { R2_PUBLIC_URL } from "../config/api.js";
 import { useLanguage } from "../context/LanguageContext.jsx";
@@ -48,7 +48,7 @@ const SCAN_STYLE = `
   }
 `;
 
-export default function GuestScanScreen({ onReady, onBack, onCreateAccount, onError, prefetchedTargets, silent = false }) {
+export default function GuestScanScreen({ onReady, onBack, onCreateAccount, onError, prefetchedTargets, silent = false, includeOwnTargets = false }) {
   const { lang } = useLanguage();
   const tr = { ...T.en, ...(T[lang] || {}) };
   const { colors, theme } = useTheme();
@@ -194,10 +194,39 @@ export default function GuestScanScreen({ onReady, onBack, onCreateAccount, onEr
     async function prepare() {
       try {
         setPhase("fetching");
-        const publicTargets =
+        let publicTargets =
           prefetchedTargets && prefetchedTargets.length > 0
             ? prefetchedTargets
             : await loadPublicTargets();
+        if (cancelledRef.current) return;
+
+        // Signed-in Home scan: a user's own private targets are never part of
+        // the shared public feed, so without this they could never scan their
+        // own uploads (only ones they'd separately marked Public). Merge them
+        // in — de-duped by id against anything already public — so "point the
+        // camera at what I just uploaded" works regardless of visibility.
+        // hasPrivateMix (NOT includeOwnTargets) is what actually gates the R2
+        // shared-cache read/write below — a signed-in user whose own targets
+        // are all already public (or has none) produces the exact same list
+        // as a pure guest, so it must still get to use/heal the shared cache;
+        // only skip that when private content is genuinely mixed in.
+        let hasPrivateMix = false;
+        if (includeOwnTargets) {
+          try {
+            const { targets: ownTargets } = await loadTargets();
+            if (ownTargets && ownTargets.length) {
+              const publicIds = new Set(publicTargets.map((t) => t.id).filter(Boolean));
+              const ownExtra = ownTargets
+                .filter((t) => !t.id || !publicIds.has(t.id))
+                .map((t) => ({ ...t, imageUrl: t.imageUrl || t._imagePreviewUrl }))
+                .filter((t) => !!t.imageUrl);
+              if (ownExtra.length) {
+                hasPrivateMix = true;
+                publicTargets = [...publicTargets, ...ownExtra];
+              }
+            }
+          } catch { /* best-effort — public targets alone still work */ }
+        }
         if (cancelledRef.current) return;
 
         if (!publicTargets || publicTargets.length === 0) {
@@ -247,7 +276,7 @@ export default function GuestScanScreen({ onReady, onBack, onCreateAccount, onEr
           waitForBackgroundPublicResult(),
           new Promise((resolve) => setTimeout(() => resolve(null), 10000)),
         ]);
-        if (bgResult && !cancelledRef.current && hasImageUrls(bgResult.arTargets)) {
+        if (bgResult && bgResult.key === fingerprint && !cancelledRef.current && hasImageUrls(bgResult.arTargets)) {
           _cachedPublicMind = { key: bgResult.key, mindBuffer: bgResult.mindBuffer, arTargets: bgResult.arTargets };
           consumeBackgroundPublicResult();
           mindBlobUrl = URL.createObjectURL(new Blob([bgResult.mindBuffer], { type: 'application/octet-stream' }));
@@ -268,8 +297,12 @@ export default function GuestScanScreen({ onReady, onBack, onCreateAccount, onEr
 
         setPhase("compiling");
 
-        // 3. Pre-built .mind in R2 — no compilation needed, just download
+        // 3. Pre-built .mind in R2 — no compilation needed, just download.
+        // Skipped when private targets are mixed in: that combined.mind is a
+        // shared public artifact keyed to a public-only fingerprint, so a
+        // merged fingerprint is guaranteed not to match — not worth the round trip.
         try {
+          if (hasPrivateMix) throw new Error("skip — private targets mixed in");
           const fpRes = await fetch(`${R2_PUBLIC_URL}/public/combined-fingerprint.txt`, { cache: "no-cache" });
           if (fpRes.ok) {
             const storedFp = (await fpRes.text()).trim();
@@ -343,7 +376,14 @@ export default function GuestScanScreen({ onReady, onBack, onCreateAccount, onEr
         // back before this finished, the compile still ran to completion in
         // the background, and skipping the upload here would waste that work
         // and leave the stale R2 copy in place for the next person too.
-        uploadPublicCombinedMind(mindBuffer, fingerprint).catch(() => {});
+        // Skipped only when this compile actually includes the viewer's own
+        // private targets (hasPrivateMix) — pushing that back would leak
+        // private content into the shared public cache for every other
+        // viewer. A signed-in viewer with no private targets (or none beyond
+        // what's already public) still heals the cache like a guest would.
+        if (!hasPrivateMix) {
+          uploadPublicCombinedMind(mindBuffer, fingerprint).catch(() => {});
+        }
         if (cancelledRef.current) return;
 
         mindBlobUrl = URL.createObjectURL(

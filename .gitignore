@@ -35,3 +35,6 @@ Thumbs.db
 .claude/
 write_components.py
 certs/
+
+# Local Netlify folder
+.netlify

@@ -32,7 +32,7 @@ const FILTER_PRESETS = [
   { name: "Sketch",   css: "grayscale(1) contrast(3.5) brightness(1.3)" },
 ];
 
-export default function ProfileScreen({ user, onBack, onUserUpdate }) {
+export default function ProfileScreen({ user, onBack, onUserUpdate, onSwitchToBusiness }) {
   const { colors } = useTheme();
   const { tr } = useLanguage();
   const [editing, setEditing] = useState(false);
@@ -322,6 +322,25 @@ export default function ProfileScreen({ user, onBack, onUserUpdate }) {
             </div>
           </div>
         )}
+      </div>
+
+      <div style={{ width: "80%", marginTop: 14, padding: "14px 16px", borderRadius: 14,
+        background: "rgba(0,201,167,0.06)", border: "1px solid rgba(0,201,167,0.25)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: colors.text, fontFamily: FONT }}>Account Type</div>
+            <div style={{ fontSize: 11, color: colors.textMuted, fontFamily: FONT, marginTop: 2 }}>
+              {user?.accountType === 'business' ? 'Business' : 'Individual'}
+            </div>
+          </div>
+          {user?.accountType !== 'business' && (
+            <button onClick={onSwitchToBusiness}
+              style={{ background: "transparent", border: `1px solid ${TEAL}`, color: TEAL,
+                borderRadius: 20, padding: "6px 14px", fontSize: 12, fontWeight: 700, fontFamily: FONT, cursor: "pointer" }}>
+              Switch to Business
+            </button>
+          )}
+        </div>
       </div>
 
       <div style={styles.buttonRow}>

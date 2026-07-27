@@ -23,6 +23,7 @@
     "@capgo/capacitor-nfc": "^8.2.2",
     "@imgly/background-removal": "^1.7.0",
     "idb-keyval": "^6.2.2",
+    "jspdf": "^4.2.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "three": "^0.150.0"
