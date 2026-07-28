@@ -26,6 +26,55 @@ const EXAMPLES = [
   { id: 'ex-sample', kind: 'sample', title: 'Sample', framesPath: '/collection-frames', total: 93, thumb: '/collection-frames/frame_0000.jpg', badge: '360° SPIN' },
 ];
 
+// ── 3D Animation Experience ─────────────────────────────────────────────────
+// A guided version of the same frame-sequence engine the Car Reveal already
+// uses. Instead of dumping an unordered multi-select in, the user fills one
+// slot per angle — which both answers "have I taken enough photos?" visually
+// and gives us the photos already in spin order, so the result actually reads
+// as walking around the product.
+//
+// Deliberately NOT AI: nothing here reconstructs geometry or detects what the
+// product is. The category and experience type are the user's own choice and
+// only decide labelling and which angles are asked for.
+const ANGLE_SLOTS = [
+  { key: 'front',   label: 'Front',   glyph: '▣', required: true  },
+  { key: 'front45', label: '45°',     glyph: '◹', required: false },
+  { key: 'right',   label: 'Right',   glyph: '◨', required: true  },
+  { key: 'back45',  label: '45° opp', glyph: '◸', required: false },
+  { key: 'back',    label: 'Back',    glyph: '▢', required: true  },
+  { key: 'left',    label: 'Left',    glyph: '◧', required: true  },
+  { key: 'top',     label: 'Top',     glyph: '△', required: false },
+  { key: 'detail',  label: 'Detail',  glyph: '◉', required: false },
+];
+
+const PRODUCT_CATEGORIES = [
+  { key: 'car',       label: 'Car',        emoji: '🚗' },
+  { key: 'gym',       label: 'Gym',        emoji: '🏋️' },
+  { key: 'apparel',   label: 'Apparel',    emoji: '👖' },
+  { key: 'furniture', label: 'Furniture',  emoji: '🪑' },
+  { key: 'jewellery', label: 'Jewellery',  emoji: '💍' },
+  { key: 'other',     label: 'Other',      emoji: '➕' },
+];
+
+// Which experience each trade is most likely to want first. The full list is
+// always available — this only decides the order they're offered in.
+const EXPERIENCE_TYPES = [
+  { key: 'uncover',    label: 'Uncover',    hint: 'Premium reveal',    glyph: '◍' },
+  { key: 'spin',       label: '360° View',  hint: 'All the way round', glyph: '↻' },
+  { key: 'walk',       label: 'Walkaround', hint: 'Interactive tour',  glyph: '◎' },
+  { key: 'use',        label: 'Drive / Use',hint: 'Show it in use',    glyph: '⚙' },
+  { key: 'explode',    label: 'Explode',    hint: 'See inside',        glyph: '✧' },
+];
+
+const CATEGORY_SUGGESTS = {
+  car:       ['uncover', 'use', 'spin', 'walk', 'explode'],
+  gym:       ['use', 'walk', 'spin', 'explode', 'uncover'],
+  apparel:   ['spin', 'uncover', 'walk', 'explode', 'use'],
+  furniture: ['walk', 'explode', 'spin', 'uncover', 'use'],
+  jewellery: ['uncover', 'spin', 'walk', 'use', 'explode'],
+  other:     ['spin', 'uncover', 'walk', 'use', 'explode'],
+};
+
 async function generateSampleFrames(stops) {
   const files = [];
   for (let i = 0; i < stops.length; i++) {
@@ -344,6 +393,16 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
   const [editModal,     setEditModal]     = useState(null); // { file }
   const [previewActive, setPreviewActive] = useState(null); // example being watched full-screen
 
+  // ── 3D Animation Experience mode ──────────────────────────────────────────
+  const [mode,          setMode]          = useState('simple'); // 'simple' | '3d'
+  const [category,      setCategory]      = useState('car');
+  const [experience,    setExperience]    = useState('uncover');
+  const [angleFiles,    setAngleFiles]    = useState({});  // { front: File, ... }
+  const [anglePreviews, setAnglePreviews] = useState({});
+  const [pendingAngle,  setPendingAngle]  = useState(null); // slot awaiting a photo
+  const angleCamRef     = useRef(null);
+  const angleGalleryRef = useRef(null);
+
   // File inputs — separate refs for camera vs gallery vs storage vs video
   const markerCamRef     = useRef(null);
   const markerGalleryRef = useRef(null);
@@ -447,13 +506,47 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
     }
   }, []);
 
-  const canCreate = markerFile && frameFiles.length >= 2 && animName.trim();
+  const applyAngle = useCallback((slotKey, file) => {
+    if (!file || !slotKey) return;
+    setAngleFiles((prev) => ({ ...prev, [slotKey]: file }));
+    setAnglePreviews((prev) => {
+      if (prev[slotKey]) URL.revokeObjectURL(prev[slotKey]);
+      return { ...prev, [slotKey]: URL.createObjectURL(file) };
+    });
+    setPendingAngle(null);
+  }, []);
+
+  const pickAngleFromInput = useCallback((e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (file) applyAngle(pendingAngle, file);
+    else setPendingAngle(null);
+  }, [applyAngle, pendingAngle]);
+
+  const clearAngle = useCallback((slotKey) => {
+    setAngleFiles((prev) => { const n = { ...prev }; delete n[slotKey]; return n; });
+    setAnglePreviews((prev) => {
+      if (prev[slotKey]) URL.revokeObjectURL(prev[slotKey]);
+      const n = { ...prev }; delete n[slotKey]; return n;
+    });
+  }, []);
+
+  // ANGLE_SLOTS is declared in spin order, so filtering it straight through
+  // hands the engine frames that already read as walking around the product.
+  const angleFrames  = ANGLE_SLOTS.map((s) => angleFiles[s.key]).filter(Boolean);
+  const anglesNeeded = ANGLE_SLOTS.filter((s) => s.required);
+  const anglesDone   = anglesNeeded.filter((s) => angleFiles[s.key]).length;
+  const is3d         = mode === '3d';
+
+  const effectiveFrames = is3d ? angleFrames : frameFiles;
+  const canCreate = markerFile && animName.trim() && effectiveFrames.length >= 2 &&
+    (!is3d || anglesDone === anglesNeeded.length);
 
   const handleCreate = useCallback(async () => {
     if (!canCreate) return;
     setState('compiling'); setProgress(0); setError('');
     try {
-      const animId = await saveAnimation(animName.trim(), frameFiles);
+      const animId = await saveAnimation(animName.trim(), effectiveFrames);
 
       const markerBuf  = await markerFile.arrayBuffer();
       const markerBlob = new Blob([markerBuf], { type: markerFile.type || 'image/jpeg' });
@@ -497,7 +590,7 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
       setState('error');
       setError(err.message || 'Failed to create animation. Please try again.');
     }
-  }, [canCreate, animName, frameFiles, markerFile, onStart, isPublic]);
+  }, [canCreate, animName, effectiveFrames, markerFile, onStart, isPublic]);
 
   const isWorking = ['compiling','uploading','finalizing'].includes(state);
 
@@ -540,6 +633,10 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
         style={{ display:'none' }} onChange={pickFramesFromVideo} />
       <input ref={framesCamRef}     type="file" accept="image/*" capture="environment"
         style={{ display:'none' }} onChange={pickFrameFromCamera} />
+      <input ref={angleCamRef}      type="file" accept="image/*" capture="environment"
+        style={{ display:'none' }} onChange={pickAngleFromInput} />
+      <input ref={angleGalleryRef}  type="file" accept="image/*"
+        style={{ display:'none' }} onChange={pickAngleFromInput} />
 
       {/* Header */}
       <div style={{ padding:'48px 20px 16px', display:'flex', alignItems:'center', gap:12, flexShrink:0 }}>
@@ -594,6 +691,135 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
           </div>
         </div>
 
+        {/* Mode — plain slideshow vs the guided angle-by-angle experience */}
+        <div style={{ marginBottom:24 }}>
+          <div style={labelStyle}>Animation Type</div>
+          <div style={{ display:'flex', gap:10 }}>
+            <ModeCard active={!is3d} onClick={() => setMode('simple')}
+              glyph="🎞️" title="Simple Animation"
+              sub="Photos or a video play as a slideshow" />
+            <ModeCard active={is3d} onClick={() => setMode('3d')}
+              glyph="🧊" title="3D Animation Experience" badge="NEW"
+              sub="Guided angles — spin around the product" />
+          </div>
+        </div>
+
+        {is3d && (
+          <>
+            {/* Product category */}
+            <div style={{ marginBottom:20 }}>
+              <div style={labelStyle}>Product Category</div>
+              <div style={{ display:'flex', gap:8, overflowX:'auto', paddingBottom:4 }}>
+                {PRODUCT_CATEGORIES.map((c) => {
+                  const on = category === c.key;
+                  return (
+                    <button key={c.key} onClick={() => {
+                      setCategory(c.key);
+                      setExperience(CATEGORY_SUGGESTS[c.key][0]);
+                    }}
+                      style={{ flexShrink:0, minWidth:76, borderRadius:14, cursor:'pointer',
+                        background: on ? 'rgba(0,201,167,0.12)' : 'rgba(255,255,255,0.05)',
+                        border: `1.5px solid ${on ? TEAL : 'rgba(255,255,255,0.12)'}`,
+                        padding:'10px 8px', display:'flex', flexDirection:'column',
+                        alignItems:'center', gap:4, fontFamily:FONT }}>
+                      <span style={{ fontSize:20 }}>{c.emoji}</span>
+                      <span style={{ fontSize:11, fontWeight:700,
+                        color: on ? TEAL : 'rgba(255,255,255,0.6)' }}>{c.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Experience type — ordered by what this category usually wants */}
+            <div style={{ marginBottom:20 }}>
+              <div style={labelStyle}>Experience Type</div>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,0.4)', fontFamily:FONT, marginBottom:10 }}>
+                Suggested for {PRODUCT_CATEGORIES.find(c => c.key === category)?.label.toLowerCase()}
+              </div>
+              <div style={{ display:'flex', gap:8, overflowX:'auto', paddingBottom:4 }}>
+                {CATEGORY_SUGGESTS[category].map((k) => {
+                  const x  = EXPERIENCE_TYPES.find(e => e.key === k);
+                  const on = experience === k;
+                  return (
+                    <button key={k} onClick={() => setExperience(k)}
+                      style={{ flexShrink:0, width:96, borderRadius:14, cursor:'pointer',
+                        background: on ? 'rgba(201,168,76,0.14)' : 'rgba(255,255,255,0.05)',
+                        border: `1.5px solid ${on ? GOLD : 'rgba(255,255,255,0.12)'}`,
+                        padding:'10px 8px', display:'flex', flexDirection:'column',
+                        alignItems:'center', gap:3, fontFamily:FONT, textAlign:'center' }}>
+                      <span style={{ fontSize:18, color: on ? GOLD : 'rgba(255,255,255,0.5)' }}>{x.glyph}</span>
+                      <span style={{ fontSize:11, fontWeight:700,
+                        color: on ? GOLD : 'rgba(255,255,255,0.7)' }}>{x.label}</span>
+                      <span style={{ fontSize:9, color:'rgba(255,255,255,0.35)', lineHeight:1.3 }}>{x.hint}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Photo guide — tap a slot to fill that angle */}
+            <div style={{ marginBottom:24 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                <div style={{ ...labelStyle, marginBottom:0 }}>Photo Guide</div>
+                <span style={{ marginLeft:'auto', fontSize:11, fontWeight:700, fontFamily:FONT,
+                  color: anglesDone === anglesNeeded.length ? TEAL : GOLD }}>
+                  {anglesDone} of {anglesNeeded.length} required
+                </span>
+              </div>
+              <div style={{ fontSize:11, color:'rgba(255,255,255,0.4)', fontFamily:FONT, marginBottom:10 }}>
+                Tap each box and photograph that side. Order matters — it becomes the spin.
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:8 }}>
+                {ANGLE_SLOTS.map((s) => {
+                  const done = !!angleFiles[s.key];
+                  return (
+                    <button key={s.key} onClick={() => setPendingAngle(s.key)}
+                      style={{ position:'relative', aspectRatio:'4/3', borderRadius:12,
+                        cursor:'pointer', overflow:'hidden', padding:0, fontFamily:FONT,
+                        background: done ? '#0a1a20' : 'rgba(255,255,255,0.04)',
+                        border: `1.5px ${done ? 'solid' : 'dashed'} ${done ? TEAL : 'rgba(255,255,255,0.18)'}` }}>
+                      {done ? (
+                        <img src={anglePreviews[s.key]} alt={s.label}
+                          style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
+                      ) : (
+                        <span style={{ display:'flex', flexDirection:'column', alignItems:'center',
+                          justifyContent:'center', height:'100%', gap:3 }}>
+                          <span style={{ fontSize:17, color:'rgba(255,255,255,0.35)' }}>{s.glyph}</span>
+                          <span style={{ fontSize:10, fontWeight:700, color:'rgba(255,255,255,0.55)' }}>{s.label}</span>
+                          {!s.required && (
+                            <span style={{ fontSize:8, color:'rgba(255,255,255,0.28)' }}>optional</span>
+                          )}
+                        </span>
+                      )}
+                      {done && (
+                        <>
+                          <span style={{ position:'absolute', top:4, right:4, width:17, height:17,
+                            borderRadius:'50%', background:TEAL, color:'#04211d', fontSize:11,
+                            fontWeight:800, lineHeight:'17px', textAlign:'center' }}>✓</span>
+                          <span onClick={(e) => { e.stopPropagation(); clearAngle(s.key); }}
+                            style={{ position:'absolute', top:4, left:4, width:17, height:17,
+                              borderRadius:'50%', background:'rgba(0,0,0,0.6)', color:'#fff',
+                              fontSize:11, lineHeight:'17px', textAlign:'center' }}>✕</span>
+                          <span style={{ position:'absolute', left:0, right:0, bottom:0,
+                            background:'rgba(0,0,0,0.55)', fontSize:9, fontWeight:700,
+                            color:'#fff', padding:'2px 0' }}>{s.label}</span>
+                        </>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              {angleFrames.length > 0 && (
+                <div style={{ fontSize:11, color:TEAL, fontFamily:FONT, fontWeight:600, marginTop:8 }}>
+                  {angleFrames.length} photo{angleFrames.length === 1 ? '' : 's'} added
+                  {anglesDone < anglesNeeded.length && ' — add the remaining required angles to continue'}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
         {/* Name */}
         <div style={{ marginBottom:20 }}>
           <div style={labelStyle}>Animation Name</div>
@@ -627,8 +853,8 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
           )}
         </div>
 
-        {/* Animation frames */}
-        <div style={{ marginBottom:24 }}>
+        {/* Animation frames — 3D mode collects these through the photo guide instead */}
+        <div style={{ marginBottom:24, display: is3d ? 'none' : 'block' }}>
           <div style={labelStyle}>Animation Frame Photos</div>
           <div style={{ fontSize:11, color:'rgba(255,255,255,0.4)', fontFamily:FONT, marginBottom:10 }}>
             Pick photos, a video, or a Memoera sample — they play as a slideshow when scanned
@@ -682,8 +908,12 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
           <div style={{ fontSize:12, fontWeight:700, color:'rgba(255,255,255,0.5)',
             fontFamily:FONT, letterSpacing:'0.08em', marginBottom:8 }}>HOW IT WORKS</div>
           <div style={stepStyle}>🎯 &nbsp;Someone scans the marker photo with their camera</div>
-          <div style={stepStyle}>✨ &nbsp;The animation plays automatically — all {frameFiles.length || 'N'} frames</div>
-          <div style={stepStyle}>👆 &nbsp;They can drag left/right to scrub through frames manually</div>
+          <div style={stepStyle}>✨ &nbsp;The animation plays automatically — all {effectiveFrames.length || 'N'} frames</div>
+          <div style={stepStyle}>
+            {is3d
+              ? '👆  They drag left/right to turn the product and look at any side'
+              : '👆  They can drag left/right to scrub through frames manually'}
+          </div>
         </div>
 
         {/* Error */}
@@ -706,10 +936,14 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
           {isWorking ? 'Creating...' : 'Create AR Animation'}
         </button>
 
-        {!markerFile && (
+        {!canCreate && (
           <div style={{ textAlign:'center', fontSize:11, color:'rgba(255,255,255,0.3)',
             fontFamily:FONT, marginTop:12 }}>
-            Pick a marker image and at least 2 frame photos to continue
+            {!markerFile
+              ? 'Pick a marker image to continue'
+              : is3d
+                ? `Add the ${anglesNeeded.length - anglesDone} remaining required angle${anglesNeeded.length - anglesDone === 1 ? '' : 's'}`
+                : 'Add at least 2 frame photos to continue'}
           </div>
         )}
       </div>
@@ -748,7 +982,43 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
             onClick={() => { setFrameSheet(false); setTimeout(() => framesVideoRef.current?.click(), 80); }} />
         </Sheet>
       )}
+
+      {/* ── Angle picker sheet (3D Animation Experience) ─────────────────────── */}
+      {pendingAngle && (
+        <Sheet
+          title={`ADD THE ${(ANGLE_SLOTS.find(s => s.key === pendingAngle)?.label || '').toUpperCase()} PHOTO`}
+          onClose={() => setPendingAngle(null)}>
+          <SheetRow icon="📷" label="Take Photo" sub="Stand square to this side of the product" accent
+            onClick={() => setTimeout(() => angleCamRef.current?.click(), 80)} />
+          <SheetRow icon="🖼️" label="Photo Gallery" sub="Pick a photo you already took"
+            onClick={() => setTimeout(() => angleGalleryRef.current?.click(), 80)} />
+        </Sheet>
+      )}
     </div>
+  );
+}
+
+function ModeCard({ active, onClick, glyph, title, sub, badge }) {
+  return (
+    <button onClick={onClick}
+      style={{ flex:1, minWidth:0, position:'relative', borderRadius:16, cursor:'pointer',
+        textAlign:'left', padding:'13px 12px', fontFamily:FONT,
+        background: active ? 'rgba(0,201,167,0.12)' : 'rgba(255,255,255,0.05)',
+        border: `1.5px solid ${active ? TEAL : 'rgba(255,255,255,0.12)'}` }}>
+      {badge && (
+        <span style={{ position:'absolute', top:8, right:8, background:GOLD, color:'#2b1002',
+          fontSize:8, fontWeight:800, letterSpacing:'0.08em', borderRadius:20, padding:'2px 6px' }}>
+          {badge}
+        </span>
+      )}
+      <div style={{ fontSize:22, marginBottom:6 }}>{glyph}</div>
+      <div style={{ fontSize:12.5, fontWeight:800, color: active ? TEAL : '#fff', lineHeight:1.25 }}>
+        {title}
+      </div>
+      <div style={{ fontSize:10, color:'rgba(255,255,255,0.45)', marginTop:3, lineHeight:1.35 }}>
+        {sub}
+      </div>
+    </button>
   );
 }
 
