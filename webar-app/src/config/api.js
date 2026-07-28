@@ -22,9 +22,26 @@ export async function parseApiResponse(res) {
 // fails at the network level (fetch throws, not an HTTP error status). Retrying
 // with backoff rides out the cold start instead of surfacing a hard failure.
 export async function fetchWithRetry(url, options, { retries = 3, baseDelayMs = 3000, onRetry } = {}) {
+  // Only GET/HEAD are retried on a server error. A 5xx can mean the request
+  // was actually applied and only the response was lost, so replaying a POST
+  // or PUT risks writing twice.
+  const method = (options?.method || 'GET').toUpperCase();
+  const replayable = method === 'GET' || method === 'HEAD';
+
   for (let attempt = 0; ; attempt++) {
     try {
-      return await fetch(url, options);
+      const res = await fetch(url, options);
+      // A cold-starting instance answers 502/503/504 for the first requests
+      // while it boots. Handing that straight back is indistinguishable from
+      // a legitimate empty response, which is what made "Tap to Scan" report
+      // "no AR targets" and refuse to open the camera after the backend had
+      // been idle. Treat a transient 5xx like a thrown network error.
+      if (replayable && res.status >= 500 && attempt < retries) {
+        onRetry && onRetry(attempt + 1);
+        await new Promise((r) => setTimeout(r, baseDelayMs * (attempt + 1)));
+        continue;
+      }
+      return res;
     } catch (err) {
       if (attempt >= retries) throw err;
       onRetry && onRetry(attempt + 1);

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { loadPublicTargets, loadTargets, uploadPublicCombinedMind } from "../hooks/useArStorage.js";
+import { fetchPublicTargets, loadTargets, uploadPublicCombinedMind } from "../hooks/useArStorage.js";
 import { getCachedPublicMind, setCachedPublicMind } from "../hooks/useMindCache.js";
 import { R2_PUBLIC_URL } from "../config/api.js";
 import { useLanguage } from "../context/LanguageContext.jsx";
@@ -194,10 +194,21 @@ export default function GuestScanScreen({ onReady, onBack, onCreateAccount, onEr
     async function prepare() {
       try {
         setPhase("fetching");
-        let publicTargets =
-          prefetchedTargets && prefetchedTargets.length > 0
-            ? prefetchedTargets
-            : await loadPublicTargets();
+        let publicTargets;
+        if (prefetchedTargets && prefetchedTargets.length > 0) {
+          publicTargets = prefetchedTargets;
+        } else {
+          try {
+            publicTargets = await fetchPublicTargets();
+          } catch {
+            // Server unreachable — say so, rather than claiming there's no
+            // content to scan. Those need different actions from the user.
+            if (cancelledRef.current) return;
+            setErrorMsg("Couldn't reach Memoera just now. Check your connection and tap Scan again.");
+            setPhase("error");
+            return;
+          }
+        }
         if (cancelledRef.current) return;
 
         // Signed-in Home scan: a user's own private targets are never part of
@@ -230,7 +241,11 @@ export default function GuestScanScreen({ onReady, onBack, onCreateAccount, onEr
         if (cancelledRef.current) return;
 
         if (!publicTargets || publicTargets.length === 0) {
-          setErrorMsg("No public AR targets yet. Create an account to upload your own!");
+          // Signed-in users already have an account — telling them to create
+          // one is the wrong next step.
+          setErrorMsg(includeOwnTargets
+            ? "Nothing to scan yet. Upload a photo and attach a video to it first."
+            : "No public AR targets yet. Create an account to upload your own!");
           setPhase("error");
           return;
         }

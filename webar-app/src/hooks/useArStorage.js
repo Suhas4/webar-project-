@@ -216,14 +216,23 @@ export async function loadTargets() {
   } catch { return { targets: null, mindFileUrl: null, hasData: false, imagePreviewUrls: [] }; }
 }
 
+// Throws when the list could not be fetched, so a caller can tell "the server
+// didn't answer" apart from "there genuinely are no targets yet". The scan path
+// depends on that distinction: swallowing a failure as an empty array made
+// "Tap to Scan" show "No public AR targets yet" and never open the camera
+// whenever the backend was briefly unreachable.
+export async function fetchPublicTargets() {
+  const res = await fetchWithRetry(`${API_BASE}/api/targets/public`);
+  if (!res.ok) throw new Error(`Public targets request failed (${res.status})`);
+  const data = await res.json();
+  if (!data.targets?.length) return [];
+  return data.targets.map((t) => ({ id:t.id, label:t.label, planeWidth:t.planeWidth, planeHeight:t.planeHeight, planeOffsetY:t.planeOffsetY, imageUrl:t.imageUrl, videoUrl:t.videoUrl, targetType:t.targetType||"video", urlLink:t.urlLink||"", animationEffect:t.animationEffect||"popIn", fileName:t.fileName||"", previewUrl:t.previewUrl||"" }));
+}
+
+// Forgiving wrapper for background/best-effort callers (prefetch, cache
+// rebuilds) where an empty list and a failure are equally "do nothing".
 export async function loadPublicTargets() {
-  try {
-    const res = await fetchWithRetry(`${API_BASE}/api/targets/public`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    if (!data.targets?.length) return [];
-    return data.targets.map((t) => ({ id:t.id, label:t.label, planeWidth:t.planeWidth, planeHeight:t.planeHeight, planeOffsetY:t.planeOffsetY, imageUrl:t.imageUrl, videoUrl:t.videoUrl, targetType:t.targetType||"video", urlLink:t.urlLink||"", animationEffect:t.animationEffect||"popIn", fileName:t.fileName||"", previewUrl:t.previewUrl||"" }));
-  } catch { return []; }
+  try { return await fetchPublicTargets(); } catch { return []; }
 }
 
 export async function clearTargets() {
