@@ -11,7 +11,7 @@ const CARDS = [
   { key: 'history', title: 'Scan History',   subtitle: 'Recent reads & writes', color: '#60A5FA' },
 ];
 
-export default function NfcDashboardScreen({ onBack, onRead, onWrite, onClear, onHistory }) {
+export default function NfcDashboardScreen({ onBack, onRead, onWrite, onClear, onHistory, onStickers }) {
   const [support, setSupport] = useState('checking'); // checking | ok | unsupported | disabled
 
   useEffect(() => {
@@ -60,6 +60,28 @@ export default function NfcDashboardScreen({ onBack, onRead, onWrite, onClear, o
       )}
 
       <div style={{ flex:1, overflowY:'auto', padding:'12px 20px 40px', display:'flex', flexDirection:'column', gap:16 }}>
+        {/* MemoEra's own stickers, as distinct from the raw read/write tools
+            below — this is the managed product, where a permanent sticker ID
+            is bound to an account and points at an experience you can change
+            at any time without ever rewriting the chip. */}
+        {onStickers && (
+          <button onClick={onStickers}
+            style={{ borderRadius:18, border:'1px solid rgba(139,92,246,0.5)', cursor:'pointer',
+              background:'linear-gradient(135deg, rgba(139,92,246,0.22), rgba(0,201,167,0.14))',
+              padding:'18px 18px', textAlign:'left', fontFamily:FONT, width:'100%' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <span style={{ fontSize:22 }}>◎</span>
+              <div style={{ flex:1, minWidth:0 }}>
+                <div style={{ fontSize:16, fontWeight:800, color:'#fff' }}>My MemoEra Stickers</div>
+                <div style={{ fontSize:11.5, color:'rgba(255,255,255,0.6)', marginTop:2 }}>
+                  Activate a sticker, build what it opens, see every tap
+                </div>
+              </div>
+              <span style={{ color:TEAL, fontSize:18 }}>→</span>
+            </div>
+          </button>
+        )}
+
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
           {CARDS.map((c) => (
             <button key={c.key} onClick={handlers[c.key]}
