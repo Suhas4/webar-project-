@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Core NFC is gated behind an entitlement as well as the Info.plist usage
+	  string. Both are required: without this the NFC session fails at runtime
+	  even though the app builds fine.
+
+	  This file alone is not enough — the same capability has to be enabled on
+	  the App ID in the Apple Developer portal (Certificates, Identifiers &
+	  Profiles -> your identifier -> NFC Tag Reading), otherwise signing fails
+	  with a provisioning profile mismatch.
+
+	  NDEF covers reading MemoEra stickers; TAG is needed to write a URL to a
+	  blank sticker from the "Write to chip" flow.
+	-->
+	<key>com.apple.developer.nfc.readersession.formats</key>
+	<array>
+		<string>NDEF</string>
+		<string>TAG</string>
+	</array>
+</dict>
+</plist>
