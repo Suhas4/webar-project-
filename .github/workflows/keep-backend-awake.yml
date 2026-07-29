@@ -1,0 +1,60 @@
+# Keeps the Render backend from sleeping.
+#
+# The backend runs on Render's free tier, which spins a service down after
+# ~15 minutes with no traffic. Waking it takes 30-60s, and during that window
+# the first request fails or hangs — which is what made "Tap to Scan" report
+# "no AR targets", and what makes the first screen after a quiet period feel
+# broken rather than slow.
+#
+# Pinging /health every 10 minutes keeps the instance warm so nobody pays that
+# cost.
+#
+# WHY NOT 24/7: Render's free plan includes 750 instance-hours per month, and a
+# month is ~730 hours. Keeping one service awake around the clock would consume
+# essentially the entire allowance, leaving nothing for any other free service
+# and risking suspension. The window below covers 05:30-01:30 IST — roughly
+# every waking hour in India — at about 610 hours a month, which leaves real
+# headroom. Widen it to '*/10 * * * *' if you move to a paid plan.
+name: Keep backend awake
+
+on:
+  schedule:
+    # Every 10 minutes, 00:00-19:59 UTC (05:30-01:30 IST).
+    - cron: '*/10 0-19 * * *'
+  # Lets you trigger it by hand from the Actions tab to wake the backend
+  # immediately, without waiting for the next scheduled run.
+  workflow_dispatch:
+
+# If a run somehow overlaps the next schedule, drop the older one rather than
+# queueing pings up behind each other.
+concurrency:
+  group: keep-backend-awake
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping /health
+        run: |
+          URL="https://webar-project-8jbi.onrender.com/health"
+
+          # A sleeping instance can take up to a minute to answer, so allow a
+          # generous timeout and retry — a slow first response is the normal
+          # case here, not a failure.
+          for attempt in 1 2 3; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+                     --max-time 90 --retry 0 "$URL" || echo "000")
+            if [ "$code" = "200" ]; then
+              echo "Backend awake (HTTP 200) on attempt $attempt."
+              exit 0
+            fi
+            echo "Attempt $attempt returned $code — retrying in 15s."
+            sleep 15
+          done
+
+          echo "::warning::Backend did not return 200 after 3 attempts."
+          # Deliberately exits 0: a failed ping is worth a warning, not a red
+          # X on the repo and a failure email every time Render is briefly slow.
+          exit 0
