@@ -19,6 +19,7 @@
     "@capacitor/browser": "^8.0.3",
     "@capacitor/cli": "^8.3.4",
     "@capacitor/core": "^8.3.4",
+    "@capacitor/ios": "^8.4.2",
     "@capacitor/share": "^8.0.1",
     "@capgo/capacitor-nfc": "^8.2.2",
     "@imgly/background-removal": "^1.7.0",
