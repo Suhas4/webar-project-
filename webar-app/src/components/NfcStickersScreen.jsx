@@ -1,6 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { API_BASE } from '../config/api.js';
-import { isNfcSupported, startNfcScan, stopNfcScan, addNfcListener, decodeNdefRecord } from '../hooks/useNfc.js';
+import { isNfcSupported, startNfcScan, stopNfcScan, addNfcListener, decodeNdefRecord, writeNfcTag } from '../hooks/useNfc.js';
+
+// What actually goes on the chip. Nothing else is ever written — the whole
+// point of the platform is that this URL never has to change.
+const tapUrl = (code) => `${window.location.origin}/nfc/${code}`;
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const TEAL = "#00C9A7";
@@ -169,6 +173,40 @@ function StickersTab({ stickers, experiences, reload, say }) {
     } catch { say('Network error.'); }
   };
 
+  // Puts the sticker's URL onto a physical chip. Stickers that arrive
+  // pre-encoded from the manufacturer never need this — it's for blank tags
+  // and for re-encoding one that was wiped.
+  const [writing, setWriting] = useState(null); // sticker id being written
+  const writeListener = useRef(null);
+
+  const stopWriting = useCallback(async () => {
+    if (writeListener.current) { await writeListener.current.remove(); writeListener.current = null; }
+    await stopNfcScan();
+    setWriting(null);
+  }, []);
+
+  useEffect(() => () => { stopWriting(); }, [stopWriting]);
+
+  const writeToChip = async (s) => {
+    if (writing) { stopWriting(); return; }
+    if (!(await isNfcSupported())) { say('This device can’t write NFC tags.'); return; }
+    setWriting(s.id);
+    try {
+      await startNfcScan({ alertMessage: 'Hold the blank sticker against the back of your phone' });
+      writeListener.current = addNfcListener(async () => {
+        try {
+          await writeNfcTag('url', { url: tapUrl(s.code) });
+          say('Written. Tapping this sticker now opens your experience.');
+        } catch (e) {
+          say(e.message || 'Could not write to that tag — it may be read-only.');
+        } finally { stopWriting(); }
+      });
+    } catch (e) {
+      say(e.message || 'NFC is not available on this device.');
+      setWriting(null);
+    }
+  };
+
   const openAnalytics = async (s) => {
     if (analytics?.id === s.id) { setAnalytics(null); return; }
     try {
@@ -211,7 +249,15 @@ function StickersTab({ stickers, experiences, reload, say }) {
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 15, fontWeight: 800 }}>{s.name || 'Untitled sticker'}</div>
-              <div style={st.code}>{s.code}</div>
+              <button onClick={() => {
+                navigator.clipboard?.writeText(tapUrl(s.code))
+                  .then(() => say('Tap link copied.'))
+                  .catch(() => say('Could not copy.'));
+              }} style={{ ...st.code, background: 'transparent', border: 'none', padding: 0,
+                cursor: 'pointer', textAlign: 'left', display: 'block', maxWidth: '100%',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {s.code} · copy link
+              </button>
             </div>
             <span style={s.status === 'active' ? st.pillOk : st.pillWarn}>
               {s.status === 'active' ? 'Active' : s.status}
@@ -231,6 +277,10 @@ function StickersTab({ stickers, experiences, reload, say }) {
           </select>
 
           <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+            <button onClick={() => writeToChip(s)}
+              style={writing === s.id ? { ...st.ghost, borderColor: GOLD, color: GOLD } : st.ghost}>
+              {writing === s.id ? 'Hold sticker near… (cancel)' : 'Write to chip'}
+            </button>
             <button onClick={() => openAnalytics(s)} style={st.ghost}>
               {analytics?.id === s.id ? 'Hide analytics' : 'Analytics'}
             </button>
