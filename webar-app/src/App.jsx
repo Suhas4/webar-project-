@@ -29,6 +29,7 @@ const BACK_MAP = {
   'nfc-read':     'nfc',
   'nfc-clear':    'nfc',
   'nfc-history':  'nfc',
+  'nfc-stickers': 'nfc',
   'catalog-setup': 'home',
   'seller-dashboard': 'home',
   // Onboarding (account type → category → details → complete) now has an
@@ -72,6 +73,10 @@ const NfcClearScreen           = lazy(() => import('./components/NfcClearScreen.
 const NfcHistoryScreen         = lazy(() => import('./components/NfcHistoryScreen.jsx'));
 const CatalogSetupScreen       = lazy(() => import('./components/CatalogSetupScreen.jsx'));
 const SellerDashboardScreen    = lazy(() => import('./components/SellerDashboardScreen.jsx'));
+// Lazy: only visitors arriving from a tapped sticker load the public view, so
+// it stays out of the bundle everyone else downloads.
+const NfcPublicView            = lazy(() => import('./components/NfcPublicView.jsx'));
+const NfcStickersScreen        = lazy(() => import('./components/NfcStickersScreen.jsx'));
 const SetupScreen              = lazy(() => import('./components/SetupScreen.jsx'));
 const SignInScreen             = lazy(() => import('./components/SignInScreen.jsx'));
 const SignUpScreen             = lazy(() => import('./components/SignUpScreen.jsx'));
@@ -106,6 +111,18 @@ export default function App() {
   // Public AR view — intercept ?ar= before any auth check
   const arToken = new URLSearchParams(window.location.search).get('ar');
   if (arToken) return <PublicArView token={arToken} />;
+
+  // Tapped NFC sticker — /nfc/MEM-NFC-######## is what the chip carries, and
+  // whoever taps it is almost never signed in, so this resolves before any
+  // auth check too. Netlify already rewrites every path to index.html.
+  const nfcMatch = window.location.pathname.match(/^\/nfc\/([A-Za-z0-9-]+)\/?$/);
+  if (nfcMatch) {
+    return (
+      <Suspense fallback={null}>
+        <NfcPublicView code={nfcMatch[1].toUpperCase()} />
+      </Suspense>
+    );
+  }
 
   const hasToken = !!localStorage.getItem('memoera_token');
 
@@ -746,6 +763,7 @@ export default function App() {
         onWrite={() => setAppView('nfc-write')}
         onClear={() => setAppView('nfc-clear')}
         onHistory={() => setAppView('nfc-history')}
+        onStickers={() => setAppView('nfc-stickers')}
       />
     );
   } else if (appView === 'nfc-write') {
@@ -756,6 +774,8 @@ export default function App() {
     mainScreen = <NfcClearScreen onBack={() => setAppView('nfc')} />;
   } else if (appView === 'nfc-history') {
     mainScreen = <NfcHistoryScreen onBack={() => setAppView('nfc')} />;
+  } else if (appView === 'nfc-stickers') {
+    mainScreen = <NfcStickersScreen onBack={() => setAppView('nfc')} user={currentUser} />;
   } else if (appView === 'catalog-setup') {
     mainScreen = <CatalogSetupScreen onStart={handleStart} onBack={() => setAppView('home')} isPublic={selectedVisibility === 'public'} />;
   } else if (appView === 'seller-dashboard') {

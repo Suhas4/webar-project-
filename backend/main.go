@@ -20,6 +20,7 @@ import (
 	"io"
 	"log"
 	"math/big"
+	"net"
 	"net/http"
 	"net/smtp"
 	"net/url"
@@ -64,6 +65,14 @@ type User struct {
 	// Populated by /api/me only — the Profile screen needs these to render
 	// verification state and the Business Information card. Sign-in/sign-up
 	// responses leave them at zero values.
+	// Derived, never stored. Lets the app hide admin-only UI; every admin
+	// endpoint re-checks server-side regardless.
+	//
+	// NOTE: isAdminEmail() is compared against whatever getUserFromToken
+	// returns, which is the MOBILE number — the ADMIN_EMAIL env var is
+	// misleadingly named but every existing admin check works this way, so
+	// this follows the same convention rather than diverging from it.
+	IsAdmin          bool      `json:"isAdmin"`
 	EmailVerified    bool      `json:"emailVerified"`
 	TwoFactorEnabled bool      `json:"twoFactorEnabled"`
 	NotifyEmail      bool      `json:"notifyEmail"`
@@ -418,6 +427,78 @@ func initDB(ctx context.Context) error {
 			created_at TIMESTAMPTZ DEFAULT NOW()
 		)`)
 	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_login_activity_user ON login_activity(user_id, created_at DESC)`)
+
+	// ── NFC platform ─────────────────────────────────────────────────────────
+	// The chip itself only ever carries https://memoera.in/nfc/<code>. Nothing
+	// about the owner lives on the sticker, so a customer can change what a tap
+	// shows — or hand the sticker to someone else — without it ever being
+	// rewritten.
+	_, _ = db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS nfc_batches (
+			id           BIGSERIAL PRIMARY KEY,
+			batch_code   TEXT NOT NULL UNIQUE,
+			manufacturer TEXT NOT NULL DEFAULT '',
+			quantity     INT  NOT NULL DEFAULT 0,
+			notes        TEXT NOT NULL DEFAULT '',
+			created_by   BIGINT REFERENCES users(id) ON DELETE SET NULL,
+			created_at   TIMESTAMPTZ DEFAULT NOW()
+		)`)
+
+	// Sequence backs the permanent MEM-NFC-######## identity. A sequence rather
+	// than max(id)+1 so concurrent batch generation can't hand out a duplicate.
+	_, _ = db.Exec(ctx, `CREATE SEQUENCE IF NOT EXISTS nfc_code_seq START 1`)
+
+	// activation_secret is printed on the packaging, never written to the chip.
+	// Codes are sequential and therefore guessable, so without a secret anyone
+	// who tapped (or simply enumerated) a sticker could claim someone else's.
+	_, _ = db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS nfc_stickers (
+			id                BIGSERIAL PRIMARY KEY,
+			code              TEXT NOT NULL UNIQUE,
+			activation_secret TEXT NOT NULL,
+			batch_id          BIGINT REFERENCES nfc_batches(id) ON DELETE SET NULL,
+			status            TEXT NOT NULL DEFAULT 'manufactured',
+			owner_id          BIGINT REFERENCES users(id) ON DELETE SET NULL,
+			experience_id     BIGINT,
+			name              TEXT NOT NULL DEFAULT '',
+			activated_at      TIMESTAMPTZ,
+			last_tap_at       TIMESTAMPTZ,
+			tap_count         BIGINT NOT NULL DEFAULT 0,
+			created_at        TIMESTAMPTZ DEFAULT NOW()
+		)`)
+	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_nfc_stickers_owner ON nfc_stickers(owner_id)`)
+	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_nfc_stickers_batch ON nfc_stickers(batch_id)`)
+
+	// blocks is the ordered block list the experience builder edits. Kept as
+	// JSONB so new block types don't need a migration.
+	_, _ = db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS nfc_experiences (
+			id         BIGSERIAL PRIMARY KEY,
+			owner_id   BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			title      TEXT NOT NULL DEFAULT '',
+			theme      TEXT NOT NULL DEFAULT 'midnight',
+			blocks     JSONB NOT NULL DEFAULT '[]'::jsonb,
+			created_at TIMESTAMPTZ DEFAULT NOW(),
+			updated_at TIMESTAMPTZ DEFAULT NOW()
+		)`)
+	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_nfc_experiences_owner ON nfc_experiences(owner_id)`)
+
+	// One row per tap. visitor_hash is a salted hash of IP+UA used only to tell
+	// repeat visitors from unique ones and to debounce double taps — the raw IP
+	// is never stored.
+	_, _ = db.Exec(ctx, `
+		CREATE TABLE IF NOT EXISTS nfc_taps (
+			id           BIGSERIAL PRIMARY KEY,
+			sticker_id   BIGINT NOT NULL REFERENCES nfc_stickers(id) ON DELETE CASCADE,
+			visitor_hash TEXT NOT NULL DEFAULT '',
+			browser      TEXT NOT NULL DEFAULT '',
+			platform     TEXT NOT NULL DEFAULT '',
+			is_mobile    BOOLEAN NOT NULL DEFAULT false,
+			country      TEXT NOT NULL DEFAULT '',
+			city         TEXT NOT NULL DEFAULT '',
+			created_at   TIMESTAMPTZ DEFAULT NOW()
+		)`)
+	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_nfc_taps_sticker ON nfc_taps(sticker_id, created_at DESC)`)
 
 	_, _ = db.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS payment_orders (
@@ -1344,7 +1425,7 @@ func changePasswordHandler(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/me — returns the authenticated user's profile (including numeric id).
 func getMeHandler(w http.ResponseWriter, r *http.Request) {
-	userID, _, err := getUserFromToken(r)
+	userID, tokenEmail, err := getUserFromToken(r)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "Unauthorized")
 		return
@@ -1370,6 +1451,7 @@ func getMeHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "User not found")
 		return
 	}
+	user.IsAdmin = isAdminEmail(tokenEmail)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(user)
 }
@@ -1577,6 +1659,651 @@ func saveBusinessDetailsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NFC PLATFORM
+//
+// The sticker is only a key. It carries https://memoera.in/nfc/MEM-NFC-########
+// and nothing else — no name, no links, no personal data — so the owner can
+// change what a tap opens, or pass the sticker on, without it ever being
+// rewritten. Everything below is the software layer that makes that work:
+// MemoEra alone mints the identities, customers claim them, and the resolve
+// endpoint decides what a stranger's tap is allowed to see.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const nfcCodePrefix = "MEM-NFC-"
+
+// Ambiguous characters (0/O, 1/I/L) are excluded — this is read off a printed
+// card and typed in by hand when a phone can't read the chip.
+const nfcSecretAlphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+func generateNfcSecret() (string, error) {
+	b := make([]byte, 8)
+	for i := range b {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(nfcSecretAlphabet))))
+		if err != nil {
+			return "", err
+		}
+		b[i] = nfcSecretAlphabet[n.Int64()]
+	}
+	return string(b), nil
+}
+
+// Salted hash of IP + user agent. Lets analytics separate unique from repeat
+// visitors, and lets us debounce a phone that fires the same tap twice, without
+// ever persisting an address.
+func visitorHash(r *http.Request) string {
+	ip := r.Header.Get("CF-Connecting-IP")
+	if ip == "" {
+		ip = strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]
+	}
+	if ip == "" {
+		// RemoteAddr is host:port and the port is a fresh ephemeral one on every
+		// connection — leaving it in made each request hash as a different
+		// visitor, so unique visitors always equalled total taps and the
+		// double-tap debounce never matched anything.
+		if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+			ip = host
+		} else {
+			ip = r.RemoteAddr
+		}
+	}
+	salt := os.Getenv("JWT_SECRET")
+	sum := sha256.Sum256([]byte(salt + "|" + strings.TrimSpace(ip) + "|" + r.UserAgent()))
+	return hex.EncodeToString(sum[:16])
+}
+
+func nfcRequireAdmin(r *http.Request) error {
+	_, email, err := getUserFromToken(r)
+	if err != nil {
+		return errors.New("authentication required")
+	}
+	if !isAdminEmail(email) {
+		return errors.New("admin only")
+	}
+	return nil
+}
+
+// POST /api/admin/nfc/batches — mints a manufacturing batch. This is the only
+// place NFC identities come into existence; neither customers nor vendors can
+// create one. Returns every code with its activation secret so the batch can be
+// handed to the printer — the secret is not retrievable in bulk again later.
+func adminCreateNfcBatchHandler(w http.ResponseWriter, r *http.Request) {
+	if err := nfcRequireAdmin(r); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	userID, _, _ := getUserFromToken(r)
+
+	var req struct {
+		BatchCode    string `json:"batchCode"`
+		Manufacturer string `json:"manufacturer"`
+		Quantity     int    `json:"quantity"`
+		Notes        string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Quantity < 1 || req.Quantity > 10000 {
+		writeError(w, http.StatusBadRequest, "Quantity must be between 1 and 10000")
+		return
+	}
+	if strings.TrimSpace(req.BatchCode) == "" {
+		req.BatchCode = fmt.Sprintf("BATCH-%s", time.Now().UTC().Format("20060102-150405"))
+	}
+	if req.Manufacturer == "" {
+		req.Manufacturer = "Shanghai Feign Microelectronics"
+	}
+
+	ctx := r.Context()
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not start batch")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var batchID int64
+	if err := tx.QueryRow(ctx, `
+		INSERT INTO nfc_batches (batch_code, manufacturer, quantity, notes, created_by)
+		VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+		req.BatchCode, req.Manufacturer, req.Quantity, req.Notes, userID,
+	).Scan(&batchID); err != nil {
+		writeError(w, http.StatusBadRequest, "That batch code already exists")
+		return
+	}
+
+	type minted struct {
+		Code   string `json:"code"`
+		Secret string `json:"secret"`
+		URL    string `json:"url"`
+	}
+	out := make([]minted, 0, req.Quantity)
+	base := strings.TrimRight(os.Getenv("FRONTEND_ORIGIN"), "/")
+	if base == "" {
+		base = "https://memoera.in"
+	}
+
+	for i := 0; i < req.Quantity; i++ {
+		var seq int64
+		if err := tx.QueryRow(ctx, `SELECT nextval('nfc_code_seq')`).Scan(&seq); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not allocate NFC id")
+			return
+		}
+		secret, err := generateNfcSecret()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not generate activation secret")
+			return
+		}
+		code := fmt.Sprintf("%s%08d", nfcCodePrefix, seq)
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO nfc_stickers (code, activation_secret, batch_id, status)
+			VALUES ($1,$2,$3,'manufactured')`, code, secret, batchID); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not register sticker")
+			return
+		}
+		out = append(out, minted{Code: code, Secret: secret, URL: base + "/nfc/" + code})
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not save batch")
+		return
+	}
+	log.Printf("[nfc] admin %d minted %d stickers in batch %s", userID, req.Quantity, req.BatchCode)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"batchId": batchID, "batchCode": req.BatchCode, "stickers": out,
+	})
+}
+
+// GET /api/admin/nfc/batches — batch list with activation progress.
+func adminListNfcBatchesHandler(w http.ResponseWriter, r *http.Request) {
+	if err := nfcRequireAdmin(r); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	rows, err := db.Query(r.Context(), `
+		SELECT b.id, b.batch_code, b.manufacturer, b.quantity, b.notes, b.created_at,
+		       COUNT(s.id) FILTER (WHERE s.status = 'active')  AS activated,
+		       COUNT(s.id) FILTER (WHERE s.status = 'blocked') AS blocked
+		FROM nfc_batches b
+		LEFT JOIN nfc_stickers s ON s.batch_id = b.id
+		GROUP BY b.id ORDER BY b.created_at DESC LIMIT 200`)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load batches")
+		return
+	}
+	defer rows.Close()
+
+	type batch struct {
+		ID           int64     `json:"id"`
+		BatchCode    string    `json:"batchCode"`
+		Manufacturer string    `json:"manufacturer"`
+		Quantity     int       `json:"quantity"`
+		Notes        string    `json:"notes"`
+		CreatedAt    time.Time `json:"createdAt"`
+		Activated    int       `json:"activated"`
+		Blocked      int       `json:"blocked"`
+	}
+	list := []batch{}
+	for rows.Next() {
+		var b batch
+		if err := rows.Scan(&b.ID, &b.BatchCode, &b.Manufacturer, &b.Quantity, &b.Notes,
+			&b.CreatedAt, &b.Activated, &b.Blocked); err != nil {
+			continue
+		}
+		list = append(list, b)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"batches": list})
+}
+
+// POST /api/admin/nfc/block — block or restore a sticker (lost, stolen, abused).
+// A blocked sticker resolves to nothing but keeps its identity and history.
+func adminBlockNfcHandler(w http.ResponseWriter, r *http.Request) {
+	if err := nfcRequireAdmin(r); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	var req struct {
+		Code    string `json:"code"`
+		Blocked bool   `json:"blocked"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	// Restoring returns it to 'active' only if somebody owns it, otherwise to
+	// 'manufactured' so an unclaimed sticker stays claimable.
+	tag, err := db.Exec(r.Context(), `
+		UPDATE nfc_stickers SET status = CASE
+			WHEN $2 THEN 'blocked'
+			WHEN owner_id IS NOT NULL THEN 'active'
+			ELSE 'manufactured' END
+		WHERE code = $1`, strings.ToUpper(strings.TrimSpace(req.Code)), req.Blocked)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not update sticker")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "No sticker with that code")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// POST /api/nfc/activate — claims a sticker. Requires the printed activation
+// secret as well as the code, because codes are sequential and so trivially
+// guessable; the secret is what proves the customer physically has the sticker.
+func activateNfcHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "Sign in to activate a sticker")
+		return
+	}
+	var req struct {
+		Code   string `json:"code"`
+		Secret string `json:"secret"`
+		Name   string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	code := strings.ToUpper(strings.TrimSpace(req.Code))
+	// Accept a full tapped URL as well as a bare code — people paste both.
+	if i := strings.LastIndex(code, "/"); i >= 0 {
+		code = code[i+1:]
+	}
+	if !strings.HasPrefix(code, nfcCodePrefix) {
+		writeError(w, http.StatusBadRequest, "That doesn't look like a MemoEra NFC ID")
+		return
+	}
+	secret := strings.ToUpper(strings.TrimSpace(req.Secret))
+
+	ctx := r.Context()
+	var id int64
+	var status, storedSecret string
+	var ownerID *int64
+	err = db.QueryRow(ctx,
+		`SELECT id, status, activation_secret, owner_id FROM nfc_stickers WHERE code=$1`, code,
+	).Scan(&id, &status, &storedSecret, &ownerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "We don't recognise that NFC ID")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Activation failed")
+		return
+	}
+	if status == "blocked" {
+		writeError(w, http.StatusForbidden, "This sticker has been blocked. Contact MemoEra support.")
+		return
+	}
+	if ownerID != nil {
+		if *ownerID == userID {
+			writeError(w, http.StatusBadRequest, "This sticker is already on your account")
+		} else {
+			writeError(w, http.StatusConflict, "This sticker is already activated on another account")
+		}
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(storedSecret), []byte(secret)) != 1 {
+		writeError(w, http.StatusBadRequest, "That activation code doesn't match this sticker")
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = "My MemoEra Sticker"
+	}
+	if _, err := db.Exec(ctx, `
+		UPDATE nfc_stickers
+		SET owner_id=$1, status='active', name=$2, activated_at=NOW()
+		WHERE id=$3 AND owner_id IS NULL`, userID, name, id); err != nil {
+		writeError(w, http.StatusInternalServerError, "Activation failed")
+		return
+	}
+	log.Printf("[nfc] sticker %s activated by user %d", code, userID)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "code": code, "name": name})
+}
+
+// GET /api/nfc/mine — the caller's stickers.
+func myNfcStickersHandler(w http.ResponseWriter, r *http.Request) {
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	rows, err := db.Query(r.Context(), `
+		SELECT s.id, s.code, s.name, s.status, s.tap_count, s.last_tap_at, s.activated_at,
+		       COALESCE(s.experience_id,0), COALESCE(e.title,'')
+		FROM nfc_stickers s
+		LEFT JOIN nfc_experiences e ON e.id = s.experience_id
+		WHERE s.owner_id=$1 ORDER BY s.activated_at DESC NULLS LAST`, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load your stickers")
+		return
+	}
+	defer rows.Close()
+
+	type sticker struct {
+		ID             int64      `json:"id"`
+		Code           string     `json:"code"`
+		Name           string     `json:"name"`
+		Status         string     `json:"status"`
+		TapCount       int64      `json:"tapCount"`
+		LastTapAt      *time.Time `json:"lastTapAt"`
+		ActivatedAt    *time.Time `json:"activatedAt"`
+		ExperienceID   int64      `json:"experienceId"`
+		ExperienceName string     `json:"experienceName"`
+	}
+	list := []sticker{}
+	for rows.Next() {
+		var s sticker
+		if err := rows.Scan(&s.ID, &s.Code, &s.Name, &s.Status, &s.TapCount, &s.LastTapAt,
+			&s.ActivatedAt, &s.ExperienceID, &s.ExperienceName); err != nil {
+			continue
+		}
+		list = append(list, s)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"stickers": list})
+}
+
+// PUT /api/nfc/sticker — rename, point at a different experience, or release.
+// Every branch is ownership-checked in the WHERE clause.
+func updateNfcStickerHandler(w http.ResponseWriter, r *http.Request) {
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	var req struct {
+		ID           int64  `json:"id"`
+		Name         *string `json:"name"`
+		ExperienceID *int64  `json:"experienceId"`
+		Release      bool    `json:"release"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	ctx := r.Context()
+
+	// Releasing hands the sticker back to unclaimed so it can be activated by
+	// whoever holds it next — the identity and its tap history survive.
+	if req.Release {
+		tag, err := db.Exec(ctx, `
+			UPDATE nfc_stickers
+			SET owner_id=NULL, status='manufactured', experience_id=NULL, name=''
+			WHERE id=$1 AND owner_id=$2`, req.ID, userID)
+		if err != nil || tag.RowsAffected() == 0 {
+			writeError(w, http.StatusNotFound, "Sticker not found on your account")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"released": true})
+		return
+	}
+
+	// An experience can only be attached if the caller owns that too.
+	if req.ExperienceID != nil && *req.ExperienceID != 0 {
+		var owns bool
+		_ = db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nfc_experiences WHERE id=$1 AND owner_id=$2)`,
+			*req.ExperienceID, userID).Scan(&owns)
+		if !owns {
+			writeError(w, http.StatusForbidden, "That experience isn't yours")
+			return
+		}
+	}
+
+	tag, err := db.Exec(ctx, `
+		UPDATE nfc_stickers SET
+			name          = COALESCE($1, name),
+			experience_id = COALESCE($2, experience_id)
+		WHERE id=$3 AND owner_id=$4`, req.Name, req.ExperienceID, req.ID, userID)
+	if err != nil || tag.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "Sticker not found on your account")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// /api/nfc/experiences — GET lists the caller's experiences, PUT creates or
+// updates one (id omitted creates).
+func nfcExperiencesHandler(w http.ResponseWriter, r *http.Request) {
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	ctx := r.Context()
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		rows, err := db.Query(ctx, `
+			SELECT id, title, theme, blocks, updated_at FROM nfc_experiences
+			WHERE owner_id=$1 ORDER BY updated_at DESC`, userID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "could not load experiences")
+			return
+		}
+		defer rows.Close()
+		type exp struct {
+			ID        int64           `json:"id"`
+			Title     string          `json:"title"`
+			Theme     string          `json:"theme"`
+			Blocks    json.RawMessage `json:"blocks"`
+			UpdatedAt time.Time       `json:"updatedAt"`
+		}
+		list := []exp{}
+		for rows.Next() {
+			var e exp
+			if err := rows.Scan(&e.ID, &e.Title, &e.Theme, &e.Blocks, &e.UpdatedAt); err != nil {
+				continue
+			}
+			list = append(list, e)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"experiences": list})
+
+	case http.MethodPut:
+		var req struct {
+			ID     int64           `json:"id"`
+			Title  string          `json:"title"`
+			Theme  string          `json:"theme"`
+			Blocks json.RawMessage `json:"blocks"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		if len(req.Blocks) == 0 {
+			req.Blocks = json.RawMessage(`[]`)
+		}
+		if req.Theme == "" {
+			req.Theme = "midnight"
+		}
+		if req.ID == 0 {
+			var id int64
+			if err := db.QueryRow(ctx, `
+				INSERT INTO nfc_experiences (owner_id, title, theme, blocks)
+				VALUES ($1,$2,$3,$4) RETURNING id`,
+				userID, req.Title, req.Theme, req.Blocks).Scan(&id); err != nil {
+				writeError(w, http.StatusInternalServerError, "could not create experience")
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": id})
+			return
+		}
+		tag, err := db.Exec(ctx, `
+			UPDATE nfc_experiences SET title=$1, theme=$2, blocks=$3, updated_at=NOW()
+			WHERE id=$4 AND owner_id=$5`, req.Title, req.Theme, req.Blocks, req.ID, userID)
+		if err != nil || tag.RowsAffected() == 0 {
+			writeError(w, http.StatusNotFound, "Experience not found on your account")
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"id": req.ID})
+
+	case http.MethodDelete:
+		id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+		if _, err := db.Exec(ctx, `DELETE FROM nfc_experiences WHERE id=$1 AND owner_id=$2`, id, userID); err != nil {
+			writeError(w, http.StatusInternalServerError, "could not delete experience")
+			return
+		}
+		// Any sticker pointing at it falls back to showing nothing rather than
+		// a dangling reference.
+		_, _ = db.Exec(ctx, `UPDATE nfc_stickers SET experience_id=NULL WHERE experience_id=$1 AND owner_id=$2`, id, userID)
+		_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
+}
+
+// GET /api/nfc/resolve?code=MEM-NFC-######## — PUBLIC. This is what a stranger's
+// tap hits. It returns only what the owner chose to publish, never account or
+// contact data they didn't put in a block, and records the tap.
+func resolveNfcHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	code := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("code")))
+	if i := strings.LastIndex(code, "/"); i >= 0 {
+		code = code[i+1:]
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	var stickerID int64
+	var status, name string
+	var expID *int64
+	err := db.QueryRow(r.Context(),
+		`SELECT id, status, name, experience_id FROM nfc_stickers WHERE code=$1`, code,
+	).Scan(&stickerID, &status, &name, &expID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "unknown sticker")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not resolve sticker")
+		return
+	}
+	if status == "blocked" {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"state": "blocked"})
+		return
+	}
+	if status != "active" || expID == nil {
+		// Claimable, or claimed but nothing published yet. Deliberately does not
+		// reveal whether it has an owner.
+		state := "unclaimed"
+		if status == "active" {
+			state = "empty"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"state": state, "code": code})
+		return
+	}
+
+	var title, theme string
+	var blocks json.RawMessage
+	if err := db.QueryRow(r.Context(),
+		`SELECT title, theme, blocks FROM nfc_experiences WHERE id=$1`, *expID,
+	).Scan(&title, &theme, &blocks); err != nil {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"state": "empty", "code": code})
+		return
+	}
+
+	recordNfcTap(r, stickerID)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"state": "ok", "code": code, "title": title, "theme": theme, "blocks": blocks,
+	})
+}
+
+// Best-effort, never blocks the response the visitor is waiting on. Repeat taps
+// from the same visitor within a minute are folded into one so a phone that
+// fires twice doesn't inflate the owner's numbers.
+func recordNfcTap(r *http.Request, stickerID int64) {
+	vh := visitorHash(r)
+	browser, platform, isMobile := parseUserAgent(r.UserAgent())
+	country := r.Header.Get("CF-IPCountry")
+	ctx := r.Context()
+
+	var recent bool
+	_ = db.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM nfc_taps
+		WHERE sticker_id=$1 AND visitor_hash=$2 AND created_at > NOW() - INTERVAL '1 minute')`,
+		stickerID, vh).Scan(&recent)
+	if recent {
+		return
+	}
+	if _, err := db.Exec(ctx, `
+		INSERT INTO nfc_taps (sticker_id, visitor_hash, browser, platform, is_mobile, country)
+		VALUES ($1,$2,$3,$4,$5,$6)`, stickerID, vh, browser, platform, isMobile, country); err != nil {
+		log.Printf("[nfc] tap insert failed for sticker %d: %v", stickerID, err)
+		return
+	}
+	_, _ = db.Exec(ctx,
+		`UPDATE nfc_stickers SET tap_count = tap_count + 1, last_tap_at = NOW() WHERE id=$1`, stickerID)
+}
+
+// GET /api/nfc/analytics?id= — tap breakdown for one of the caller's stickers.
+func nfcAnalyticsHandler(w http.ResponseWriter, r *http.Request) {
+	userID, _, err := getUserFromToken(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	stickerID, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+
+	var owns bool
+	_ = db.QueryRow(r.Context(),
+		`SELECT EXISTS(SELECT 1 FROM nfc_stickers WHERE id=$1 AND owner_id=$2)`, stickerID, userID).Scan(&owns)
+	if !owns {
+		writeError(w, http.StatusForbidden, "Not your sticker")
+		return
+	}
+
+	var total, unique, last7 int64
+	_ = db.QueryRow(r.Context(), `
+		SELECT COUNT(*), COUNT(DISTINCT visitor_hash),
+		       COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')
+		FROM nfc_taps WHERE sticker_id=$1`, stickerID).Scan(&total, &unique, &last7)
+
+	breakdown := func(col string) []map[string]interface{} {
+		out := []map[string]interface{}{}
+		rows, err := db.Query(r.Context(), fmt.Sprintf(`
+			SELECT COALESCE(NULLIF(%s,''),'Unknown') AS k, COUNT(*) FROM nfc_taps
+			WHERE sticker_id=$1 GROUP BY k ORDER BY COUNT(*) DESC LIMIT 6`, col), stickerID)
+		if err != nil {
+			return out
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var k string
+			var n int64
+			if err := rows.Scan(&k, &n); err == nil {
+				out = append(out, map[string]interface{}{"label": k, "count": n})
+			}
+		}
+		return out
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"total": total, "unique": unique, "repeat": total - unique, "last7Days": last7,
+		"platforms": breakdown("platform"), "browsers": breakdown("browser"),
+		"countries": breakdown("country"),
+	})
 }
 
 // ── Profile screen: email verification, 2FA, login history, preferences ──────
@@ -4318,6 +5045,22 @@ func main() {
 	mux.HandleFunc("/api/auth/email/verify", verifyEmailCodeHandler)
 	mux.HandleFunc("/api/auth/2fa", twoFactorHandler)
 	mux.HandleFunc("/api/preferences", updatePreferencesHandler)
+
+	// ── NFC platform ──────────────────────────────────────────────────────
+	mux.HandleFunc("/api/admin/nfc/batches", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			adminCreateNfcBatchHandler(w, r)
+			return
+		}
+		adminListNfcBatchesHandler(w, r)
+	})
+	mux.HandleFunc("/api/admin/nfc/block", adminBlockNfcHandler)
+	mux.HandleFunc("/api/nfc/activate", activateNfcHandler)
+	mux.HandleFunc("/api/nfc/mine", myNfcStickersHandler)
+	mux.HandleFunc("/api/nfc/sticker", updateNfcStickerHandler)
+	mux.HandleFunc("/api/nfc/experiences", nfcExperiencesHandler)
+	mux.HandleFunc("/api/nfc/analytics", nfcAnalyticsHandler)
+	mux.HandleFunc("/api/nfc/resolve", resolveNfcHandler) // public — no auth
 	mux.HandleFunc("/api/auth/onboarding", updateOnboardingHandler)
 	mux.HandleFunc("/api/business/details", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
