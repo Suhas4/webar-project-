@@ -183,16 +183,33 @@ export default function App() {
   // Initialise AdMob SDK as early as possible
   useEffect(() => { initAdMob(); }, []);
 
-  // Preload video overlay assets (~510 KB) once the page has finished loading.
-  // See deferUntilIdleAfterLoad — a bare requestIdleCallback fired early enough
-  // that these four videos were downloading before first contentful paint.
-  useEffect(() => deferUntilIdleAfterLoad(() => {
-    const VIDEOS = ['/right-mark.mp4', '/x-mark.mp4', '/wings-to-memories.mp4', '/welcome-hand.mp4'];
-    VIDEOS.forEach((src) => {
-      const v = document.createElement('video');
-      v.src = src; v.preload = 'auto'; v.muted = true; v.load();
-    });
-  }), []);
+  // Preload the video overlay assets (~510 KB) on first interaction rather than
+  // on load. They were already deferred past the load event, but startup got
+  // fast enough (~650ms) that "after load" still landed them right on the first
+  // paint boundary. Nothing here is needed until the user actually does
+  // something, so waiting for a real gesture keeps them off the critical path
+  // entirely — and a session that only reads the landing page never pays for
+  // them at all.
+  useEffect(() => {
+    let done = false;
+    const preload = () => {
+      if (done) return;
+      done = true;
+      ['/right-mark.mp4', '/x-mark.mp4', '/wings-to-memories.mp4', '/welcome-hand.mp4']
+        .forEach((src) => {
+          const v = document.createElement('video');
+          v.src = src; v.preload = 'auto'; v.muted = true; v.load();
+        });
+      cleanup();
+    };
+    const EVENTS = ['pointerdown', 'keydown', 'touchstart', 'scroll'];
+    const cleanup = () => EVENTS.forEach((e) => window.removeEventListener(e, preload));
+    EVENTS.forEach((e) => window.addEventListener(e, preload, { once: true, passive: true }));
+    // Backstop: if the visitor just reads without touching anything, fetch them
+    // well after everything else has settled so they're ready if needed.
+    const t = setTimeout(() => deferUntilIdleAfterLoad(preload), 8000);
+    return () => { clearTimeout(t); cleanup(); };
+  }, []);
 
   // Warm the AR libraries (~6 MB across MindAR, A-Frame and Three.js) so that
   // tapping Scan opens the camera instantly instead of stalling on a multi-MB

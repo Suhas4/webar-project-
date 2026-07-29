@@ -554,7 +554,7 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
         </form>
 
         {/* Full-bleed "Explore modes" banner — three diagonal-cut partitions */}
-        <ExploreModes onScan={onScan} onGallery={onGallery} onCollection={onCollection} colors={colors} />
+        <ExploreModes onUpload={onUpload} onScan={onScan} onCollection={onCollection} colors={colors} />
 
         {/* ── Social icons + Reviews / Stats ── */}
         <div style={styles.bodyGrid}>
@@ -607,11 +607,13 @@ const EXPLORE_MODES = [
 // Full-bleed diagonal-cut banner, split into three tiles — one per
 // "Explore modes" step. Deliberately breaks out of the page's side padding
 // (negative margins) so the diagonal edges run edge-to-edge like a ribbon.
-function ExploreModes({ onScan, onGallery, onCollection, colors }) {
+function ExploreModes({ onUpload, onScan, onCollection, colors }) {
+  // Indexes must line up with EXPLORE_MODES above — they were off by one, so
+  // the tile labelled "Upload" opened the scanner and "Scan" opened the gallery.
   const actions = [
-    () => onScan?.(),
-    () => onGallery?.(),
-    () => onCollection?.(),
+    () => onUpload?.(),      // Upload
+    () => onScan?.(),        // Scan
+    () => onCollection?.(),  // Relive
   ];
   return (
     <div style={s2.wrap}>

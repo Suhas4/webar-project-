@@ -8,17 +8,39 @@
 // resolves false and every other method rejects "unimplemented", which the
 // functions below catch and surface as "NFC isn't available here."
 import { CapacitorNfc } from '@capgo/capacitor-nfc';
+import { Capacitor } from '@capacitor/core';
 
 const HISTORY_KEY = 'memoera_nfc_history';
 const MAX_HISTORY = 100;
 
+// Web NFC — Chrome on Android only, and only over HTTPS. This is what makes
+// NFC usable at memoera.in: the Capacitor plugin above resolves to a stub in
+// any browser, so before this every NFC action failed on the website and only
+// worked inside the installed APK.
+//
+// Safari does not implement Web NFC and Apple has not signalled that it will,
+// so iPhone users still need the native app to write a tag. Reading a tag to
+// open a URL needs neither — iOS does that itself.
+export function isWebNfcAvailable() {
+  return typeof window !== 'undefined'
+    && 'NDEFReader' in window
+    && window.isSecureContext;
+}
+
+function isNative() {
+  try { return Capacitor.isNativePlatform(); } catch { return false; }
+}
+
 export async function isNfcSupported() {
-  try {
-    const { supported } = await CapacitorNfc.isSupported();
-    return !!supported;
-  } catch {
-    return false;
+  if (isNative()) {
+    try {
+      const { supported } = await CapacitorNfc.isSupported();
+      return !!supported;
+    } catch {
+      return false;
+    }
   }
+  return isWebNfcAvailable();
 }
 
 export async function getNfcStatus() {
@@ -139,7 +161,37 @@ export function buildRecordsFor(type, values) {
 // rejects on timeout/cancel). Caller is responsible for calling
 // stopNfcScan() when done with a write, since write() acts on "the last
 // discovered tag" from an still-open session.
+// Web NFC scanning is one long-lived NDEFReader with an abort signal, whereas
+// the plugin is start/stop plus an event listener. These module-level handles
+// bridge the two so callers keep the same start / addListener / stop shape.
+let webScanAbort = null;
+let webScanHandlers = [];
+
 export async function startNfcScan({ alertMessage } = {}) {
+  if (!isNative()) {
+    if (!isWebNfcAvailable()) {
+      throw new Error('NFC scanning needs Chrome on Android, or the Memoera app.');
+    }
+    try {
+      const reader = new window.NDEFReader();
+      webScanAbort = new AbortController();
+      // Shaped like the plugin's nfcEvent payload so listeners don't branch.
+      reader.onreading = (e) => {
+        const records = [...(e.message?.records || [])].map((r) => ({
+          recordType: r.recordType, mediaType: r.mediaType,
+          data: r.data, encoding: r.encoding, lang: r.lang,
+        }));
+        const payload = { nfcTag: { message: { records }, id: e.serialNumber } };
+        webScanHandlers.forEach((h) => { try { h(payload); } catch { /* one bad listener shouldn't kill the scan */ } });
+      };
+      await reader.scan({ signal: webScanAbort.signal });
+    } catch (e) {
+      webScanAbort = null;
+      if (e?.name === 'NotAllowedError') throw new Error('NFC permission was denied.');
+      throw new Error(e?.message || 'Could not start NFC scanning.');
+    }
+    return;
+  }
   try {
     await CapacitorNfc.startScanning({ invalidateAfterFirstRead: false, alertMessage: alertMessage || 'Hold a tag near the back of your phone.' });
   } catch {
@@ -148,10 +200,20 @@ export async function startNfcScan({ alertMessage } = {}) {
 }
 
 export async function stopNfcScan() {
+  if (!isNative()) {
+    try { webScanAbort?.abort(); } catch {}
+    webScanAbort = null;
+    webScanHandlers = [];
+    return;
+  }
   try { await CapacitorNfc.stopScanning(); } catch {}
 }
 
 export function addNfcListener(handler) {
+  if (!isNative()) {
+    webScanHandlers.push(handler);
+    return { remove: async () => { webScanHandlers = webScanHandlers.filter((h) => h !== handler); } };
+  }
   try {
     return CapacitorNfc.addListener('nfcEvent', handler);
   } catch {
@@ -159,7 +221,48 @@ export function addNfcListener(handler) {
   }
 }
 
+// Web NFC uses its own high-level record shape rather than the raw NDEF byte
+// layout the Capacitor plugin wants, so the same write is expressed twice.
+function webNdefRecords(type, values) {
+  switch (type) {
+    case 'url':
+    case 'social':
+      return [{ recordType: 'url', data: values.url || '' }];
+    case 'email':
+      return [{ recordType: 'url', data: `mailto:${values.address || ''}` }];
+    case 'location':
+      return [{ recordType: 'url', data: `geo:${values.lat || '0'},${values.lng || '0'}` }];
+    case 'contact':
+      return [{ recordType: 'mime', mediaType: 'text/vcard',
+                data: new TextEncoder().encode(buildVcard(values)) }];
+    case 'wifi':
+      return [{ recordType: 'text',
+                data: `WIFI:S:${values.ssid || ''};T:${values.security || 'WPA'};P:${values.password || ''};;` }];
+    case 'text':
+    default:
+      return [{ recordType: 'text', data: values.text || '' }];
+  }
+}
+
 export async function writeNfcTag(type, values) {
+  // Browser path — Chrome on Android. The NDEFReader write() call itself is
+  // what prompts the user and waits for a tag to be presented.
+  if (!isNative()) {
+    if (!isWebNfcAvailable()) {
+      throw new Error('NFC writing needs Chrome on Android, or the Memoera app.');
+    }
+    try {
+      const writer = new window.NDEFReader();
+      await writer.write({ records: webNdefRecords(type, values) });
+    } catch (e) {
+      if (e?.name === 'NotAllowedError') throw new Error('NFC permission was denied.');
+      if (e?.name === 'NotSupportedError') throw new Error('This device cannot write NFC tags.');
+      throw new Error(e?.message || 'Failed to write to tag. It may be read-only.');
+    }
+    pushHistory({ direction: 'write', type, summary: summarizeWrite(type, values) });
+    return;
+  }
+
   const records = buildRecordsFor(type, values);
   try {
     await CapacitorNfc.write({ allowFormat: true, records });
@@ -201,6 +304,23 @@ const fromBytes = (arr) => dec.decode(new Uint8Array(arr || []));
 
 export function decodeNdefRecord(record) {
   if (!record) return { label: 'Empty', value: '' };
+
+  // Web NFC hands back a different shape from the plugin: a string recordType
+  // and a DataView of already-decoded payload, with no TNF and no language
+  // prefix to strip. Detect and handle it before the raw-NDEF path below.
+  if (typeof record.recordType === 'string') {
+    let value = '';
+    try {
+      if (record.data instanceof DataView || ArrayBuffer.isView(record.data)) {
+        value = new TextDecoder(record.encoding || 'utf-8').decode(record.data);
+      } else if (typeof record.data === 'string') {
+        value = record.data;
+      }
+    } catch { value = ''; }
+    const LABELS = { text: 'Text', url: 'Link', mime: 'Contact', absoluteURL: 'Link' };
+    return { label: LABELS[record.recordType] || record.recordType, value };
+  }
+
   const type = fromBytes(record.type);
   const tnf = record.tnf;
 

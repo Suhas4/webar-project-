@@ -75,11 +75,20 @@ export default function HelloScreen({ onCreateAccount, onExisting, onGuestScan, 
         pendingOpenRef.current = requestCameraNow;
         if (state === 'granted' || hasConfirmedCameraThisSession()) {
           requestCameraNow();
-        } else {
-          // First time (or previously denied) — show the friendly primer first
-          // instead of surprising the visitor with a native prompt out of nowhere.
-          setShowPermissionPrimer(true);
         }
+        // Otherwise: do nothing. The camera here only powers a decorative live
+        // background, so it is not worth a permission request.
+        //
+        // This used to pop the primer automatically a moment after the screen
+        // mounted. Two problems with that: a first-time visitor was asked for
+        // camera access before understanding what Memoera is — and a refusal in
+        // Chrome is sticky, so a reflexive dismissal permanently blocked the
+        // camera for the scan feature that actually needs it. It also became
+        // the Largest Contentful Paint element at ~5.9s, failing Core Web
+        // Vitals on a page that otherwise paints in under a second.
+        //
+        // Permission is now requested at the point of intent instead: tapping
+        // "Tap to Scan" runs the scan flow, which has its own primer.
       }, 200);
       return () => {
         cancelled = true;

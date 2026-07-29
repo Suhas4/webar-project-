@@ -32,6 +32,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/joho/godotenv"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -68,7 +70,7 @@ type User struct {
 	// Derived, never stored. Lets the app hide admin-only UI; every admin
 	// endpoint re-checks server-side regardless.
 	//
-	// NOTE: isAdminEmail() is compared against whatever getUserFromToken
+	// NOTE: isAdminIdentity() is compared against whatever getUserFromToken
 	// returns, which is the MOBILE number — the ADMIN_EMAIL env var is
 	// misleadingly named but every existing admin check works this way, so
 	// this follows the same convention rather than diverging from it.
@@ -114,6 +116,90 @@ type OTPEntry struct {
 	OTP       string
 	Email     string
 	ExpiresAt time.Time
+	// Guessing budget for this specific code. A 6-digit OTP is one million
+	// values; without a cap it can simply be enumerated inside the validity
+	// window, which makes it no barrier at all.
+	Attempts  int
+}
+
+// Guesses allowed against a single OTP before it is discarded.
+const maxOTPAttempts = 5
+
+// ─── Rate limiting ────────────────────────────────────────────────────────────
+//
+// Fixed-window counters held in process. That is sufficient today because the
+// backend runs as a single Render instance — if it is ever scaled to more than
+// one, this must move to Redis or the limits become per-instance and therefore
+// meaningless.
+//
+// Keys are scoped per action so one endpoint's traffic can't exhaust another's
+// budget, e.g. "signin:9876500518" or "resolve:203.0.113.9".
+
+type rateWindow struct {
+	count int
+	reset time.Time
+}
+
+var (
+	rateMu    sync.Mutex
+	rateTable = map[string]*rateWindow{}
+)
+
+// rateAllow reports whether this key may proceed, and how long until the window
+// resets if not. Also opportunistically evicts expired entries so the table
+// cannot grow without bound.
+func rateAllow(key string, limit int, window time.Duration) (bool, time.Duration) {
+	now := time.Now()
+	rateMu.Lock()
+	defer rateMu.Unlock()
+
+	if len(rateTable) > 10000 {
+		for k, v := range rateTable {
+			if now.After(v.reset) {
+				delete(rateTable, k)
+			}
+		}
+	}
+
+	w, ok := rateTable[key]
+	if !ok || now.After(w.reset) {
+		rateTable[key] = &rateWindow{count: 1, reset: now.Add(window)}
+		return true, 0
+	}
+	if w.count >= limit {
+		return false, time.Until(w.reset)
+	}
+	w.count++
+	return true, 0
+}
+
+// clientIP prefers the proxy headers Render/Cloudflare set, since RemoteAddr is
+// the load balancer. Falls back to RemoteAddr with the ephemeral port stripped —
+// leaving the port in would make every request a distinct client and silently
+// disable every limit below.
+func clientIP(r *http.Request) string {
+	if ip := r.Header.Get("CF-Connecting-IP"); ip != "" {
+		return strings.TrimSpace(ip)
+	}
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		return strings.TrimSpace(strings.Split(fwd, ",")[0])
+	}
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return host
+	}
+	return r.RemoteAddr
+}
+
+// enforceRate writes a 429 and returns false when the caller should stop.
+func enforceRate(w http.ResponseWriter, key string, limit int, window time.Duration, msg string) bool {
+	ok, retry := rateAllow(key, limit, window)
+	if ok {
+		return true
+	}
+	secs := int(retry.Seconds()) + 1
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	writeError(w, http.StatusTooManyRequests, fmt.Sprintf("%s Try again in %d seconds.", msg, secs))
+	return false
 }
 
 type ARTarget struct {
@@ -609,9 +695,20 @@ func planLimit(plan string) int64 {
 	return planLimitBytes["free"]
 }
 
-func isAdminEmail(email string) bool {
-	adminEmail := os.Getenv("ADMIN_EMAIL")
-	return adminEmail != "" && email != "" && strings.EqualFold(email, adminEmail)
+// isAdminIdentity reports whether the identity carried by the auth token is the
+// configured admin.
+//
+// NOTE on naming: getUserFromToken returns the user's MOBILE number, so this is
+// matched against a phone number despite the historic ADMIN_EMAIL variable name.
+// ADMIN_MOBILE is the correct name and is preferred; ADMIN_EMAIL is still read
+// as a fallback so an existing deployment does not lose admin access the moment
+// this ships.
+func isAdminIdentity(identity string) bool {
+	admin := os.Getenv("ADMIN_MOBILE")
+	if admin == "" {
+		admin = os.Getenv("ADMIN_EMAIL")
+	}
+	return admin != "" && identity != "" && strings.EqualFold(identity, admin)
 }
 
 // buildReferralCode mirrors buildCode() in ReferFriendScreen.jsx exactly so
@@ -660,10 +757,66 @@ func ensureOwnReferralCode(ctx context.Context, userID int64, firstName, lastNam
 
 // ─── Token helpers ────────────────────────────────────────────────────────────
 
-func hashPassword(password, salt string) string {
+// bcrypt cost 12 — roughly 250ms per hash on Render's shared CPU. Expensive
+// enough that offline guessing against a leaked database is impractical, cheap
+// enough that sign-in stays responsive.
+const bcryptCost = 12
+
+// hashSecret is what every NEW password and security answer is stored with.
+//
+// Replaces a bare salted SHA-256. SHA-256 is fast by design, so a leaked
+// database could be brute-forced at billions of guesses per second on a single
+// GPU — the per-user salt only defeated rainbow tables, not targeted cracking.
+func hashSecret(plain string) (string, error) {
+	b, err := bcrypt.GenerateFromPassword([]byte(plain), bcryptCost)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// secretMatches verifies against either storage format so existing accounts
+// keep working. Legacy values are "<salt>:<sha256hex>"; bcrypt values always
+// begin "$2". needsUpgrade is true when a legacy hash matched, which is the
+// caller's cue to silently re-store it as bcrypt — the plaintext is only
+// available at that moment.
+func secretMatches(stored, plain string) (ok bool, needsUpgrade bool) {
+	if strings.HasPrefix(stored, "$2") {
+		return bcrypt.CompareHashAndPassword([]byte(stored), []byte(plain)) == nil, false
+	}
+	parts := strings.SplitN(stored, ":", 2)
+	if len(parts) != 2 {
+		return false, false
+	}
+	// Constant-time: the previous implementation compared with != , which
+	// short-circuits on the first differing byte and is timing-observable.
+	if subtle.ConstantTimeCompare([]byte(legacyHash(plain, parts[0])), []byte(parts[1])) != 1 {
+		return false, false
+	}
+	return true, true
+}
+
+// legacyHash reproduces the retired salted-SHA-256 scheme. Kept solely so
+// existing credentials can still be verified once, then upgraded.
+func legacyHash(password, salt string) string {
 	h := sha256.New()
 	h.Write([]byte(salt + password))
 	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// upgradeSecret re-stores a freshly-verified credential as bcrypt. Best effort:
+// a failure here must never block a sign-in that already succeeded.
+func upgradeSecret(ctx context.Context, column string, userID int64, plain string) {
+	hashed, err := hashSecret(plain)
+	if err != nil {
+		return
+	}
+	if _, err := db.Exec(ctx,
+		fmt.Sprintf("UPDATE users SET %s=$1 WHERE id=$2", column), hashed, userID); err != nil {
+		log.Printf("[auth] bcrypt upgrade of %s failed for user %d: %v", column, userID, err)
+		return
+	}
+	log.Printf("[auth] upgraded %s to bcrypt for user %d", column, userID)
 }
 
 func generateSalt() string {
@@ -875,10 +1028,48 @@ func getPort() string {
 
 // ─── Middleware ───────────────────────────────────────────────────────────────
 
+// originAllowed matches a request Origin against the configured production
+// origin plus the local dev servers and the Capacitor shells.
+//
+// The native apps are a real case: Android WebView sends
+// "https://localhost" and iOS sends "capacitor://localhost", so hard-coding
+// only FRONTEND_ORIGIN would break both installed apps.
+func originAllowed(origin, configured string) bool {
+	allowed := []string{
+		configured,
+		"https://memoera.in",
+		"https://www.memoera.in",
+		"http://localhost:5173", // vite dev
+		"http://localhost:4173", // vite preview
+		"http://localhost:3456", // desktop dev server
+		"https://localhost",     // Capacitor Android
+		"capacitor://localhost", // Capacitor iOS
+	}
+	for _, a := range allowed {
+		if a != "" && strings.EqualFold(origin, a) {
+			return true
+		}
+	}
+	// Netlify deploy previews for this site, e.g.
+	// https://<hash>--memoera-811.netlify.app
+	if strings.HasSuffix(origin, "--memoera-811.netlify.app") && strings.HasPrefix(origin, "https://") {
+		return true
+	}
+	return false
+}
+
 func corsMiddleware(allowedOrigin string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin != "" {
+		// Previously this echoed whatever Origin the request carried, which made
+		// the configured allowedOrigin (FRONTEND_ORIGIN) dead code — any site
+		// could call the API and read the response. Now the origin is matched
+		// against an allowlist and only echoed on a hit.
+		//
+		// Vary: Origin is required because the response differs per origin;
+		// without it a CDN could cache one origin's headers and serve them to
+		// another.
+		w.Header().Set("Vary", "Origin")
+		if origin := r.Header.Get("Origin"); origin != "" && originAllowed(origin, allowedOrigin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
@@ -972,6 +1163,15 @@ func sendSignupOTPHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Mobile number is required")
 		return
 	}
+	// Every send costs a real SMS and rings a real phone. Cap per number so a
+	// stranger can't be spammed from our brand, and per IP so the SMS budget
+	// can't be drained across many numbers.
+	if !enforceRate(w, "otpsend:"+mobile, 3, time.Hour, "Too many codes requested for this number.") {
+		return
+	}
+	if !enforceRate(w, "otpsendip:"+clientIP(r), 10, time.Hour, "Too many codes requested.") {
+		return
+	}
 	// Check if mobile already registered
 	var exists bool
 	_ = db.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM users WHERE mobile=$1)", mobile).Scan(&exists)
@@ -1018,8 +1218,23 @@ func signUpHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Verify OTP
+	if !enforceRate(w, "signup:"+clientIP(r), 20, time.Hour, "Too many sign-up attempts.") {
+		return
+	}
 	otpMu.Lock()
 	entry, exists := otpStore["signup:"+req.Mobile]
+	if exists {
+		// Burn one guess per attempt and discard the code once the budget is
+		// spent, so the remaining values can't simply be walked.
+		entry.Attempts++
+		if entry.Attempts > maxOTPAttempts {
+			delete(otpStore, "signup:"+req.Mobile)
+			otpMu.Unlock()
+			writeError(w, http.StatusTooManyRequests, "Too many incorrect codes. Request a new one.")
+			return
+		}
+		otpStore["signup:"+req.Mobile] = entry
+	}
 	otpMu.Unlock()
 	if !exists || time.Now().After(entry.ExpiresAt) {
 		writeError(w, http.StatusUnauthorized, "OTP has expired. Please request a new one.")
@@ -1033,13 +1248,19 @@ func signUpHandler(w http.ResponseWriter, r *http.Request) {
 	delete(otpStore, "signup:"+req.Mobile)
 	otpMu.Unlock()
 
-	salt := generateSalt()
-	passwordHash := salt + ":" + hashPassword(req.Password, salt)
-	answerSalt := generateSalt()
-	answerHash := answerSalt + ":" + hashPassword(strings.ToLower(req.SecurityAnswer), answerSalt)
+	passwordHash, err := hashSecret(req.Password)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not create account")
+		return
+	}
+	answerHash, err := hashSecret(strings.ToLower(req.SecurityAnswer))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not create account")
+		return
+	}
 
 	var userID int64
-	err := db.QueryRow(r.Context(), `
+	err = db.QueryRow(r.Context(), `
 		INSERT INTO users (mobile, first_name, last_name, password_hash, security_question, security_answer, date_of_birth, referral_code)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id`,
@@ -1101,6 +1322,15 @@ func signInHandler(w http.ResponseWriter, r *http.Request) {
 
 	mobile := strings.TrimSpace(req.Identifier)
 
+	// Password guessing is otherwise unlimited. Per-identifier stops a single
+	// account being hammered; per-IP stops one host spraying many accounts.
+	if !enforceRate(w, "signin:"+mobile, 10, 15*time.Minute, "Too many sign-in attempts for this number.") {
+		return
+	}
+	if !enforceRate(w, "signinip:"+clientIP(r), 50, 15*time.Minute, "Too many sign-in attempts.") {
+		return
+	}
+
 	var user User
 	err := db.QueryRow(r.Context(), `
 		SELECT id, mobile, first_name, last_name, password_hash, security_question,
@@ -1121,10 +1351,15 @@ func signInHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parts := strings.SplitN(user.PasswordHash, ":", 2)
-	if len(parts) != 2 || hashPassword(req.Password, parts[0]) != parts[1] {
+	ok, needsUpgrade := secretMatches(user.PasswordHash, req.Password)
+	if !ok {
 		writeError(w, http.StatusUnauthorized, "Invalid mobile number or password")
 		return
+	}
+	// Sign-in is the only moment the plaintext exists, so it's the only chance
+	// to move a legacy SHA-256 credential onto bcrypt. Invisible to the user.
+	if needsUpgrade {
+		upgradeSecret(r.Context(), "password_hash", user.ID, req.Password)
 	}
 
 	recordLogin(r, user.ID)
@@ -1200,6 +1435,9 @@ func forgotPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !enforceRate(w, "forgot:"+clientIP(r), 10, time.Hour, "Too many password reset attempts.") {
+		return
+	}
 	var req struct {
 		Mobile string `json:"mobile"`
 	}
@@ -1260,10 +1498,17 @@ func verifySecurityQuestionHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parts := strings.SplitN(storedHash, ":", 2)
-	if len(parts) != 2 || hashPassword(strings.ToLower(strings.TrimSpace(req.SecurityAnswer)), parts[0]) != parts[1] {
+	answer := strings.ToLower(strings.TrimSpace(req.SecurityAnswer))
+	okAns, upgradeAns := secretMatches(storedHash, answer)
+	if !okAns {
 		writeError(w, http.StatusUnauthorized, "Incorrect security answer")
 		return
+	}
+	if upgradeAns {
+		var uid int64
+		if db.QueryRow(r.Context(), `SELECT id FROM users WHERE mobile=$1`, req.Mobile).Scan(&uid) == nil {
+			upgradeSecret(r.Context(), "security_answer", uid, answer)
+		}
 	}
 
 	otp := generateOTP()
@@ -1302,6 +1547,16 @@ func verifyOTPHandler(w http.ResponseWriter, r *http.Request) {
 
 	otpMu.Lock()
 	entry, exists := otpStore[req.Mobile]
+	if exists {
+		entry.Attempts++
+		if entry.Attempts > maxOTPAttempts {
+			delete(otpStore, req.Mobile)
+			otpMu.Unlock()
+			writeError(w, http.StatusTooManyRequests, "Too many incorrect codes. Request a new one.")
+			return
+		}
+		otpStore[req.Mobile] = entry
+	}
 	otpMu.Unlock()
 
 	if !exists || time.Now().After(entry.ExpiresAt) {
@@ -1348,8 +1603,11 @@ func resetPasswordHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	salt := generateSalt()
-	newHash := salt + ":" + hashPassword(req.NewPassword, salt)
+	newHash, err := hashSecret(req.NewPassword)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update password")
+		return
+	}
 	_, err = db.Exec(r.Context(), "UPDATE users SET password_hash=$1 WHERE mobile=$2", newHash, mobile)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to update password")
@@ -1404,14 +1662,17 @@ func changePasswordHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Failed to fetch user")
 		return
 	}
-	parts := strings.SplitN(storedHash, ":", 2)
-	if len(parts) != 2 || hashPassword(req.CurrentPassword, parts[0]) != parts[1] {
+	okCur, _ := secretMatches(storedHash, req.CurrentPassword)
+	if !okCur {
 		writeError(w, http.StatusUnauthorized, "Current password is incorrect")
 		return
 	}
 
-	salt := generateSalt()
-	newHash := salt + ":" + hashPassword(req.NewPassword, salt)
+	newHash, err := hashSecret(req.NewPassword)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update password")
+		return
+	}
 	_, err = db.Exec(r.Context(), "UPDATE users SET password_hash=$1 WHERE id=$2", newHash, userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Failed to update password")
@@ -1451,7 +1712,7 @@ func getMeHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "User not found")
 		return
 	}
-	user.IsAdmin = isAdminEmail(tokenEmail)
+	user.IsAdmin = isAdminIdentity(tokenEmail)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(user)
 }
@@ -1481,8 +1742,11 @@ func updateSecurityHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Security question and answer are required")
 		return
 	}
-	salt := generateSalt()
-	answerHash := salt + ":" + hashPassword(strings.ToLower(strings.TrimSpace(req.SecurityAnswer)), salt)
+	answerHash, err := hashSecret(strings.ToLower(strings.TrimSpace(req.SecurityAnswer)))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Failed to update security question")
+		return
+	}
 	_, err = db.Exec(r.Context(),
 		`UPDATE users SET security_question=$1, security_answer=$2 WHERE id=$3`,
 		req.SecurityQuestion, answerHash, userID)
@@ -1719,7 +1983,7 @@ func nfcRequireAdmin(r *http.Request) error {
 	if err != nil {
 		return errors.New("authentication required")
 	}
-	if !isAdminEmail(email) {
+	if !isAdminIdentity(email) {
 		return errors.New("admin only")
 	}
 	return nil
@@ -1915,6 +2179,9 @@ func activateNfcHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if !enforceRate(w, "activate:"+clientIP(r), 20, time.Hour, "Too many activation attempts.") {
 		return
 	}
 	code := strings.ToUpper(strings.TrimSpace(req.Code))
@@ -2177,6 +2444,9 @@ func nfcExperiencesHandler(w http.ResponseWriter, r *http.Request) {
 func resolveNfcHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if !enforceRate(w, "resolve:"+clientIP(r), 60, time.Minute, "Too many requests.") {
 		return
 	}
 	code := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("code")))
@@ -3184,7 +3454,7 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	var bonusBytes int64
 	_ = db.QueryRow(r.Context(), `SELECT COALESCE(email,''), plan, bonus_storage_bytes FROM users WHERE id=$1`, userID).
 		Scan(&email, &plan, &bonusBytes)
-	if !isAdminEmail(email) {
+	if !isAdminIdentity(email) {
 		if limit := planLimit(plan); limit >= 0 {
 			effectiveLimit := limit + bonusBytes
 			var existingUsage int64
@@ -3218,7 +3488,7 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 	// Temporarily disabled at the user's request: OPENAI_API_KEY isn't
 	// configured yet, so this always failed closed and blocked every public
 	// upload. Re-enable once a real key is set in .env / Render.
-	if false && req.IsPublic && !isAdminEmail(email) {
+	if false && req.IsPublic && !isAdminIdentity(email) {
 		for _, t := range req.Targets {
 			if t.ImageKey == "" {
 				continue
@@ -3741,7 +4011,7 @@ func adminListReportsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	var email string
 	_ = db.QueryRow(r.Context(), `SELECT COALESCE(email,'') FROM users WHERE mobile=$1`, mobile).Scan(&email)
-	if !isAdminEmail(email) {
+	if !isAdminIdentity(email) {
 		writeError(w, http.StatusForbidden, "admin access required")
 		return
 	}
@@ -3804,7 +4074,7 @@ func adminResolveReportHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	var email string
 	_ = db.QueryRow(r.Context(), `SELECT COALESCE(email,'') FROM users WHERE mobile=$1`, mobile).Scan(&email)
-	if !isAdminEmail(email) {
+	if !isAdminIdentity(email) {
 		writeError(w, http.StatusForbidden, "admin access required")
 		return
 	}
@@ -3907,7 +4177,7 @@ func getStorageHandler(w http.ResponseWriter, r *http.Request) {
 	if !unlimited {
 		effectiveLimit += bonusBytes
 	}
-	if isAdminEmail(email) {
+	if isAdminIdentity(email) {
 		unlimited = true
 	}
 
@@ -4461,7 +4731,7 @@ func getPosterQuotaHandler(w http.ResponseWriter, r *http.Request) {
 	_ = db.QueryRow(r.Context(), `SELECT COALESCE(email,''), plan, poster_generations_used FROM users WHERE id=$1`, userID).
 		Scan(&email, &plan, &used)
 
-	unlimited := isAdminEmail(email) || (plan != "" && plan != "free")
+	unlimited := isAdminIdentity(email) || (plan != "" && plan != "free")
 	remaining := freePosterLimit - used
 	if remaining < 0 {
 		remaining = 0
