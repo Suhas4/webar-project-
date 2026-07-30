@@ -93,6 +93,9 @@ const PremiumScreen            = lazy(() => import('./components/PremiumScreen.j
 const ReferFriendScreen        = lazy(() => import('./components/ReferFriendScreen.jsx'));
 const StreakScreen             = lazy(() => import('./components/StreakScreen.jsx'));
 const ChatBotWidget            = lazy(() => import('./components/ChatBotWidget.jsx'));
+// Lazy + preload:'none' on the video, so a session that never goes idle never
+// downloads the clip.
+const IdlePanda                = lazy(() => import('./components/IdlePanda.jsx'));
 const AdminScreen              = lazy(() => import('./components/AdminScreen.jsx'));
 
 import { loadTargets, loadPublicTargets } from './hooks/useArStorage.js';
@@ -815,6 +818,11 @@ export default function App() {
         />
         <Suspense fallback={null}>
           <ChatBotWidget />
+        </Suspense>
+        {/* Idle-time flourish. Home only — appearing over the scanner or a
+            half-filled form would interrupt rather than delight. */}
+        <Suspense fallback={null}>
+          <IdlePanda enabled={appView === 'home'} />
         </Suspense>
       </>
     );
