@@ -5,7 +5,6 @@ import UploadProgressOverlay from './UploadProgressOverlay.jsx';
 import { saveTargets, loadTargets } from '../hooks/useArStorage.js';
 import { rebuildPublicMindInBackground } from '../utils/rebuildPublicMind.js';
 import { useLanguage } from '../context/LanguageContext.jsx';
-import { T } from '../config/translations.js';
 import { useTheme } from '../context/ThemeContext.jsx';
 import { isImageOwnedByAnotherUser, checkImageModeration, extractVideoThumbnail } from '../utils/contentSafety.js';
 import { assessMarkerQuality } from '../utils/assessMarkerQuality.js';
@@ -31,8 +30,8 @@ export default function SetupScreen({ onStart, onLaunchSaved, initialCards, onBa
   const [showValidation, setShowValidation] = useState(false);
   const [moderationWarning, setModerationWarning] = useState(null); // { categories, resolve }
   const [qualityWarning, setQualityWarning] = useState(null); // { label, resolve }
-  const { lang } = useLanguage();
-  const tr = { ...T.en, ...(T[lang] || {}) };
+  const { lang, tr: trFromContext } = useLanguage();
+  const tr = trFromContext;
   const { colors } = useTheme();
 
   // Fetch existing count to offset default labels (e.g. already have 3 → next is "Target 4")

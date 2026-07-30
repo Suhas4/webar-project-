@@ -1,7 +1,6 @@
 ﻿import { useState, useCallback } from "react";
 import { API_BASE, parseApiResponse } from "../config/api.js";
 import { useLanguage } from "../context/LanguageContext.jsx";
-import { T } from "../config/translations.js";
 import { useTheme } from "../context/ThemeContext.jsx";
 
 function validateSignIn(mobile, password) {
@@ -23,8 +22,8 @@ export default function SignInScreen({ onSuccess, onGoForgotPassword, onBack, su
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState({});
   const [showValidation, setShowValidation] = useState(false);
-  const { lang } = useLanguage();
-  const tr = { ...T.en, ...(T[lang] || {}) };
+  const { lang, tr: trFromContext } = useLanguage();
+  const tr = trFromContext;
   const { colors } = useTheme();
 
   const handleMobileChange = (e) => {

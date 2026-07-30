@@ -9,7 +9,6 @@ import { invalidateBackgroundPublicCompile } from "../hooks/backgroundCompilePub
 import ARGlbScreen from "./ARGlbScreen.jsx";
 import UserAnimationViewer from "./UserAnimationViewer.jsx";
 import { useLanguage } from "../context/LanguageContext.jsx";
-import { T } from "../config/translations.js";
 import { useTheme } from "../context/ThemeContext.jsx";
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
@@ -43,7 +42,7 @@ export default function GalleryScreen({ onBack, onCollection, initialQuery }) {
   const [viewingAnim, setViewingAnim] = useState(null);
   const [animLoading, setAnimLoading] = useState(null); // target index being loaded
   const { lang }   = useLanguage();
-  const tr         = { ...T.en, ...(T[lang] || {}) };
+  const tr = trFromContext;
   const { colors } = useTheme();
 
   useEffect(() => {

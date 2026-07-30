@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useLanguage } from '../context/LanguageContext.jsx';
-import { LANGUAGES, T } from '../config/translations.js';
+import { LANGUAGES } from '../config/translations.js';
 import { useTheme } from '../context/ThemeContext.jsx';
 import { API_BASE } from '../config/api.js';
 import { showBanner, removeBanner } from '../services/AdMobService.js';
@@ -36,9 +36,9 @@ const PROMO_CARDS = [
 ];
 
 export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium, onSignOut, onRefer, onStreak, onCollection, onLiked, onAdmin, onScan, onSearch, onAnimation, onNfc, onCatalog, onDashboard, user }) {
-  const { lang, setLang } = useLanguage();
+  const { lang, setLang, tr: trFromContext } = useLanguage();
   const { theme, toggleTheme, colors } = useTheme();
-  const tr = { ...T.en, ...(T[lang] || {}) };
+  const tr = trFromContext;
   const whatsappUrl = "https://wa.me/919187713120";
   const isDark = theme === 'dark';
 
