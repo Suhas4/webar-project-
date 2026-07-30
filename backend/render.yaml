@@ -18,3 +18,11 @@ services:
         sync: false
       - key: RAZORPAY_KEY_SECRET
         sync: false
+      # Where Razorpay returns the customer after a hosted payment link. Only
+      # used by /api/payment/create-link; Standard Checkout doesn't need it.
+      - key: RAZORPAY_CALLBACK_URL
+        value: https://memoera.in
+      # Admin identity. Compared against the MOBILE number on the auth token,
+      # despite the legacy ADMIN_EMAIL name that is still read as a fallback.
+      - key: ADMIN_MOBILE
+        sync: false

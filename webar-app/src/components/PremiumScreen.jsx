@@ -155,7 +155,16 @@ export default function PremiumScreen({ onBack, user }) {
       });
       if (!orderRes.ok) {
         const e = await orderRes.json().catch(() => ({}));
-        setPayMsg(e.error || 'Failed to start payment. Please try again.');
+        // 503 means the server has no Razorpay credentials configured. That's
+        // an operator problem, not something the customer can act on, so don't
+        // show them server-config wording — but keep the real reason in the
+        // console so it's diagnosable.
+        if (orderRes.status === 503) {
+          console.error('[payment] backend reports:', e.error);
+          setPayMsg('Payments are temporarily unavailable. Please try again later or contact support.');
+        } else {
+          setPayMsg(e.error || 'Failed to start payment. Please try again.');
+        }
         setPaying(false); return;
       }
       const order = await orderRes.json();
