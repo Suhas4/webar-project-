@@ -149,6 +149,10 @@ export function buildRecordsFor(type, values) {
       const q = params.length ? `?${params.join('&')}` : '';
       return [uriRecord(`mailto:${values.address || ''}${q}`)];
     }
+    case 'phone':
+      return [uriRecord(`tel:${values.phone || ''}`)];
+    case 'sms':
+      return [uriRecord(`sms:${values.phone || ''}${values.text ? '?body=' + encodeURIComponent(values.text) : ''}`)];
     case 'location':
       return [uriRecord(`geo:${values.lat || '0'},${values.lng || '0'}`)];
     default:
@@ -230,6 +234,10 @@ function webNdefRecords(type, values) {
       return [{ recordType: 'url', data: values.url || '' }];
     case 'email':
       return [{ recordType: 'url', data: `mailto:${values.address || ''}` }];
+    case 'phone':
+      return [{ recordType: 'url', data: `tel:${values.phone || ''}` }];
+    case 'sms':
+      return [{ recordType: 'url', data: `sms:${values.phone || ''}${values.text ? '?body=' + encodeURIComponent(values.text) : ''}` }];
     case 'location':
       return [{ recordType: 'url', data: `geo:${values.lat || '0'},${values.lng || '0'}` }];
     case 'contact':
@@ -272,6 +280,85 @@ export async function writeNfcTag(type, values) {
   pushHistory({ direction: 'write', type, summary: summarizeWrite(type, values) });
 }
 
+// Writes several records to one tag in a single NDEF message, which is what a
+// real tag holds — writeNfcTag() only ever writes one.
+// `list` is [{ type, values }, …] using the same type names as buildRecordsFor.
+export async function writeNfcRecords(list) {
+  if (!list?.length) throw new Error('Add at least one record first.');
+
+  if (!isNative()) {
+    if (!isWebNfcAvailable()) {
+      throw new Error('NFC writing needs Chrome on Android, or the Memoera app.');
+    }
+    const records = list.flatMap(({ type, values }) => webNdefRecords(type, values));
+    try {
+      await new window.NDEFReader().write({ records });
+    } catch (e) {
+      if (e?.name === 'NotAllowedError') throw new Error('NFC permission was denied.');
+      throw new Error(e?.message || 'Failed to write. The tag may be read-only or too small.');
+    }
+  } else {
+    const records = list.flatMap(({ type, values }) => buildRecordsFor(type, values));
+    try {
+      await CapacitorNfc.write({ allowFormat: true, records });
+    } catch (e) {
+      throw new Error(e?.message || 'Failed to write to tag.');
+    }
+  }
+  pushHistory({
+    direction: 'write',
+    type: list.length === 1 ? list[0].type : 'multi',
+    summary: list.map((r) => summarizeWrite(r.type, r.values)).filter(Boolean).join(' · '),
+  });
+}
+
+// Approximate byte cost of a record set, so the Write button can show a size
+// the way a tag's capacity is quoted. Close enough to warn before a write
+// fails for being too large; not an exact NDEF encoding.
+export function estimateRecordBytes(list) {
+  return (list || []).reduce((total, { type, values }) => {
+    let payload = '';
+    switch (type) {
+      case 'text':     payload = values.text || ''; break;
+      case 'url':
+      case 'social':   payload = values.url || ''; break;
+      case 'email':    payload = `mailto:${values.address || ''}${values.subject || ''}${values.body || ''}`; break;
+      case 'phone':    payload = `tel:${values.phone || ''}`; break;
+      case 'sms':      payload = `sms:${values.phone || ''}${values.text || ''}`; break;
+      case 'location': payload = `geo:${values.lat || ''},${values.lng || ''}`; break;
+      case 'wifi':     payload = `${values.ssid || ''}${values.password || ''}` + 24; break;
+      case 'contact':  payload = Object.values(values).join(''); break;
+      default:         payload = JSON.stringify(values || {});
+    }
+    return total + new TextEncoder().encode(String(payload)).length + 8; // + record header
+  }, 0);
+}
+
+// Normalises the very different tag payloads the two backends hand back into
+// one shape for the tag-detail view. Web NFC exposes only a serial number and
+// the NDEF message — no tag type, technology list, capacity or writability,
+// because the API deliberately withholds low-level tag access.
+export function normalizeTag(event) {
+  const tag = event?.nfcTag || event?.tag || event || {};
+  const message = tag.message || event?.message || {};
+  const records = message.records || [];
+  const hex = (arr) => (Array.isArray(arr) && arr.length)
+    ? arr.map((b) => b.toString(16).padStart(2, '0').toUpperCase()).join(':')
+    : '';
+
+  return {
+    serial:     tag.id ? (typeof tag.id === 'string' ? tag.id : hex(tag.id)) : '',
+    techTypes:  tag.techTypes || [],
+    type:       tag.type || null,
+    maxSize:    tag.maxSize ?? null,
+    isWritable: tag.isWritable ?? null,
+    records,
+    // True when the data came from Web NFC, where most detail fields are
+    // simply unavailable rather than empty — the UI says so explicitly.
+    limited:    !tag.techTypes && !tag.type,
+  };
+}
+
 export async function eraseNfcTag() {
   try {
     await CapacitorNfc.erase();
@@ -293,6 +380,8 @@ function summarizeWrite(type, values) {
     case 'contact':  return values.name || values.phone || '';
     case 'wifi':     return values.ssid || '';
     case 'email':    return values.address || '';
+    case 'phone':    return values.phone || '';
+    case 'sms':      return values.phone || '';
     case 'location': return `${values.lat || '0'}, ${values.lng || '0'}`;
     default:         return '';
   }

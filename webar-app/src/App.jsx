@@ -25,10 +25,6 @@ const BACK_MAP = {
   'doc-setup':   'image-upload',
   'admin':       'home',
   'nfc':          'home',
-  'nfc-write':    'nfc',
-  'nfc-read':     'nfc',
-  'nfc-clear':    'nfc',
-  'nfc-history':  'nfc',
   'nfc-stickers': 'nfc',
   'catalog-setup': 'home',
   'seller-dashboard': 'home',
@@ -66,11 +62,9 @@ const DocumentSetupScreen      = lazy(() => import('./components/DocumentSetupSc
 const PhotoAnimationSetupScreen = lazy(() => import('./components/PhotoAnimationSetupScreen.jsx'));
 const CollectionScreen         = lazy(() => import('./components/CollectionScreen.jsx'));
 const LikedSavedScreen         = lazy(() => import('./components/LikedSavedScreen.jsx'));
-const NfcDashboardScreen       = lazy(() => import('./components/NfcDashboardScreen.jsx'));
-const NfcWriteMenuScreen       = lazy(() => import('./components/NfcWriteMenuScreen.jsx'));
-const NfcReadScreen            = lazy(() => import('./components/NfcReadScreen.jsx'));
-const NfcClearScreen           = lazy(() => import('./components/NfcClearScreen.jsx'));
-const NfcHistoryScreen         = lazy(() => import('./components/NfcHistoryScreen.jsx'));
+// One screen replaces the old Dashboard/Write/Read/Clear/History set — read,
+// write, erase, saved sets and history all live inside it now.
+const NfcToolsScreen           = lazy(() => import('./components/NfcToolsScreen.jsx'));
 const CatalogSetupScreen       = lazy(() => import('./components/CatalogSetupScreen.jsx'));
 const SellerDashboardScreen    = lazy(() => import('./components/SellerDashboardScreen.jsx'));
 // Lazy: only visitors arriving from a tapped sticker load the public view, so
@@ -774,23 +768,11 @@ export default function App() {
     );
   } else if (appView === 'nfc') {
     mainScreen = (
-      <NfcDashboardScreen
+      <NfcToolsScreen
         onBack={() => setAppView('home')}
-        onRead={() => setAppView('nfc-read')}
-        onWrite={() => setAppView('nfc-write')}
-        onClear={() => setAppView('nfc-clear')}
-        onHistory={() => setAppView('nfc-history')}
         onStickers={() => setAppView('nfc-stickers')}
       />
     );
-  } else if (appView === 'nfc-write') {
-    mainScreen = <NfcWriteMenuScreen onBack={() => setAppView('nfc')} onHistory={() => setAppView('nfc-history')} />;
-  } else if (appView === 'nfc-read') {
-    mainScreen = <NfcReadScreen onBack={() => setAppView('nfc')} />;
-  } else if (appView === 'nfc-clear') {
-    mainScreen = <NfcClearScreen onBack={() => setAppView('nfc')} />;
-  } else if (appView === 'nfc-history') {
-    mainScreen = <NfcHistoryScreen onBack={() => setAppView('nfc')} />;
   } else if (appView === 'nfc-stickers') {
     mainScreen = <NfcStickersScreen onBack={() => setAppView('nfc')} user={currentUser} />;
   } else if (appView === 'catalog-setup') {
