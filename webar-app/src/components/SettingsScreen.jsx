@@ -2,7 +2,6 @@
 import { API_BASE, R2_PUBLIC_URL } from '../config/api.js';
 import { useTheme, THEME_LIST, themes as ALL_THEMES } from '../context/ThemeContext.jsx';
 import { useLanguage } from '../context/LanguageContext.jsx';
-import { T } from '../config/translations.js';
 import { invalidateGuestCache } from './GuestScanScreen.jsx';
 import { invalidateBackgroundPublicCompile } from '../hooks/backgroundCompilePublic.js';
 import { clearCachedPublicMind } from '../hooks/useMindCache.js';
@@ -24,8 +23,8 @@ function savePref(key, val) { try { localStorage.setItem(key, String(val)); } ca
 
 export default function SettingsScreen({ onBack, onProfile, initialSection }) {
   const { colors, theme, setTheme } = useTheme();
-  const { lang } = useLanguage();
-  const tr = { ...T.en, ...(T[lang] || {}) };
+  const { lang, tr: trFromContext } = useLanguage();
+  const tr = trFromContext;
   const [openSection, setOpenSection] = useState(initialSection || null); // 'account'|'notifications'|'ar'|'subscription'|'support'|'about'|'theme'
   // Deep-linked from the Home profile menu (e.g. tapping "Account") — show
   // only that one section instead of the full Settings list.

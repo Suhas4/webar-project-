@@ -1,14 +1,13 @@
 import { useTheme } from "../context/ThemeContext.jsx";
 import { useLanguage } from "../context/LanguageContext.jsx";
-import { T } from "../config/translations.js";
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const TEAL = "#00C9A7";
 
 export default function AccountConfirmScreen({ accountType, onContinue, onBack, onNoSelection }) {
   const { colors } = useTheme();
-  const { lang } = useLanguage();
-  const tr = { ...T.en, ...(T[lang] || {}) };
+  const { lang, tr: trFromContext } = useLanguage();
+  const tr = trFromContext;
   const isBusiness = accountType === 'business';
   const hasSelection = accountType === 'business' || accountType === 'individual';
 

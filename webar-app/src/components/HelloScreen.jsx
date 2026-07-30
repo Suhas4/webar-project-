@@ -1,6 +1,6 @@
 ﻿import { useState, useRef, useEffect } from 'react';
 import { useLanguage } from '../context/LanguageContext.jsx';
-import { LANGUAGES, T } from '../config/translations.js';
+import { LANGUAGES } from '../config/translations.js';
 import { takeWarmStream, getCameraPermissionState, markCameraConfirmed, hasConfirmedCameraThisSession } from '../hooks/cameraWarmup.js';
 import CameraPermissionPrimer from './CameraPermissionPrimer.jsx';
 import { buildCameraErrorMessage } from '../utils/inAppBrowser.js';
@@ -8,8 +8,8 @@ import { buildCameraErrorMessage } from '../utils/inAppBrowser.js';
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 
 export default function HelloScreen({ onCreateAccount, onExisting, onGuestScan, errorMsg, onDismissError }) {
-  const { lang, setLang } = useLanguage();
-  const s = { ...T.en, ...(T[lang] || {}) };
+  const { lang, setLang, tr: trFromContext } = useLanguage();
+  const s = trFromContext;
 
   const [sheetOpen, setSheetOpen]     = useState(false);
   const [cameraReady, setCameraReady] = useState(false);

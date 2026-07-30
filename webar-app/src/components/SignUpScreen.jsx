@@ -1,7 +1,6 @@
 ﻿import { useState, useCallback, useRef, useEffect } from 'react';
 import { API_BASE, parseApiResponse } from '../config/api.js';
 import { useLanguage } from '../context/LanguageContext.jsx';
-import { T } from '../config/translations.js';
 import { useTheme } from '../context/ThemeContext.jsx';
 import OtpKeypad from './OtpKeypad.jsx';
 
@@ -27,8 +26,8 @@ function validateStep1(form) {
 }
 
 export default function SignUpScreen({ onSuccess, onBack, onOtpFail }) {
-  const { lang } = useLanguage();
-  const tr = { ...T.en, ...(T[lang] || {}) };
+  const { lang, tr: trFromContext } = useLanguage();
+  const tr = trFromContext;
   const { colors } = useTheme();
   const [step, setStep] = useState(1);
   const [form, setForm] = useState({

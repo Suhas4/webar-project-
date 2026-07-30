@@ -3,7 +3,6 @@ import { fetchPublicTargets, loadTargets, uploadPublicCombinedMind } from "../ho
 import { getCachedPublicMind, setCachedPublicMind } from "../hooks/useMindCache.js";
 import { R2_PUBLIC_URL } from "../config/api.js";
 import { useLanguage } from "../context/LanguageContext.jsx";
-import { T } from "../config/translations.js";
 import { useTheme } from "../context/ThemeContext.jsx";
 import { takeWarmStream, markCameraConfirmed } from "../hooks/cameraWarmup.js";
 import { loadMindARCompiler } from "../hooks/loadMindARCompiler.js";
@@ -49,8 +48,8 @@ const SCAN_STYLE = `
 `;
 
 export default function GuestScanScreen({ onReady, onBack, onCreateAccount, onError, prefetchedTargets, silent = false, includeOwnTargets = false }) {
-  const { lang } = useLanguage();
-  const tr = { ...T.en, ...(T[lang] || {}) };
+  const { lang, tr: trFromContext } = useLanguage();
+  const tr = trFromContext;
   const { colors, theme } = useTheme();
   const isDark = theme !== 'light';
   const [phase, setPhase] = useState("fetching");

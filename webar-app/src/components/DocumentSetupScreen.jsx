@@ -7,7 +7,6 @@ import { saveTargets, loadTargets } from '../hooks/useArStorage.js';
 import { rebuildPublicMindInBackground } from '../utils/rebuildPublicMind.js';
 import { assessMarkerQuality } from '../utils/assessMarkerQuality.js';
 import { useLanguage } from '../context/LanguageContext.jsx';
-import { T } from '../config/translations.js';
 import { useTheme } from '../context/ThemeContext.jsx';
 
 const ASPECT_MAP = { '16:9': 0.5625, '4:3': 0.75, '1:1': 1.0, '9:16': 1.7778 };
@@ -33,8 +32,8 @@ export default function DocumentSetupScreen({ onStart, onBack, onSignOut, isPubl
   const [compileProgress, setCompileProgress] = useState(0);
   const [compileError, setCompileError] = useState('');
   const [showValidation, setShowValidation] = useState(false);
-  const { lang } = useLanguage();
-  const tr = { ...T.en, ...(T[lang] || {}) };
+  const { lang, tr: trFromContext } = useLanguage();
+  const tr = trFromContext;
   const { colors } = useTheme();
 
   // Offset default labels by existing target count for this visibility type

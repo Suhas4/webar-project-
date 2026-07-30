@@ -1,6 +1,5 @@
 import { useTheme } from "../context/ThemeContext.jsx";
 import { useLanguage } from "../context/LanguageContext.jsx";
-import { T } from "../config/translations.js";
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const GOLD = "#E0A94A";
@@ -9,8 +8,8 @@ const CARD_BORDER = "#1FBFA6";
 
 export default function AccountTypeScreen({ onSelect, onLogin, onBack }) {
   const { colors } = useTheme();
-  const { lang } = useLanguage();
-  const tr = { ...T.en, ...(T[lang] || {}) };
+  const { lang, tr: trFromContext } = useLanguage();
+  const tr = trFromContext;
 
   return (
     <div style={{ ...s.screen, background: colors.bg }}>
