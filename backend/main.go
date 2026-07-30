@@ -552,6 +552,10 @@ func initDB(ctx context.Context) error {
 			tap_count         BIGINT NOT NULL DEFAULT 0,
 			created_at        TIMESTAMPTZ DEFAULT NOW()
 		)`)
+	// When the URL was physically written onto this chip. Lets a bulk-encoding
+	// run be paused and resumed without re-writing tags already done, and makes
+	// "how much of this batch is ready to ship" answerable.
+	_, _ = db.Exec(ctx, `ALTER TABLE nfc_stickers ADD COLUMN IF NOT EXISTS encoded_at TIMESTAMPTZ`)
 	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_nfc_stickers_owner ON nfc_stickers(owner_id)`)
 	_, _ = db.Exec(ctx, `CREATE INDEX IF NOT EXISTS idx_nfc_stickers_batch ON nfc_stickers(batch_id)`)
 
@@ -2152,6 +2156,73 @@ func adminBlockNfcHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if tag.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "No sticker with that code")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// GET /api/admin/nfc/batch-stickers?batchId=N — the codes in a batch, so they
+// can be written onto physical chips in one run.
+//
+// Deliberately does NOT return activation secrets. Those are shown once at mint
+// time for the printer; encoding a chip only needs the code, and re-exposing
+// secrets through a listing endpoint would turn any admin session into a way to
+// claim every unsold sticker.
+func adminBatchStickersHandler(w http.ResponseWriter, r *http.Request) {
+	if err := nfcRequireAdmin(r); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	batchID, _ := strconv.ParseInt(r.URL.Query().Get("batchId"), 10, 64)
+	rows, err := db.Query(r.Context(), `
+		SELECT code, status, encoded_at FROM nfc_stickers
+		WHERE batch_id=$1 ORDER BY id ASC`, batchID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load batch")
+		return
+	}
+	defer rows.Close()
+
+	type sticker struct {
+		Code      string     `json:"code"`
+		Status    string     `json:"status"`
+		EncodedAt *time.Time `json:"encodedAt"`
+	}
+	list := []sticker{}
+	base := strings.TrimRight(os.Getenv("FRONTEND_ORIGIN"), "/")
+	if base == "" {
+		base = "https://memoera.in"
+	}
+	for rows.Next() {
+		var s sticker
+		if err := rows.Scan(&s.Code, &s.Status, &s.EncodedAt); err != nil {
+			continue
+		}
+		list = append(list, s)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"stickers": list, "baseUrl": base})
+}
+
+// POST /api/admin/nfc/mark-encoded — records that a chip has been written.
+func adminMarkEncodedHandler(w http.ResponseWriter, r *http.Request) {
+	if err := nfcRequireAdmin(r); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	tag, err := db.Exec(r.Context(),
+		`UPDATE nfc_stickers SET encoded_at=NOW() WHERE code=$1`,
+		strings.ToUpper(strings.TrimSpace(req.Code)))
+	if err != nil || tag.RowsAffected() == 0 {
 		writeError(w, http.StatusNotFound, "No sticker with that code")
 		return
 	}
@@ -5325,6 +5396,8 @@ func main() {
 		adminListNfcBatchesHandler(w, r)
 	})
 	mux.HandleFunc("/api/admin/nfc/block", adminBlockNfcHandler)
+	mux.HandleFunc("/api/admin/nfc/batch-stickers", adminBatchStickersHandler)
+	mux.HandleFunc("/api/admin/nfc/mark-encoded", adminMarkEncodedHandler)
 	mux.HandleFunc("/api/nfc/activate", activateNfcHandler)
 	mux.HandleFunc("/api/nfc/mine", myNfcStickersHandler)
 	mux.HandleFunc("/api/nfc/sticker", updateNfcStickerHandler)

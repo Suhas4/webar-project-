@@ -532,12 +532,131 @@ function BlockFields({ block, onChange }) {
 
 // ── Admin ───────────────────────────────────────────────────────────────────
 
+// Writes a whole batch onto physical chips in one sitting: hold a sticker,
+// it writes, advances, and waits for the next. Resumable — anything already
+// encoded is skipped, so a run can be stopped and picked up later.
+//
+// This is what makes the iPhone gap irrelevant in practice. Apple allows no
+// NFC access to websites at all, but nobody has to write their own sticker:
+// a batch is encoded once here (on Android, or in the app) before shipping,
+// and the customer only ever types an activation code.
+function BulkEncode({ batch, onDone, say }) {
+  const [items, setItems] = useState(null);
+  const [baseUrl, setBaseUrl] = useState('https://memoera.in');
+  const [idx, setIdx] = useState(0);
+  const [running, setRunning] = useState(false);
+  const [doneCount, setDoneCount] = useState(0);
+  const listener = useRef(null);
+  const cancelled = useRef(false);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/admin/nfc/batch-stickers?batchId=${batch.id}`, { headers: auth() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) { say('Could not load that batch.'); return; }
+        const pending = (d.stickers || []).filter((s) => !s.encodedAt);
+        setItems(pending);
+        setBaseUrl(d.baseUrl || 'https://memoera.in');
+        setDoneCount((d.stickers || []).length - pending.length);
+      })
+      .catch(() => say('Network error.'));
+  }, [batch.id, say]);
+
+  const stop = useCallback(async () => {
+    cancelled.current = true;
+    if (listener.current) { await listener.current.remove(); listener.current = null; }
+    await stopNfcScan();
+    setRunning(false);
+  }, []);
+
+  useEffect(() => () => { stop(); }, [stop]);
+
+  const start = async () => {
+    if (!(await isNfcSupported())) {
+      say('Encoding needs Chrome on Android, or the Memoera app.');
+      return;
+    }
+    cancelled.current = false;
+    setRunning(true);
+    try {
+      await startNfcScan({ alertMessage: 'Hold the next blank sticker to the phone' });
+      listener.current = addNfcListener(async () => {
+        if (cancelled.current) return;
+        const current = items[idxRef.current];
+        if (!current) return;
+        try {
+          await writeNfcTag('url', { url: `${baseUrl}/nfc/${current.code}` });
+          await fetch(`${API_BASE}/api/admin/nfc/mark-encoded`, {
+            method: 'POST', headers: auth(), body: JSON.stringify({ code: current.code }),
+          });
+          setDoneCount((n) => n + 1);
+          const next = idxRef.current + 1;
+          idxRef.current = next;
+          setIdx(next);
+          if (next >= items.length) { say('Batch complete.'); stop(); }
+          else say(`${current.code} written — next sticker.`);
+        } catch (e) {
+          say(e.message || 'That tag failed — try another.');
+        }
+      });
+    } catch (e) {
+      say(e.message || 'Could not start NFC.');
+      setRunning(false);
+    }
+  };
+
+  // Ref mirrors idx because the NFC listener closes over its first render.
+  const idxRef = useRef(0);
+  useEffect(() => { idxRef.current = idx; }, [idx]);
+
+  if (!items) return <Card><div style={st.hint}>Loading batch…</div></Card>;
+
+  const total = items.length + doneCount;
+  const current = items[idx];
+
+  return (
+    <>
+      <Card>
+        <div style={st.h2}>{batch.batchCode}</div>
+        <div style={st.hint}>Hold each blank sticker to the phone in turn. Already-encoded ones are skipped.</div>
+        <div style={{ display: 'flex', gap: 16, marginTop: 14 }}>
+          <Stat label="Encoded" value={`${doneCount}/${total}`} />
+          <Stat label="Remaining" value={Math.max(0, items.length - idx)} />
+        </div>
+        <div style={{ height: 6, borderRadius: 4, background: 'rgba(255,255,255,0.12)', marginTop: 12, overflow: 'hidden' }}>
+          <div style={{ height: '100%', borderRadius: 4, width: `${total ? (doneCount / total) * 100 : 0}%`,
+            background: `linear-gradient(90deg, ${TEAL}, #00E5CC)`, transition: 'width .3s' }} />
+        </div>
+      </Card>
+
+      {current ? (
+        <Card>
+          <div style={st.hint}>Next sticker</div>
+          <div style={{ ...st.code, fontSize: 15, marginTop: 4 }}>{current.code}</div>
+          <div style={{ ...st.hint, marginTop: 6, wordBreak: 'break-all' }}>{baseUrl}/nfc/{current.code}</div>
+          <button onClick={running ? stop : start}
+            style={{ ...(running ? st.ghost : st.primary), width: '100%', marginTop: 14 }}>
+            {running ? 'Stop encoding' : 'Start encoding'}
+          </button>
+        </Card>
+      ) : (
+        <Card><div style={{ ...st.hint, textAlign: 'center', color: TEAL }}>
+          Every sticker in this batch is encoded.
+        </div></Card>
+      )}
+
+      <button onClick={() => { stop(); onDone(); }} style={{ ...st.ghost, width: '100%' }}>Back to batches</button>
+    </>
+  );
+}
+
 function AdminTab({ say }) {
   const [batches, setBatches] = useState([]);
   const [qty, setQty] = useState(50);
   const [batchCode, setBatchCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [minted, setMinted] = useState(null);
+  const [encoding, setEncoding] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -574,6 +693,10 @@ function AdminTab({ say }) {
     URL.revokeObjectURL(url);
   };
 
+  if (encoding) {
+    return <BulkEncode batch={encoding} onDone={() => { setEncoding(null); load(); }} say={say} />;
+  }
+
   return (
     <>
       <Card>
@@ -608,10 +731,13 @@ function AdminTab({ say }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontWeight: 800, fontSize: 14 }}>{b.batchCode}</div>
-              <div style={st.hint}>{b.manufacturer}</div>
+              <div style={st.hint}>{b.manufacturer} · {b.quantity} stickers</div>
             </div>
-            <span style={st.pillOk}>{b.activated}/{b.quantity} active</span>
+            <span style={st.pillOk}>{b.activated} active</span>
           </div>
+          <button onClick={() => setEncoding(b)} style={{ ...st.ghost, marginTop: 12 }}>
+            Encode stickers
+          </button>
         </Card>
       ))}
     </>
