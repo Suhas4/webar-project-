@@ -154,7 +154,28 @@
     </style>
   </head>
   <body>
+    <!--
+      #root stays empty on purpose.
+
+      Content for crawlers is injected at the edge instead — see
+      netlify/edge-functions/prerender.js. Putting it inline here was tried and
+      measurably backfired: React's createRoot() clears the container, Chrome
+      discards removed elements as LCP candidates, and the late HelloScreen
+      paint it had been masking became LCP instead — 1064ms to ~5900ms, which
+      fails Core Web Vitals and so costs more SEO than the markup gained.
+    -->
     <div id="root"></div>
+    <noscript>
+      <div style="padding:24px;font-family:sans-serif;color:#F2F7F6;background:#040D0B">
+        <h2>Memoera needs JavaScript</h2>
+        <p>
+          Memoera is an augmented reality platform — scan a printed photo to see
+          video, 3D models and animations appear on it. Please enable JavaScript,
+          or visit <a href="https://memoera.in" style="color:#00C9A7">memoera.in</a>
+          in a modern browser.
+        </p>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
