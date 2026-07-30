@@ -1,0 +1,106 @@
+# Builds the Memoera iOS app on a cloud Mac and ships it to TestFlight.
+#
+# Why this file exists: iOS binaries can only be compiled and signed on macOS,
+# and Memoera is developed on Windows. Codemagic rents a Mac for the length of
+# the build, so no Apple hardware is needed. Their free tier covers 500 build
+# minutes a month; a build here takes roughly 10-15, so a normal release
+# cadence stays free.
+#
+# Nothing about the app changes — this compiles the existing Capacitor iOS
+# project in ios/, which is already configured with the Core NFC entitlement
+# and the camera/photo permission strings.
+#
+# ── One-time setup in the Codemagic UI (see the checklist in the repo) ───────
+#   1. Connect this GitHub repository.
+#   2. Teams -> Integrations -> Apple Developer Portal: upload an App Store
+#      Connect API key (.p8). Codemagic uses it to fetch signing certificates
+#      and provisioning profiles automatically.
+#   3. Create an environment group named "appstore" holding:
+#        APP_STORE_APPLE_ID   the numeric app id from App Store Connect
+#   4. Register the bundle id app.memoera.webar in the Apple Developer portal
+#      and enable the "NFC Tag Reading" capability on it — without that the
+#      build fails signing, because ios/App/App/App.entitlements requests it.
+
+workflows:
+  ios-testflight:
+    name: Memoera iOS — TestFlight
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    environment:
+      groups:
+        - appstore
+      vars:
+        BUNDLE_ID: "app.memoera.webar"
+        XCODE_WORKSPACE: "ios/App/App.xcodeproj"
+        XCODE_SCHEME: "App"
+      node: 20
+      xcode: latest
+      cocoapods: default
+
+    integrations:
+      app_store_connect: memoera-api-key
+
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: "ios-*"
+          include: true
+      # Tag-triggered rather than on every push: an iOS build is slow and
+      # consumes build minutes, and not every commit needs to reach TestFlight.
+      # Ship one with:  git tag ios-1.0.0 && git push origin ios-1.0.0
+
+    scripts:
+      - name: Install web dependencies
+        script: npm ci
+
+      - name: Build the web app
+        script: npm run build
+
+      - name: Copy the build into the iOS project
+        script: npx cap sync ios
+
+      - name: Fetch signing files
+        script: |
+          # Creates the bundle id if it doesn't exist yet and pulls down a
+          # matching distribution profile.
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+          keychain initialize
+          keychain add-certificates
+          xcode-project use-profiles
+
+      - name: Set the build number
+        script: |
+          # Monotonically increasing build number from TestFlight, so uploads
+          # are never rejected for reusing one.
+          LATEST=$(app-store-connect get-latest-testflight-build-number "$APP_STORE_APPLE_ID" || echo 0)
+          cd ios/App
+          agvtool new-version -all $(($LATEST + 1))
+
+      - name: Archive the app
+        script: |
+          xcode-project build-ipa \
+            --project "$CM_BUILD_DIR/$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        # Not submitted for App Store review automatically — TestFlight first,
+        # so the AR scanner and NFC can be tested on a real device before
+        # anything goes to Apple's reviewers.
+        submit_to_app_store: false
+      email:
+        recipients:
+          - memoerabangalore@gmail.com
+        notify:
+          success: true
+          failure: true
