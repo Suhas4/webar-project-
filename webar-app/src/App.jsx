@@ -819,11 +819,6 @@ export default function App() {
         <Suspense fallback={null}>
           <ChatBotWidget />
         </Suspense>
-        {/* Idle-time flourish. Home only — appearing over the scanner or a
-            half-filled form would interrupt rather than delight. */}
-        <Suspense fallback={null}>
-          <IdlePanda enabled={appView === 'home'} />
-        </Suspense>
       </>
     );
   } else {
@@ -841,6 +836,16 @@ export default function App() {
     <>
       <Suspense fallback={<div style={{ position:'fixed', inset:0, background:'#061A1F' }} />}>
         {mainScreen}
+      </Suspense>
+
+      {/* Idle-time flourish, on the two screens people actually sit still on:
+          the signed-out Welcome screen (what most first-time visitors see) and
+          Home. Lives out here at the top level rather than inside the 'home'
+          branch — nested in there it could never render for a signed-out
+          visitor no matter what its `enabled` prop said.
+          Deliberately not on the scanner, forms or checkout. */}
+      <Suspense fallback={null}>
+        <IdlePanda enabled={appView === 'home' || appView === 'hello'} />
       </Suspense>
 
       {pendingTermsGate && (
