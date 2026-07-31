@@ -12,7 +12,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 // browsers block autoplay with sound. It's also decoded only when first needed,
 // so a session that never goes idle never pays for it.
 
-const VIDEO_SRC = '/panda-idle.mp4';
+const VIDEO_WEBM = '/panda-idle.webm';
+const VIDEO_MP4  = '/panda-idle.mp4';
 
 // Interaction that counts as "the user is still here". pointerdown rather than
 // click so it reacts to the press, not the release.
@@ -123,16 +124,29 @@ export default function IdlePanda({
 
       <video
         ref={videoRef}
-        src={VIDEO_SRC}
         muted
         playsInline
         preload="none"
         style={{
           width: '100%', height: 'auto', display: 'block',
-          borderRadius: 18,
-          filter: 'drop-shadow(0 18px 28px rgba(0,0,0,.45))',
+          // drop-shadow (unlike box-shadow) follows the alpha channel, so this
+          // traces the panda's outline rather than a rectangle around it.
+          filter: 'drop-shadow(0 14px 22px rgba(0,0,0,.5))',
         }}
-      />
+      >
+        {/* WebM first: VP9 with a real alpha channel, so the panda sits on the
+            app background with no white box. The original clip had an off-white
+            backdrop that was almost the same colour as the panda's own helmet
+            and belly, so a colour key would have punched holes straight through
+            it — the background was removed by flood-filling inward from the
+            frame edges instead, which only clears backdrop actually connected
+            to the border.
+            The MP4 stays as a fallback for browsers without WebM alpha; they
+            get the original clip, white background and all, rather than
+            nothing. */}
+        <source src={VIDEO_WEBM} type="video/webm" />
+        <source src={VIDEO_MP4} type="video/mp4" />
+      </video>
     </div>
   );
 }
