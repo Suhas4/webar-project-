@@ -28,6 +28,7 @@ const BACK_MAP = {
   'nfc-stickers': 'nfc',
   'catalog-setup': 'home',
   'seller-dashboard': 'home',
+  'business-search': 'home',
   // Onboarding (account type → category → details → complete) now has an
   // on-screen Back button on every step, mirroring these same targets — kept
   // in sync so the hardware back button / edge-swipe gesture behaves the
@@ -67,6 +68,7 @@ const LikedSavedScreen         = lazy(() => import('./components/LikedSavedScree
 const NfcToolsScreen           = lazy(() => import('./components/NfcToolsScreen.jsx'));
 const CatalogSetupScreen       = lazy(() => import('./components/CatalogSetupScreen.jsx'));
 const SellerDashboardScreen    = lazy(() => import('./components/SellerDashboardScreen.jsx'));
+const BusinessSearchScreen     = lazy(() => import('./components/BusinessSearchScreen.jsx'));
 // Lazy: only visitors arriving from a tapped sticker load the public view, so
 // it stays out of the bundle everyone else downloads.
 const NfcPublicView            = lazy(() => import('./components/NfcPublicView.jsx'));
@@ -136,6 +138,7 @@ export default function App() {
   const [scanHint,      setScanHint]      = useState(false);
   const [pendingAR,     setPendingAR]     = useState(null);
   const [guestScanError, setGuestScanError] = useState('');
+  const [bizQuery, setBizQuery] = useState('');
   // Terms & Conditions gate — 'scan' before the camera opens, 'signup' before
   // the signup form (and therefore before any account is created — declining
   // here must never leave a live, unconsented account behind). Agreement is
@@ -780,6 +783,8 @@ export default function App() {
     mainScreen = <NfcStickersScreen onBack={() => setAppView('nfc')} user={currentUser} />;
   } else if (appView === 'catalog-setup') {
     mainScreen = <CatalogSetupScreen onStart={handleStart} onBack={() => setAppView('home')} isPublic={selectedVisibility === 'public'} />;
+  } else if (appView === 'business-search') {
+    mainScreen = <BusinessSearchScreen initialQuery={bizQuery} onBack={() => setAppView('home')} />;
   } else if (appView === 'seller-dashboard') {
     mainScreen = <SellerDashboardScreen onBack={() => setAppView('home')} />;
   } else if (appView === 'home') {
@@ -788,7 +793,7 @@ export default function App() {
         <HomeScreen
           onUpload={() => { setForcedContentType(null); setAppView('goal-select'); }}
           onGallery={() => { setGalleryQuery(''); setAppView('gallery'); }}
-          onSearch={(q) => { setGalleryQuery(q); setAppView('gallery'); }}
+          onSearch={(q) => { setBizQuery(q); setAppView('business-search'); }}
           onSettings={(section) => { setSettingsInitialSection(section || null); setAppView('settings'); }}
           onPremium={() => setAppView('premium')}
           onRefer={() => setAppView('refer')}

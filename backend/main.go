@@ -2918,6 +2918,127 @@ func totpAt(key []byte, step int64) string {
 	return fmt.Sprintf("%06d", trunc%1000000)
 }
 
+// GET /api/business/search?q=jewellery — the Home search box.
+//
+// Finds registered Business accounts by trade, name, or something they sell, so
+// "jewellery" or "carpenter" turns up local shops with their address, phone and
+// catalogue.
+//
+// Requires auth, unlike the per-product seller lookup. A single product's
+// sellers being public is the point of the Buy Now flow; a freely queryable
+// directory of every business and phone number on the platform is a scraping
+// target, so this one is gated and rate limited.
+func searchBusinessesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	if _, _, err := getUserFromToken(r); err != nil {
+		writeError(w, http.StatusUnauthorized, "Sign in to search businesses")
+		return
+	}
+	if !enforceRate(w, "bizsearch:"+clientIP(r), 60, time.Minute, "Too many searches.") {
+		return
+	}
+
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(q) < 2 {
+		writeError(w, http.StatusBadRequest, "Type at least two characters")
+		return
+	}
+	// ILIKE with the wildcards bound as data, never concatenated into the SQL.
+	like := "%" + q + "%"
+
+	rows, err := db.Query(r.Context(), `
+		SELECT u.id, u.business_name, u.business_category, u.business_address,
+		       u.business_phone, u.business_hours, u.business_website, u.business_instagram,
+		       COUNT(DISTINCT pl.id) AS listings
+		FROM users u
+		LEFT JOIN product_listings pl ON pl.seller_id = u.id
+		LEFT JOIN ar_targets t        ON t.id = pl.target_id
+		WHERE u.account_type = 'business'
+		  AND u.business_name <> ''
+		  AND (u.business_name ILIKE $1
+		       OR u.business_category ILIKE $1
+		       OR u.business_address ILIKE $1
+		       OR t.label ILIKE $1)
+		GROUP BY u.id
+		ORDER BY COUNT(DISTINCT pl.id) DESC, u.business_name ASC
+		LIMIT 50`, like)
+	if err != nil {
+		log.Printf("[bizsearch] query failed: %v", err)
+		writeError(w, http.StatusInternalServerError, "Search failed")
+		return
+	}
+	defer rows.Close()
+
+	type biz struct {
+		ID        int64  `json:"id"`
+		Name      string `json:"name"`
+		Category  string `json:"category"`
+		Address   string `json:"address"`
+		Phone     string `json:"phone"`
+		Hours     string `json:"hours"`
+		Website   string `json:"website"`
+		Instagram string `json:"instagram"`
+		Listings  int    `json:"listings"`
+	}
+	list := []biz{}
+	for rows.Next() {
+		var b biz
+		if err := rows.Scan(&b.ID, &b.Name, &b.Category, &b.Address, &b.Phone,
+			&b.Hours, &b.Website, &b.Instagram, &b.Listings); err != nil {
+			continue
+		}
+		list = append(list, b)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"businesses": list, "query": q})
+}
+
+// GET /api/business/catalog?id=42 — what one business sells, for the expanded
+// row in search results.
+func businessCatalogHandler(w http.ResponseWriter, r *http.Request) {
+	if _, _, err := getUserFromToken(r); err != nil {
+		writeError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	sellerID, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+
+	rows, err := db.Query(r.Context(), `
+		SELECT COALESCE(t.label,''), COALESCE(t.image_url,''),
+		       pl.price, pl.unit, pl.moq, pl.notes
+		FROM product_listings pl
+		JOIN ar_targets t ON t.id = pl.target_id
+		WHERE pl.seller_id = $1
+		ORDER BY pl.created_at DESC
+		LIMIT 60`, sellerID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not load catalogue")
+		return
+	}
+	defer rows.Close()
+
+	type item struct {
+		Label    string `json:"label"`
+		ImageURL string `json:"imageUrl"`
+		Price    string `json:"price"`
+		Unit     string `json:"unit"`
+		MOQ      string `json:"moq"`
+		Notes    string `json:"notes"`
+	}
+	list := []item{}
+	for rows.Next() {
+		var it item
+		if err := rows.Scan(&it.Label, &it.ImageURL, &it.Price, &it.Unit, &it.MOQ, &it.Notes); err != nil {
+			continue
+		}
+		list = append(list, it)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{"items": list})
+}
+
 // GET /api/business/by-target?targetId=123 — public, no auth: lets anyone who
 // scans a business account's AR content and taps "Buy Now"/"Shop Now" see how
 // to reach that business (name, address, phone for calling, etc).
@@ -5404,6 +5525,8 @@ func main() {
 	mux.HandleFunc("/api/nfc/experiences", nfcExperiencesHandler)
 	mux.HandleFunc("/api/nfc/analytics", nfcAnalyticsHandler)
 	mux.HandleFunc("/api/nfc/resolve", resolveNfcHandler) // public — no auth
+	mux.HandleFunc("/api/business/search", searchBusinessesHandler)
+	mux.HandleFunc("/api/business/catalog", businessCatalogHandler)
 	mux.HandleFunc("/api/auth/onboarding", updateOnboardingHandler)
 	mux.HandleFunc("/api/business/details", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
