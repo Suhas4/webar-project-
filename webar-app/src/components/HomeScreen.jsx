@@ -547,7 +547,8 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
         <form onSubmit={handleSearchSubmit} style={{ ...styles.searchBar, background: colors.surface, border: `1px solid ${colors.border}` }}>
           <SearchIcon size={15} color={colors.textMuted} />
           <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search memories, places, tags…" style={{ ...styles.searchInput, color: colors.text }} />
+            placeholder="Find a business — jewellery, carpenter…"
+            style={{ ...styles.searchInput, color: colors.text }} />
           <button type="submit" aria-label="Search" style={{ ...styles.searchGo, background: `linear-gradient(160deg, ${GOLD}, ${GOLD}cc)` }}>
             <ArrowRightIcon color="#2b1002" />
           </button>
