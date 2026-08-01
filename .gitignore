@@ -13,6 +13,10 @@ backend/*.exe~
 backend/.env
 backend/backend_log.txt
 
+# Built app binaries — 50 MB artefacts that are rebuilt from source, never committed
+*.apk
+*.aab
+
 # Logs
 *.log
 vite_log.txt
