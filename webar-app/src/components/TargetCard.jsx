@@ -282,7 +282,7 @@ export default function TargetCard({ index, data, onChange, onRemove, showValida
       />
 
       {/* Video Overlay */}
-      <p style={{ ...styles.fieldLabel, marginTop: 16 }}>Video Overlay<span style={styles.fieldHint}> — plays when marker is detected</span></p>
+      <p style={{ ...styles.fieldLabel, marginTop: 16 }}>Next step<span style={styles.fieldHint}> — upload a video</span></p>
       <UploadDropZone
         title="Tap to upload"
         hint="MP4, WebM (Max 100MB)"
