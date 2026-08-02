@@ -38,11 +38,11 @@ func moderateImageKey(ctx context.Context, key string) (flagged bool, err error)
 	if apiKey == "" {
 		return true, fmt.Errorf("OPENAI_API_KEY not configured")
 	}
-	if s3Client == nil || r2Bucket == "" {
+	if s3Client == nil || s3Bucket == "" {
 		return true, fmt.Errorf("R2 not configured")
 	}
 
-	head, err := s3Client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(r2Bucket), Key: aws.String(key)})
+	head, err := s3Client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s3Bucket), Key: aws.String(key)})
 	if err != nil {
 		return true, fmt.Errorf("head %s: %w", key, err)
 	}
@@ -54,7 +54,7 @@ func moderateImageKey(ctx context.Context, key string) (flagged bool, err error)
 		contentType = *head.ContentType
 	}
 
-	obj, err := s3Client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(r2Bucket), Key: aws.String(key)})
+	obj, err := s3Client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s3Bucket), Key: aws.String(key)})
 	if err != nil {
 		return true, fmt.Errorf("get %s: %w", key, err)
 	}

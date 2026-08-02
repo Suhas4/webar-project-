@@ -219,8 +219,8 @@ var (
 	db            *pgxpool.Pool
 	s3Client      *s3.Client
 	presignClient *s3.PresignClient
-	r2Bucket      string
-	r2PublicURL   string
+	s3Bucket      string
+	s3PublicURL   string
 
 	otpStore  = map[string]OTPEntry{}
 	otpMu     sync.Mutex
@@ -625,45 +625,41 @@ func initDB(ctx context.Context) error {
 	return nil
 }
 
-// ─── R2 Init ──────────────────────────────────────────────────────────────────
+// ─── S3 Init ──────────────────────────────────────────────────────────────────
 
 func initR2() error {
-	accountID := os.Getenv("R2_ACCOUNT_ID")
-	accessKey := os.Getenv("R2_ACCESS_KEY_ID")
-	secretKey := os.Getenv("R2_SECRET_ACCESS_KEY")
-	r2Bucket = os.Getenv("R2_BUCKET_NAME")
-	r2PublicURL = strings.TrimSuffix(os.Getenv("R2_PUBLIC_URL"), "/")
+	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
+	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
+	region := os.Getenv("AWS_REGION")
+	s3Bucket = os.Getenv("S3_BUCKET_NAME")
+	s3PublicURL = strings.TrimSuffix(os.Getenv("S3_PUBLIC_URL"), "/")
 
-	if accountID == "" || accessKey == "" || secretKey == "" || r2Bucket == "" {
-		return fmt.Errorf("R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME must all be set")
+	if accessKey == "" || secretKey == "" || region == "" || s3Bucket == "" {
+		return fmt.Errorf("AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, S3_BUCKET_NAME must all be set")
 	}
 
 	cfg, err := awsconfig.LoadDefaultConfig(context.Background(),
 		awsconfig.WithCredentialsProvider(
 			credentials.NewStaticCredentialsProvider(accessKey, secretKey, ""),
 		),
-		awsconfig.WithRegion("auto"),
+		awsconfig.WithRegion(region),
 	)
 	if err != nil {
 		return fmt.Errorf("aws config: %w", err)
 	}
 
-	endpoint := fmt.Sprintf("https://%s.r2.cloudflarestorage.com", accountID)
-	s3Client = s3.NewFromConfig(cfg, func(o *s3.Options) {
-		o.BaseEndpoint = aws.String(endpoint)
-		o.UsePathStyle = true
-	})
+	s3Client = s3.NewFromConfig(cfg)
 	presignClient = s3.NewPresignClient(s3Client)
 
-	log.Printf("R2 connected: bucket=%s", r2Bucket)
+	log.Printf("S3 connected: bucket=%s region=%s", s3Bucket, region)
 	return nil
 }
 
 func fileURL(key string) string {
-	if r2PublicURL == "" || key == "" {
+	if s3PublicURL == "" || key == "" {
 		return ""
 	}
-	return r2PublicURL + "/" + key
+	return s3PublicURL + "/" + key
 }
 
 // ─── Storage plans & referral bonus ──────────────────────────────────────────
@@ -3277,7 +3273,7 @@ func updateProfilePhotoHandler(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Storage not configured")
 		return
 	}
-	bucket := os.Getenv("R2_BUCKET_NAME")
+	bucket := os.Getenv("S3_BUCKET_NAME")
 	contentType := "image/jpeg"
 	_, err = s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      &bucket,
@@ -3286,11 +3282,11 @@ func updateProfilePhotoHandler(w http.ResponseWriter, r *http.Request) {
 		ContentType: &contentType,
 	})
 	if err != nil {
-		log.Printf("[profilePhoto] R2 upload error: %v", err)
+		log.Printf("[profilePhoto] S3 upload error: %v", err)
 		writeError(w, http.StatusInternalServerError, "Failed to upload image")
 		return
 	}
-	publicBase := os.Getenv("R2_PUBLIC_URL")
+	publicBase := os.Getenv("S3_PUBLIC_URL")
 	photoUrl := publicBase + "/" + key
 	_, err = db.Exec(r.Context(),
 		`UPDATE users SET profile_photo_url=$1 WHERE id=$2`, photoUrl, userID)
@@ -3342,7 +3338,7 @@ func presignUploadHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	presignResult, err := presignClient.PresignPutObject(r.Context(), &s3.PutObjectInput{
-		Bucket:      aws.String(r2Bucket),
+		Bucket:      aws.String(s3Bucket),
 		Key:         aws.String(req.Key),
 		ContentType: aws.String(req.ContentType),
 	}, func(opts *s3.PresignOptions) {
@@ -3377,7 +3373,7 @@ func presignPublicMindHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mindResult, err := presignClient.PresignPutObject(r.Context(), &s3.PutObjectInput{
-		Bucket:      aws.String(r2Bucket),
+		Bucket:      aws.String(s3Bucket),
 		Key:         aws.String("public/combined.mind"),
 		ContentType: aws.String("application/octet-stream"),
 	}, func(opts *s3.PresignOptions) {
@@ -3390,7 +3386,7 @@ func presignPublicMindHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fpResult, err := presignClient.PresignPutObject(r.Context(), &s3.PutObjectInput{
-		Bucket:      aws.String(r2Bucket),
+		Bucket:      aws.String(s3Bucket),
 		Key:         aws.String("public/combined-fingerprint.txt"),
 		ContentType: aws.String("text/plain"),
 	}, func(opts *s3.PresignOptions) {
@@ -3442,7 +3438,7 @@ func multipartInitHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result, err := s3Client.CreateMultipartUpload(r.Context(), &s3.CreateMultipartUploadInput{
-		Bucket:      aws.String(r2Bucket),
+		Bucket:      aws.String(s3Bucket),
 		Key:         aws.String(req.Key),
 		ContentType: aws.String(req.ContentType),
 	})
@@ -3490,7 +3486,7 @@ func multipartPartURLHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	presignResult, err := presignClient.PresignUploadPart(r.Context(), &s3.UploadPartInput{
-		Bucket:     aws.String(r2Bucket),
+		Bucket:     aws.String(s3Bucket),
 		Key:        aws.String(req.Key),
 		UploadId:   aws.String(req.UploadID),
 		PartNumber: aws.Int32(req.PartNumber),
@@ -3549,7 +3545,7 @@ func multipartCompleteHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = s3Client.CompleteMultipartUpload(r.Context(), &s3.CompleteMultipartUploadInput{
-		Bucket:   aws.String(r2Bucket),
+		Bucket:   aws.String(s3Bucket),
 		Key:      aws.String(req.Key),
 		UploadId: aws.String(req.UploadID),
 		MultipartUpload: &s3types.CompletedMultipartUpload{
@@ -3589,7 +3585,7 @@ func multipartAbortHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, _ = s3Client.AbortMultipartUpload(r.Context(), &s3.AbortMultipartUploadInput{
-		Bucket:   aws.String(r2Bucket),
+		Bucket:   aws.String(s3Bucket),
 		Key:      aws.String(req.Key),
 		UploadId: aws.String(req.UploadID),
 	})
@@ -3730,7 +3726,7 @@ func saveTargetsHandler(w http.ResponseWriter, r *http.Request) {
 		if targetType == "document" && t.URLLink != "" {
 			ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(t.URLLink), "."))
 			if ext == "psd" || ext == "cdr" {
-				docKey := strings.TrimPrefix(t.URLLink, r2PublicURL+"/")
+				docKey := strings.TrimPrefix(t.URLLink, s3PublicURL+"/")
 				if pk, err := generateDocPreview(r.Context(), userID, docKey, ext, startIdx+i); err == nil {
 					previewKey = pk
 				}
@@ -4993,7 +4989,7 @@ func savePosterHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		if imgData, err := base64.StdEncoding.DecodeString(raw); err == nil {
 			key := fmt.Sprintf("posters/%d/poster-%d.png", userID, time.Now().UnixMilli())
-			bucket := os.Getenv("R2_BUCKET_NAME")
+			bucket := os.Getenv("S3_BUCKET_NAME")
 			contentType := "image/png"
 			_, uploadErr := s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 				Bucket: &bucket, Key: &key, Body: bytes.NewReader(imgData), ContentType: &contentType,
@@ -5001,7 +4997,7 @@ func savePosterHandler(w http.ResponseWriter, r *http.Request) {
 			if uploadErr == nil {
 				imageKey = key
 			} else {
-				log.Printf("[poster] R2 upload error: %v", uploadErr)
+				log.Printf("[poster] S3 upload error: %v", uploadErr)
 			}
 		}
 	}

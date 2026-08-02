@@ -11,6 +11,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o webar-backend .
 # (draw component only, to keep the image smaller) converts CDR files to PNG
 # for the same purpose — neither format has a pure-Go decoder available.
 FROM debian:bookworm-slim
+ENV DEBIAN_FRONTEND=noninteractive TZ=UTC
 RUN apt-get update && apt-get install -y --no-install-recommends \
         imagemagick \
         libreoffice-draw \

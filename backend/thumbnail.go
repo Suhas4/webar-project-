@@ -41,11 +41,11 @@ func generateDocPreview(ctx context.Context, userID int64, docKey, ext string, t
 	if ext != "psd" && ext != "cdr" {
 		return "", nil
 	}
-	if s3Client == nil || r2Bucket == "" {
+	if s3Client == nil || s3Bucket == "" {
 		return "", nil
 	}
 
-	head, err := s3Client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(r2Bucket), Key: aws.String(docKey)})
+	head, err := s3Client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s3Bucket), Key: aws.String(docKey)})
 	if err != nil {
 		log.Printf("[docPreview] head %s: %v", docKey, err)
 		return "", nil
@@ -55,7 +55,7 @@ func generateDocPreview(ctx context.Context, userID int64, docKey, ext string, t
 		return "", nil
 	}
 
-	obj, err := s3Client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(r2Bucket), Key: aws.String(docKey)})
+	obj, err := s3Client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(s3Bucket), Key: aws.String(docKey)})
 	if err != nil {
 		log.Printf("[docPreview] get %s: %v", docKey, err)
 		return "", nil
@@ -82,7 +82,7 @@ func generateDocPreview(ctx context.Context, userID int64, docKey, ext string, t
 	previewKey := fmt.Sprintf("users/%d/previews/target-%d-%d.jpg", userID, targetIdx, time.Now().UnixMilli())
 	contentType := "image/jpeg"
 	_, err = s3Client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:      aws.String(r2Bucket),
+		Bucket:      aws.String(s3Bucket),
 		Key:         aws.String(previewKey),
 		Body:        bytes.NewReader(jpgBytes),
 		ContentType: &contentType,
