@@ -1,0 +1,44 @@
+# Mirrors the [[headers]] blocks in ../netlify.toml — see _redirects for why
+# this duplicate exists (netlify.toml is outside the publish directory, so a
+# drag-and-drop deploy of dist/ never reads it). Losing these silently costs
+# the camera permission the AR scanner needs, plus all asset caching.
+# Keep in step with netlify.toml.
+
+/*
+  Permissions-Policy: camera=(*), microphone=()
+  X-Frame-Options: SAMEORIGIN
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+# Videos are large and their filenames aren't content-hashed — rename the file
+# (e.g. panda-key-v2.mp4) if you ever change one, or caches will hold the old
+# copy for a year.
+/*.mp4
+  Cache-Control: public, max-age=31536000, immutable
+
+/*.webm
+  Cache-Control: public, max-age=31536000, immutable
+
+# Frame sequences (cloth-frames) are dozens of files fetched together — without
+# this every visit re-downloads the whole reveal.
+/*.webp
+  Cache-Control: public, max-age=604800
+
+/*.png
+  Cache-Control: public, max-age=604800
+
+/*.jpg
+  Cache-Control: public, max-age=604800
+
+/targets/*
+  Cache-Control: public, max-age=86400
+
+/libs/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Vite content-hashes everything under /assets/, so these never change in place.
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/ar-scanner.html
+  Cache-Control: no-cache, no-store, must-revalidate

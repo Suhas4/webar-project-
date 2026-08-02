@@ -8,6 +8,7 @@ import UploadProgressOverlay from './UploadProgressOverlay.jsx';
 import UploadDropZone from './UploadDropZone.jsx';
 import FrameViewer from './FrameViewer.jsx';
 import CarFrameViewer from './CarFrameViewer.jsx';
+import { ClothRevealPicker } from './ClothRevealViewer.jsx';
 
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const TEAL = "#00C9A7";
@@ -22,8 +23,10 @@ const MEMOERA_SAMPLES = [
 // ── What-it-looks-like examples shown before the user builds their own ─────
 const EXAMPLES = [
   { id: 'ex-car', kind: 'car', title: 'Car Reveal', thumb: '/car-frames/frame_0000.jpg', badge: '360° SPIN' },
+  // Unlike the others, this one composites the user's own photo under the
+  // cloth, so picking it asks for a photo before it can show anything.
+  { id: 'ex-cloth', kind: 'cloth', title: 'Cloth Reveal', thumb: '/cloth-frames/frame_0001.webp', badge: 'YOUR PHOTO' },
   { id: 'ex-invite', kind: 'sample', title: 'Invitation', framesPath: '/invitation-29-frames', total: 360, thumb: '/invitation-29-frames/frame_0000.jpg', canvasWidth: 540, canvasHeight: 960, badge: 'BIRTHDAY' },
-  { id: 'ex-sample', kind: 'sample', title: 'Sample', framesPath: '/collection-frames', total: 93, thumb: '/collection-frames/frame_0000.jpg', badge: '360° SPIN' },
 ];
 
 // ── 3D Animation Experience ─────────────────────────────────────────────────
@@ -595,6 +598,9 @@ export default function PhotoAnimationSetupScreen({ onStart, onBack, isPublic = 
   const isWorking = ['compiling','uploading','finalizing'].includes(state);
 
   if (previewActive?.kind === 'car') return <CarFrameViewer onBack={() => setPreviewActive(null)} />;
+  if (previewActive?.kind === 'cloth') return (
+    <ClothRevealPicker onBack={() => setPreviewActive(null)} />
+  );
   if (previewActive?.kind === 'sample') return (
     <FrameViewer title={previewActive.title} framesPath={previewActive.framesPath}
       total={previewActive.total} onBack={() => setPreviewActive(null)}

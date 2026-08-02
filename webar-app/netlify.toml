@@ -40,10 +40,22 @@
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
+[[headers]]
+  for = "/*.webm"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
 # Logo/static images — filenames aren't content-hashed, so a moderate cache
 # (not "immutable") avoids serving a stale image forever if one is ever swapped.
 [[headers]]
   for = "/*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+# Frame sequences (cloth-frames) are dozens of files fetched together — without
+# this every visit re-downloads the whole reveal.
+[[headers]]
+  for = "/*.webp"
   [headers.values]
     Cache-Control = "public, max-age=604800"
 

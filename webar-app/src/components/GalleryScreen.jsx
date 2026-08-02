@@ -41,7 +41,7 @@ export default function GalleryScreen({ onBack, onCollection, initialQuery }) {
   const [viewing3D, setViewing3D]   = useState(null);
   const [viewingAnim, setViewingAnim] = useState(null);
   const [animLoading, setAnimLoading] = useState(null); // target index being loaded
-  const { lang }   = useLanguage();
+  const { lang, tr: trFromContext } = useLanguage();
   const tr = trFromContext;
   const { colors } = useTheme();
 

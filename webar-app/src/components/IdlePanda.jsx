@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { keyGreen } from '../utils/chromaKey.js';
 
 // A panda that pops out of the chat bubble when the screen has gone quiet,
 // waves, and tucks itself away again.
@@ -12,8 +13,20 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 // browsers block autoplay with sound. It's also decoded only when first needed,
 // so a session that never goes idle never pays for it.
 
-const VIDEO_WEBM = '/panda-idle.webm';
-const VIDEO_MP4  = '/panda-idle.mp4';
+// Plain H.264 with the green backdrop still in it — see utils/chromaKey.js for
+// why the transparency is produced at runtime instead of being baked into the
+// file. One asset, decodable by every browser we target.
+const VIDEO_SRC = '/panda-key.mp4';
+
+// White sticker outline, roughly 0.5mm at the size this renders. Chained
+// drop-shadows compound — each one shadows the result of the last — so four
+// axis-aligned passes fill the diagonals as well. Applied to the canvas, so it
+// traces the keyed silhouette rather than a rectangle, and lives in CSS so the
+// thickness can be changed without re-encoding anything.
+const OUTLINE = ['1.5px 0', '-1.5px 0', '0 1.5px', '0 -1.5px']
+  .map((o) => `drop-shadow(${o} 0 #fff)`)
+  .join(' ');
+const DEPTH = 'drop-shadow(0 14px 22px rgba(0,0,0,.5))';
 
 // Interaction that counts as "the user is still here". pointerdown rather than
 // click so it reacts to the press, not the release.
@@ -29,6 +42,7 @@ export default function IdlePanda({
   const idleTimer = useRef(null);
   const lastShown = useRef(0);
   const videoRef  = useRef(null);
+  const canvasRef = useRef(null);
 
   const hide = useCallback(() => {
     setLeaving(true);
@@ -77,16 +91,54 @@ export default function IdlePanda({
     };
   }, [enabled, idleMs, show, hide]);
 
-  // Tuck away on its own once the clip has played through.
+  // Play the clip, keying each decoded frame into the canvas, and tuck away on
+  // its own once it has played through.
   useEffect(() => {
     if (!visible) return undefined;
     const v = videoRef.current;
-    if (!v) return undefined;
-    v.currentTime = 0;
-    v.play().catch(() => { /* autoplay refused — the panda just sits still */ });
+    const c = canvasRef.current;
+    if (!v || !c) return undefined;
+
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    let handle = 0;
+    let stopped = false;
+
+    // requestVideoFrameCallback fires once per *decoded* frame, so a 24fps clip
+    // is keyed 24 times a second instead of 60 — less than half the work of a
+    // rAF loop, and never keys the same frame twice. rAF is the fallback where
+    // it isn't implemented.
+    const schedule = () => {
+      if (stopped) return;
+      handle = v.requestVideoFrameCallback
+        ? v.requestVideoFrameCallback(render)
+        : requestAnimationFrame(render);
+    };
+
+    const render = () => {
+      if (stopped) return;
+      if (v.videoWidth) {
+        if (c.width !== v.videoWidth) { c.width = v.videoWidth; c.height = v.videoHeight; }
+        ctx.drawImage(v, 0, 0);
+        const frame = ctx.getImageData(0, 0, c.width, c.height);
+        keyGreen(frame.data);
+        ctx.putImageData(frame, 0, 0);
+      }
+      schedule();
+    };
+
     const onEnd = () => hide();
     v.addEventListener('ended', onEnd);
-    return () => v.removeEventListener('ended', onEnd);
+
+    v.currentTime = 0;
+    v.play().catch(() => { /* autoplay refused — the panda just sits still */ });
+    schedule();
+
+    return () => {
+      stopped = true;
+      v.removeEventListener('ended', onEnd);
+      if (v.cancelVideoFrameCallback) v.cancelVideoFrameCallback(handle);
+      else cancelAnimationFrame(handle);
+    };
   }, [visible, hide]);
 
   if (!visible) return null;
@@ -122,31 +174,33 @@ export default function IdlePanda({
         }
       `}</style>
 
+      {/* The canvas is what's actually seen — the video only feeds it frames.
+          drop-shadow (unlike box-shadow) follows the alpha channel, so both the
+          white outline and the soft depth shadow trace the keyed silhouette
+          rather than a rectangle around it. */}
+      <canvas
+        ref={canvasRef}
+        style={{
+          width: '100%', height: 'auto', display: 'block',
+          filter: `${OUTLINE} ${DEPTH}`,
+        }}
+      />
+
+      {/* Kept in the layout but invisible rather than display:none — a hidden
+          video does not reliably decode frames on mobile Safari, and with no
+          frames there is nothing to key. */}
       <video
         ref={videoRef}
+        src={VIDEO_SRC}
         muted
         playsInline
         preload="none"
+        aria-hidden="true"
         style={{
-          width: '100%', height: 'auto', display: 'block',
-          // drop-shadow (unlike box-shadow) follows the alpha channel, so this
-          // traces the panda's outline rather than a rectangle around it.
-          filter: 'drop-shadow(0 14px 22px rgba(0,0,0,.5))',
+          position: 'absolute', width: 1, height: 1,
+          opacity: 0, pointerEvents: 'none',
         }}
-      >
-        {/* WebM first: VP9 with a real alpha channel, so the panda sits on the
-            app background with no white box. The original clip had an off-white
-            backdrop that was almost the same colour as the panda's own helmet
-            and belly, so a colour key would have punched holes straight through
-            it — the background was removed by flood-filling inward from the
-            frame edges instead, which only clears backdrop actually connected
-            to the border.
-            The MP4 stays as a fallback for browsers without WebM alpha; they
-            get the original clip, white background and all, rather than
-            nothing. */}
-        <source src={VIDEO_WEBM} type="video/webm" />
-        <source src={VIDEO_MP4} type="video/mp4" />
-      </video>
+      />
     </div>
   );
 }

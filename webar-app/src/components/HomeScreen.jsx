@@ -244,7 +244,7 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
   }, []);
 
   const hour = new Date().getHours();
-  const [greetWord, greetEmoji] = hour < 5 ? ['Still up', '🌙'] : hour < 12 ? ['Good morning', '☀️'] : hour < 17 ? ['Good afternoon', '⛅'] : hour < 21 ? ['Good evening', '🌇'] : ['Good night', '🌙'];
+  const [greetWord] = hour < 5 ? ['Still up'] : hour < 12 ? ['Good morning'] : hour < 17 ? ['Good afternoon'] : hour < 21 ? ['Good evening'] : ['Good night'];
   const userName = user?.firstName || user?.name || user?.username || 'Explorer';
 
   return (
@@ -259,7 +259,6 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
           0%,100% { transform: translate(0,0) scale(1); opacity: 0.4; }
           50%     { transform: translate(-30px,-20px) scale(1.2); opacity: 0.7; }
         }
-        @keyframes homePulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
         @keyframes ptr-spin { to { transform: rotate(360deg); } }
         @keyframes hg-ring { 0%{transform:scale(.9);opacity:.6} 100%{transform:scale(1.5);opacity:0} }
 
@@ -281,9 +280,12 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
         .home-promo-cta:hover { transform: translateY(-2px) rotate(8deg); }
         .home-promo-cta:active { transform: scale(.92); }
 
-        .home-mode-tile { transition: transform .18s ease, background .18s ease, border-color .18s ease; }
-        .home-mode-tile:hover { transform: translateY(-3px); }
-        .home-mode-tile:active { transform: scale(.96) !important; }
+        .explore-track::-webkit-scrollbar { display: none; }
+        /* The region is only focusable so a keyboard can reach it; a ring
+           around the whole ribbon on every stray click would be noise, so it
+           shows only for actual keyboard focus. */
+        .explore-track:focus { outline: none; }
+        .explore-track:focus-visible { outline: 2px solid #00E5CC; outline-offset: -2px; }
 
         .home-social-btn { transition: transform .15s ease, box-shadow .15s ease; }
         .home-social-btn:hover { transform: translateX(4px); }
@@ -464,8 +466,7 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
         {/* ── Greeting ── */}
         <div style={styles.greeting}>
           <div style={{ ...styles.eyebrow, color: colors.textMuted }}>
-            <span style={{ width: 6, height: 6, borderRadius: '50%', background: colors.accent, animation: 'homePulse 2.4s ease-in-out infinite', display: 'inline-block' }} />
-            {greetEmoji} {greetWord}
+            {greetWord}
           </div>
           <h1 style={{ ...styles.hello, color: colors.text }}>
             Hello, <span style={styles.helloName}>{userName}</span>
@@ -555,16 +556,17 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
         </form>
 
         {/* Full-bleed "Explore modes" banner — three diagonal-cut partitions */}
-        <ExploreModes onUpload={onUpload} onScan={onScan} onCollection={onCollection} colors={colors} />
+        <ExploreModes colors={colors} />
 
         {/* ── Social icons + Reviews / Stats ── */}
         <div style={styles.bodyGrid}>
           <div style={styles.socialRail}>
-            <SocialLink className="home-social-btn" href="https://www.instagram.com/memoerabangalore/" icon={<InstagramIcon color={colors.text} />} colors={colors} />
-            <SocialLink className="home-social-btn" href="https://www.facebook.com/profile.php?id=61574312286741" icon={<FacebookIcon color={colors.text} />} colors={colors} />
-            <SocialLink className="home-social-btn" href="https://www.youtube.com/@memoerabangalore" icon={<YouTubeIcon color={colors.text} />} colors={colors} />
-            <SocialLink className="home-social-btn" href="https://x.com/Memo_Era" icon={<XIcon color={colors.text} />} colors={colors} />
-            <SocialLink className="home-social-btn" href={whatsappUrl} icon={<WhatsAppIcon color={colors.text} />} colors={colors} />
+            <SocialLink className="home-social-btn" href="https://www.instagram.com/memoerabangalore/" icon="/social-instagram.png" label="Instagram" />
+            <SocialLink className="home-social-btn" href="https://www.facebook.com/profile.php?id=61574312286741" icon="/social-facebook.png" label="Facebook" />
+            <SocialLink className="home-social-btn" href="https://www.youtube.com/@memoerabangalore" icon="/social-youtube.png" label="YouTube" />
+            <SocialLink className="home-social-btn" href={whatsappUrl} icon="/social-whatsapp.png" label="WhatsApp" />
+            <SocialLink className="home-social-btn" href="https://x.com/Memo_Era" icon="/social-x.png" label="X" />
+            <SocialLink className="home-social-btn" href="https://www.threads.com/@memoerabangalore" icon="/social-threads.png" label="Threads" />
           </div>
 
           <div style={styles.stack}>
@@ -600,37 +602,45 @@ export default function HomeScreen({ onUpload, onGallery, onSettings, onPremium,
 }
 
 const EXPLORE_MODES = [
-  { icon: '📤', title: 'Upload',  desc: 'Upload a photo, video, or 3D model as your AR target.' },
-  { icon: '📱', title: 'Scan',    desc: 'Point your camera at the uploaded photo to detect it.' },
-  { icon: '✨', title: 'Relive',  desc: 'Watch your memory come alive right on top of it!' },
+  { key: 'upload', title: 'Upload', video: '/videos/explore-upload.mp4' },
+  { key: 'scan',   title: 'Scan',   video: '/videos/explore-scan.mp4' },
+  { key: 'relive', title: 'Relive', video: '/videos/explore-relive.mp4' },
 ];
 
 // Full-bleed diagonal-cut banner, split into three tiles — one per
 // "Explore modes" step. Deliberately breaks out of the page's side padding
 // (negative margins) so the diagonal edges run edge-to-edge like a ribbon.
-function ExploreModes({ onUpload, onScan, onCollection, colors }) {
-  // Indexes must line up with EXPLORE_MODES above — they were off by one, so
-  // the tile labelled "Upload" opened the scanner and "Scan" opened the gallery.
-  const actions = [
-    () => onUpload?.(),      // Upload
-    () => onScan?.(),        // Scan
-    () => onCollection?.(),  // Relive
-  ];
+// Each tile is a looping placeholder video (no click action, no text) — drop
+// the matching file into public/videos/ to fill it in.
+//
+// The three tiles sit on a horizontal scroller rather than splitting the width
+// three ways: each is wide enough that the strip overflows, so it swipes
+// left→right and snaps, with the next tile always half-visible as the cue that
+// there's more. The scroller is nested *inside* the clipped shape so the
+// diagonal clip-path and the overflow live on separate elements.
+//
+// There is deliberately no visible control — no arrows, no dots, no scrollbar.
+// The strip is moved by dragging it. The half-cut tile at the edge is the only
+// affordance, which is why the tile width is a fraction that never divides
+// evenly into the track. tabIndex makes the region focusable so it can still be
+// scrolled from a keyboard, which is otherwise the one input left with no way
+// in once the buttons are gone.
+function ExploreModes({ colors }) {
   return (
     <div style={s2.wrap}>
       <div style={s2.head}>
         <h2 style={{ ...s2.headTitle, color: colors.text }}>Explore modes</h2>
-        <span style={{ ...s2.headSub, color: colors.textMuted }}>3 WAYS IN</span>
       </div>
       <div style={s2.accent}>
         <div style={s2.shape}>
-          {EXPLORE_MODES.map((step, i) => (
-            <button key={i} className="home-mode-tile" onClick={actions[i]} style={s2.tile}>
-              <span style={s2.tileIcon}><span style={{ fontSize: 22 }}>{step.icon}</span></span>
-              <span style={s2.tileTitle}>{step.title}</span>
-              <span style={s2.tileDesc}>{step.desc}</span>
-            </button>
-          ))}
+          <div className="explore-track" style={s2.track}
+            tabIndex={0} role="region" aria-label="Explore modes, scroll sideways">
+            {EXPLORE_MODES.map((step) => (
+              <div key={step.key} style={s2.tile}>
+                <video src={step.video} autoPlay muted loop playsInline style={s2.tileVideo} />
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -639,18 +649,18 @@ function ExploreModes({ onUpload, onScan, onCollection, colors }) {
 
 const s2 = {
   wrap: { position: 'relative', marginLeft: -16, marginRight: -16, marginTop: 6 },
-  head: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', padding: '0 20px 10px' },
+  head: { display: 'flex', alignItems: 'baseline', padding: '0 20px 10px' },
   headTitle: { fontFamily: FONT, fontSize: 15, margin: 0, letterSpacing: '-.01em', color: '#fff' },
-  headSub: { fontFamily: 'ui-monospace, monospace', fontSize: 9.5, color: 'rgba(255,255,255,.5)', letterSpacing: '.08em' },
   accent: { position: 'relative', background: '#00E5CC', clipPath: 'polygon(0 6%, 100% 0%, 100% 94%, 0% 100%)' },
   shape: { margin: 3, background: '#0A3733', clipPath: 'polygon(0 6%, 100% 0%, 100% 94%, 0% 100%)',
-    display: 'flex', padding: '30px 10px 38px', gap: 8 },
-  tile: { flex: 1, minWidth: 0, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
-    borderRadius: 16, padding: '14px 6px', display: 'flex', flexDirection: 'column', alignItems: 'center',
-    gap: 8, textAlign: 'center', cursor: 'pointer', color: '#fff', fontFamily: FONT, boxSizing: 'border-box' },
-  tileIcon: { width: 40, height: 40, borderRadius: 14, background: 'rgba(255,255,255,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  tileTitle: { fontSize: 11.5, fontWeight: 700, width: '100%' },
-  tileDesc: { fontSize: 9, color: 'rgba(255,255,255,.65)', lineHeight: 1.3, width: '100%', overflowWrap: 'break-word', wordBreak: 'break-word' },
+    padding: '30px 10px 38px' },
+  track: { display: 'flex', gap: 10, overflowX: 'auto', overflowY: 'hidden',
+    scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch',
+    scrollbarWidth: 'none', msOverflowStyle: 'none' },
+  tile: { flex: '0 0 46%', minWidth: 0, aspectRatio: '1', borderRadius: 16, overflow: 'hidden',
+    scrollSnapAlign: 'start', background: 'rgba(255,255,255,0.06)',
+    border: '1px solid rgba(255,255,255,0.1)' },
+  tileVideo: { width: '100%', height: '100%', objectFit: 'cover', display: 'block' },
 };
 
 const CUSTOMER_REVIEWS = [
@@ -955,10 +965,15 @@ function NavBtn({ icon, img, count, label, sublabel, bg, onClick, labelColor, su
     </button>
   );
 }
-function SocialLink({ href, icon, className }) {
+// `icon` is a path into public/ — the artwork already carries its own outlined
+// ring, so the tile just frames it on white (kept white in both themes because
+// the icons are a fixed dark navy).
+function SocialLink({ href, icon, label, className }) {
   return (
-    <a href={href} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
-      <div className={`social-icon-hover ${className || ''}`} style={styles.socialIcon}>{icon}</div>
+    <a href={href} target="_blank" rel="noreferrer" aria-label={label} style={{ textDecoration: 'none' }}>
+      <div className={`social-icon-hover ${className || ''}`} style={styles.socialIcon}>
+        <img src={icon} alt="" style={styles.socialIconImg} />
+      </div>
     </a>
   );
 }
@@ -1055,39 +1070,6 @@ function PowerIcon({ color = '#555' }) {
 function StreakGlyph() { return <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 2c1 3-2.5 4-2.5 7.2 0 1.6 1 2.6 2 2.6.8 0 1.6-.6 1.6-1.7 0-.7-.3-1.1-.3-1.1 2 .6 3.7 2.6 3.7 5.1 0 3.3-2.9 5.9-6.5 5.9S3.5 18.4 3.5 15.1c0-4.8 4.7-6 8.5-13.1Z"/></svg>; }
 function StorageGlyph() { return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round"><rect x="3" y="4" width="18" height="6" rx="1.6"/><rect x="3" y="14" width="18" height="6" rx="1.6"/><circle cx="7" cy="7" r="0.6" fill="currentColor" stroke="none"/><circle cx="7" cy="17" r="0.6" fill="currentColor" stroke="none"/></svg>; }
 
-const SOCIAL = "#0D333B";
-function InstagramIcon() {
-  return <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke={SOCIAL} strokeWidth="1.7">
-    <rect x="3.2" y="3.2" width="17.6" height="17.6" rx="6"/>
-    <circle cx="12" cy="12" r="4.2"/>
-    <circle cx="17" cy="7" r="1" fill={SOCIAL} stroke="none"/>
-  </svg>;
-}
-function FacebookIcon() {
-  return <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke={SOCIAL} strokeWidth="1.7">
-    <circle cx="12" cy="12" r="9.3"/>
-    <path d="M14.2 8.6h-1.3c-.5 0-.9.4-.9.9v1.3h2.2l-.3 1.9h-1.9V21h-2v-8.3H8.3v-1.9H10V9.3c0-1.6 1-2.7 2.6-2.7h1.6z" fill={SOCIAL} stroke="none"/>
-  </svg>;
-}
-function YouTubeIcon() {
-  return <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke={SOCIAL} strokeWidth="1.7">
-    <circle cx="12" cy="12" r="9.3"/>
-    <path d="M10 8.3v7.4l6.2-3.7z" fill={SOCIAL} stroke="none"/>
-  </svg>;
-}
-function XIcon() {
-  return <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke={SOCIAL} strokeWidth="1.7">
-    <circle cx="12" cy="12" r="9.3"/>
-    <path d="M17.8 8.2c-.4.2-.8.3-1.2.4.4-.3.7-.7.9-1.2-.4.3-.9.4-1.3.6-.4-.4-1-.7-1.6-.7-1.2 0-2.1 1-2.1 2.2 0 .2 0 .3.1.5-1.8-.1-3.3-.9-4.4-2.2-.2.3-.3.6-.3 1 0 .7.4 1.3.9 1.7-.3 0-.6-.1-.9-.3v0c0 1 .7 1.8 1.7 2-.2.1-.4.1-.6.1-.1 0-.3 0-.4 0 .3.8 1 1.4 1.9 1.5-.7.6-1.6.9-2.6.9-.2 0-.3 0-.5 0 .9.6 2 1 3.2 1 3.8 0 5.9-3.2 5.9-5.9v-.3c.4-.3.7-.6 1-1z" fill={SOCIAL} stroke="none"/>
-  </svg>;
-}
-function WhatsAppIcon() {
-  return <svg width="25" height="25" viewBox="0 0 24 24" fill="none" stroke={SOCIAL} strokeWidth="1.7">
-    <circle cx="12" cy="12" r="9.3"/>
-    <path d="M9.9 9.6c.1-.3.3-.3.4-.3h.3c.1 0 .3 0 .4.3.2.4.5 1.1.5 1.2.1.1.1.2 0 .3-.1.2-.1.2-.2.3-.1.1-.2.3-.3.4-.1.1-.2.2-.1.4.2.3.6.9 1.3 1.5.8.7 1.3.9 1.5.9.2.1.3.1.4-.1.1-.1.3-.4.5-.6.1-.1.3-.1.4-.1.2.1.9.5 1.1.6.2.1.3.1.3.2.1.2.1.5-.1 1-.2.4-1 .9-1.5.9-.4 0-1.2-.1-2.5-.9-1.9-1.1-3.2-3.2-3.3-3.4-.1-.1-.8-1.1-.8-2.1 0-1 .5-1.5.7-1.7z" fill={SOCIAL} stroke="none"/>
-  </svg>;
-}
-
 const styles = {
   screen: { position:'fixed',inset:0,display:'flex',flexDirection:'column',fontFamily:FONT,overflow:'hidden' },
   watermark: { position:'fixed',bottom:-60,left:-40,width:'70vw',maxWidth:280,opacity:0.05,pointerEvents:'none',zIndex:0 },
@@ -1163,6 +1145,7 @@ const styles = {
   socialIcon: { width:52,height:52,borderRadius:16,display:'flex',alignItems:'center',
     justifyContent:'center',overflow:'hidden',flexShrink:0,background:'#ffffff',
     boxShadow:'0 1px 4px rgba(0,0,0,0.15)' },
+  socialIconImg: { width:32,height:32,display:'block',objectFit:'contain' },
   stack: { display:'flex',flexDirection:'column',gap:12,minWidth:0 },
 
   stat: { flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:4,

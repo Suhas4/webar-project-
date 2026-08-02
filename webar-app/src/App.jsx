@@ -275,10 +275,17 @@ export default function App() {
   // Prefetch public targets + pre-warm the guest scan's .mind file as early as
   // possible — including during the splash screen, not just once hello/home is
   // reached — so tapping "Tap to Scan" opens instantly with zero wait instead
-  // of downloading/compiling at that point. This also fires the first request
-  // to the backend (which sleeps after ~15 min idle on its free hosting tier
-  // and cold-starts in 30-60s+) as early as possible, since the splash screen
-  // alone was costing ~4s of wasted head-start against that cold start.
+  // of downloading at that point. This also fires the first request to the
+  // backend (which sleeps after ~15 min idle on its free hosting tier and
+  // cold-starts in 30-60s+) as early as possible, since the splash screen alone
+  // was costing ~4s of wasted head-start against that cold start.
+  //
+  // Pre-warming here is strictly the cheap paths: a cached .mind, or the
+  // pre-built one downloaded from R2. It deliberately does NOT fall through to
+  // compiling from scratch — that costs several MB of image downloads and a
+  // heavy main-thread compile, which at startup starves the UI. When the
+  // pre-built is stale, the scan screen does that work instead, where there is
+  // a progress phase to show for it.
   useEffect(() => {
     loadPublicTargets().then((t) => {
       prefetchedPublicTargetsRef.current = t;

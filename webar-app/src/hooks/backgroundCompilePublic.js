@@ -10,9 +10,12 @@ import { R2_PUBLIC_URL } from '../config/api.js';
 let _result  = null; // { key, mindBuffer, arTargets }
 let _promise = null; // running job promise
 
-export function startBackgroundPublicCompile(prefetchedTargets) {
+// `allowCompile` gates the from-scratch compile in step 3. It is off by default
+// because this runs during app startup, where that path is ruinous — see the
+// note above step 3.
+export function startBackgroundPublicCompile(prefetchedTargets, { allowCompile = false } = {}) {
   if (_result || _promise) return;
-  _promise = _doCompile(prefetchedTargets)
+  _promise = _doCompile(prefetchedTargets, allowCompile)
     .then((r) => { _result = r; })
     .catch(() => {})
     .finally(() => { _promise = null; });
@@ -53,7 +56,7 @@ function buildArTargets(targets) {
   }));
 }
 
-async function _doCompile(prefetchedTargets) {
+async function _doCompile(prefetchedTargets, allowCompile) {
   const publicTargets = prefetchedTargets?.length > 0 ? prefetchedTargets : await loadPublicTargets();
   if (!publicTargets || publicTargets.length === 0) return null;
 
@@ -84,7 +87,27 @@ async function _doCompile(prefetchedTargets) {
     // Pre-built not available — fall through to compile
   }
 
-  // 3. Compile from scratch (first-time or stale pre-built)
+  // 3. Compile from scratch (first-time or stale pre-built).
+  //
+  // Only when explicitly asked for. Steps 1 and 2 are cheap — a cache read or a
+  // single .mind download — but this step is not: it pulls the MindAR compiler
+  // (~2 MB) plus every public target image at full size, then runs feature
+  // extraction over all of them. That is fine on the scan screen, which shows a
+  // "compiling" phase while it happens, and ruinous at app startup, which is
+  // where this is called from.
+  //
+  // It bit hard: whenever the pre-built .mind in R2 goes stale, step 2 misses
+  // and *every* app open silently fell into this path — several MB of image
+  // downloads and a long main-thread compile competing with the home screen for
+  // the same CPU, so the interface crawled and taps appeared to do nothing.
+  // Stale is not an edge case either: the self-heal that refreshes the
+  // pre-built (uploadPublicCombinedMind) no-ops without a signed-in token, so a
+  // run of guest traffic leaves it stale indefinitely.
+  //
+  // Returning null here is safe: GuestScanScreen treats a missing background
+  // result as "not ready" and runs its own identical compile, with UI.
+  if (!allowCompile) return null;
+
   try {
     await loadMindARCompiler();
   } catch {

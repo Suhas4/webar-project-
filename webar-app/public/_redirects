@@ -1,0 +1,9 @@
+# Mirrors the [[redirects]] block in ../netlify.toml.
+#
+# netlify.toml sits at the repo root, outside the publish directory, so a
+# manual/drag-and-drop deploy of dist/ never sees it — the SPA fallback would
+# silently vanish and any deep link would 404. This file lives in public/, so
+# Vite copies it into dist/ on every build and both deploy routes behave the
+# same. Keep it in step with netlify.toml.
+
+/*  /index.html  200
