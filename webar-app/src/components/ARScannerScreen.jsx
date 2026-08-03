@@ -199,7 +199,7 @@ export default function ARScannerScreen({ targets, mindFileUrl, onBack }) {
   // of the file's own error screen so "is this actually the new build?" is
   // answerable from a screenshot alone. Bump SCANNER_BUILD (and the matching
   // stamp in ar-scanner.html) whenever that file changes.
-  const SCANNER_BUILD = '2026-07-26-1';
+  const SCANNER_BUILD = '2026-08-02-1';
   const scannerSrc = `/ar-scanner.html?v=${SCANNER_BUILD}`;
 
   return (

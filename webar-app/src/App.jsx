@@ -789,7 +789,9 @@ export default function App() {
   } else if (appView === 'nfc-stickers') {
     mainScreen = <NfcStickersScreen onBack={() => setAppView('nfc')} user={currentUser} />;
   } else if (appView === 'catalog-setup') {
-    mainScreen = <CatalogSetupScreen onStart={handleStart} onBack={() => setAppView('home')} isPublic={selectedVisibility === 'public'} />;
+    // No onStart: this screen finishes on its own PDF result rather than
+    // launching the AR scanner.
+    mainScreen = <CatalogSetupScreen onBack={() => setAppView('home')} isPublic={selectedVisibility === 'public'} />;
   } else if (appView === 'business-search') {
     mainScreen = <BusinessSearchScreen initialQuery={bizQuery} onBack={() => setAppView('home')} />;
   } else if (appView === 'seller-dashboard') {

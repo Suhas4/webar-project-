@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import { loadTargets, clearTargets, saveTargets } from "../hooks/useArStorage.js";
 import { API_BASE } from "../config/api.js";
 import { loadAnimationById, deleteAnimation } from "../hooks/usePhotoAnimations.js";
@@ -14,6 +14,23 @@ import { useTheme } from "../context/ThemeContext.jsx";
 const FONT = "Outfit, -apple-system, BlinkMacSystemFont, sans-serif";
 const TEAL = "#00C9A7";
 const GOLD = "#C9A84C";
+
+// Action icons. These were emoji (🧊 ▶ 🔗 📄 🎞️), which every platform draws at
+// its own intrinsic size and baseline — that is why the buttons looked ragged
+// next to each other. Line-art SVGs on a fixed 22px box give one optical size.
+const Ico = ({ d, fill = false }) => (
+  <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"
+    fill={fill ? 'currentColor' : 'none'} stroke="currentColor"
+    strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+    {d}
+  </svg>
+);
+const IconPlay  = () => <Ico d={<path d="M8 5.5v13l11-6.5z" />} fill />;
+const IconCube  = () => <Ico d={<><path d="M12 2.6 21 7.5v9L12 21.4 3 16.5v-9z" /><path d="M3 7.5l9 5 9-5" /><path d="M12 12.5v8.9" /></>} />;
+const IconLink  = () => <Ico d={<><path d="M10.6 13.4a4 4 0 0 0 5.7 0l2.8-2.8a4 4 0 1 0-5.7-5.7l-1.6 1.6" /><path d="M13.4 10.6a4 4 0 0 0-5.7 0l-2.8 2.8a4 4 0 1 0 5.7 5.7l1.6-1.6" /></>} />;
+const IconDoc   = () => <Ico d={<><path d="M14 2.6H7a2 2 0 0 0-2 2v14.8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7.6z" /><path d="M14 2.6v5h5" /><path d="M9 13h6" /><path d="M9 17h4" /></>} />;
+const IconFilm  = () => <Ico d={<><rect x="3" y="4.5" width="18" height="15" rx="2.2" /><path d="M7.5 4.5v15M16.5 4.5v15M3 12h18" /></>} />;
+const IconClock = () => <Ico d={<><circle cx="12" cy="12" r="8.6" /><path d="M12 7.2V12l3 1.8" /></>} />;
 
 function formatUploadDate(iso) {
   if (!iso) return null;
@@ -40,7 +57,27 @@ export default function GalleryScreen({ onBack, onCollection, initialQuery }) {
   const [videoToast, setVideoToast] = useState('');
   const [viewing3D, setViewing3D]   = useState(null);
   const [viewingAnim, setViewingAnim] = useState(null);
-  const [animLoading, setAnimLoading] = useState(null); // target index being loaded
+  // Keyed by the target's own identity, not its list index: the two panes each
+  // count from zero, so an index would mark the wrong card as loading.
+  const [animLoading, setAnimLoading] = useState(null);
+  const [tab, setTab] = useState(0);                    // 0 = media, 1 = catalogs
+  const trackRef = useRef(null);
+
+  const goToTab = (next) => {
+    setTab(next);
+    const el = trackRef.current;
+    if (el) el.scrollTo({ left: next * el.clientWidth, behavior: "smooth" });
+  };
+
+  // Swiping is the source of truth; this keeps the tab underline in step with
+  // wherever the finger left the track. Rounded, so a half-swipe that snaps
+  // back doesn't leave the wrong tab highlighted.
+  const onTrackScroll = (e) => {
+    const el = e.currentTarget;
+    if (!el.clientWidth) return;
+    const next = Math.round(el.scrollLeft / el.clientWidth);
+    setTab((cur) => (cur === next ? cur : next));
+  };
   const { lang, tr: trFromContext } = useLanguage();
   const tr = trFromContext;
   const { colors } = useTheme();
@@ -282,6 +319,9 @@ export default function GalleryScreen({ onBack, onCollection, initialQuery }) {
 
   return (
     <div style={{ ...s.screen, background: colors.bg }}>
+      <style>{`
+        .gal-swipe::-webkit-scrollbar { display: none; }
+      `}</style>
       {/* Header */}
       <div style={s.header}>
         <button onClick={onBack} style={{ ...s.backBtn, color: colors.textMuted }}>← Back</button>
@@ -345,12 +385,21 @@ export default function GalleryScreen({ onBack, onCollection, initialQuery }) {
             <span>No memories match "{query}"</span>
           </div>
         );
-        return (
-        <div style={s.list}>
-          {filtered.map((t, i) => {
+        // Catalogs are a different kind of thing from photos and videos — they
+        // are documents you read, not memories you scan — so each gets its own
+        // swipeable pane rather than being interleaved by upload date.
+        const isCatalog = (t) => t.targetType === "document";
+        const media   = filtered.filter((t) => !isCatalog(t));
+        const catalogs = filtered.filter(isCatalog);
+
+        const renderCard = (t, i) => {
             const uploadDate = formatUploadDate(t.createdAt);
+            // Stable across panes; falls back to the label when the row has no
+            // id (older targets saved before ids were stored).
+            const cardKey = t.id ?? `${t.targetType}:${t.label}:${t.targetIndex}`;
             return (
-              <div key={i} style={{ ...s.card, background: colors.cardBg || colors.surface, border: `1px solid ${colors.border}` }}>
+              <Fragment key={cardKey}>
+              <div style={{ ...s.card, background: colors.cardBg || colors.surface, border: `1px solid ${colors.border}` }}>
 
                 {/* Photo thumbnail — tap to view fullscreen */}
                 {t._imagePreviewUrl ? (
@@ -408,40 +457,83 @@ export default function GalleryScreen({ onBack, onCollection, initialQuery }) {
                 {/* Action button */}
                 <div style={s.actionCol}>
                   {t.targetType === "glb" && t.urlLink && (
-                    <button style={s.actionBtn} onClick={() => setViewing3D(t.urlLink)}>🧊</button>
+                    <button style={s.actionBtn} aria-label="View 3D model" title="View 3D model"
+                      onClick={() => setViewing3D(t.urlLink)}><IconCube /></button>
                   )}
                   {t.videoUrl && t.targetType !== "glb" && t.targetType !== "animation" && t.targetType !== "document" && (
-                    <button style={s.actionBtn} onClick={() => setPlayingVideo(t)}>▶</button>
+                    <button style={s.actionBtn} aria-label="Play video" title="Play video"
+                      onClick={() => setPlayingVideo(t)}><IconPlay /></button>
                   )}
                   {t.targetType === "url" && t.urlLink && (
-                    <button style={{ ...s.actionBtn, background: "rgba(201,168,76,0.12)", borderColor: GOLD + "55", color: GOLD }}
-                      onClick={() => window.open(t.urlLink, "_blank")}>🔗</button>
+                    <button style={{ ...s.actionBtn, ...s.actionBtnGold }} aria-label="Open link" title="Open link"
+                      onClick={() => window.open(t.urlLink, "_blank")}><IconLink /></button>
                   )}
                   {t.targetType === "document" && t.urlLink && (
-                    <button style={{ ...s.actionBtn, background: "rgba(201,168,76,0.12)", borderColor: GOLD + "55", color: GOLD }}
-                      onClick={() => window.open(t.urlLink, "_blank", "noopener")}>📄</button>
+                    <button style={{ ...s.actionBtn, ...s.actionBtnGold }} aria-label="Open catalog PDF" title="Open catalog PDF"
+                      onClick={() => window.open(t.urlLink, "_blank", "noopener")}><IconDoc /></button>
                   )}
                   {t.targetType === "animation" && t.urlLink && (
                     <button
-                      style={{ ...s.actionBtn, background: "rgba(0,201,167,0.13)", borderColor: TEAL + "66",
-                        color: TEAL, fontSize: 22, opacity: animLoading === i ? 0.5 : 1 }}
-                      disabled={animLoading === i}
+                      style={{ ...s.actionBtn, opacity: animLoading === cardKey ? 0.5 : 1 }}
+                      aria-label="Play animation" title="Play animation"
+                      disabled={animLoading === cardKey}
                       onClick={async () => {
-                        setAnimLoading(i);
+                        setAnimLoading(cardKey);
                         const anim = await loadAnimationById(t.urlLink).catch(() => null);
                         setAnimLoading(null);
                         if (anim) setViewingAnim(anim);
                         else alert('Animation not found. It may have been created on a different device or browser.');
                       }}>
-                      {animLoading === i ? "⏳" : "🎞️"}
+                      {animLoading === cardKey ? <IconClock /> : <IconFilm />}
                     </button>
                   )}
                 </div>
 
               </div>
+              </Fragment>
             );
-          })}
-        </div>
+        };
+
+        const emptyPane = (msg) => (
+          <div style={{ ...s.empty, color: colors.textMuted, flexDirection: "column", gap: 10, padding: "48px 24px", textAlign: "center" }}>
+            <span style={{ fontSize: 34 }}>📭</span>
+            <span style={{ fontSize: 14 }}>{msg}</span>
+          </div>
+        );
+
+        return (
+        <>
+          {/* Tabs double as the swipe indicator — tapping and swiping drive the
+              same scroll position, so the two can never disagree. */}
+          <div style={{ ...s.tabBar, borderColor: colors.border }}>
+            {[
+              { key: 0, label: "Images & Videos", count: media.length,    tint: TEAL },
+              { key: 1, label: "Catalogs",        count: catalogs.length, tint: GOLD },
+            ].map((tb) => {
+              const on = tab === tb.key;
+              return (
+                <button key={tb.key} onClick={() => goToTab(tb.key)}
+                  style={{ ...s.tabBtn, color: on ? tb.tint : colors.textMuted,
+                    borderBottom: `2.5px solid ${on ? tb.tint : "transparent"}` }}>
+                  {tb.label}
+                  <span style={{ ...s.tabCount, background: on ? `${tb.tint}22` : "transparent",
+                    color: on ? tb.tint : colors.textMuted }}>{tb.count}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div ref={trackRef} className="gal-swipe" style={s.swipeTrack} onScroll={onTrackScroll}>
+            <div style={s.pane}>
+              {media.length ? <div style={s.paneList}>{media.map(renderCard)}</div>
+                            : emptyPane("No images or videos yet — swipe left for catalogs.")}
+            </div>
+            <div style={s.pane}>
+              {catalogs.length ? <div style={s.paneList}>{catalogs.map(renderCard)}</div>
+                               : emptyPane("No catalogs yet — create one from Home → Catalog.")}
+            </div>
+          </div>
+        </>
         );
       })()}
 
@@ -521,8 +613,30 @@ const s = {
   pill:     { fontSize: 10, fontFamily: FONT, fontWeight: 600, borderRadius: 20, padding: "2px 9px", border: "1px solid" },
 
   actionCol:{ display: "flex", flexDirection: "column", gap: 8, flexShrink: 0 },
-  actionBtn:{ background: "rgba(0,201,167,0.15)", border: `1px solid ${TEAL}66`, borderRadius: 10,
-              color: TEAL, fontSize: 20, fontFamily: FONT, padding: "10px 14px", cursor: "pointer" },
+  // Fixed square rather than padding-driven, so every action button is the same
+  // size whatever glyph sits inside it.
+  actionBtn:{ width: 44, height: 44, padding: 0, flexShrink: 0,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              background: "rgba(0,201,167,0.15)", border: `1px solid ${TEAL}66`, borderRadius: 12,
+              color: TEAL, fontFamily: FONT, cursor: "pointer" },
+  actionBtnGold: { background: "rgba(201,168,76,0.12)", borderColor: GOLD + "55", color: GOLD },
+
+  tabBar:   { display: "flex", flexShrink: 0, borderBottom: "1px solid", padding: "0 12px" },
+  tabBtn:   { flex: 1, background: "transparent", border: "none", cursor: "pointer",
+              fontSize: 13, fontWeight: 700, fontFamily: FONT, padding: "12px 4px 10px",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+              transition: "color .2s ease, border-color .2s ease" },
+  tabCount: { fontSize: 10.5, fontWeight: 700, fontFamily: FONT, borderRadius: 20, padding: "1px 7px",
+              transition: "background .2s ease, color .2s ease" },
+
+  // One scroller holding both panes. Snapping means a swipe always lands on a
+  // whole tab rather than parking between them.
+  swipeTrack:{ flex: 1, display: "flex", overflowX: "auto", overflowY: "hidden", minHeight: 0,
+               scrollSnapType: "x mandatory", WebkitOverflowScrolling: "touch",
+               scrollbarWidth: "none", msOverflowStyle: "none" },
+  pane:     { flex: "0 0 100%", width: "100%", minWidth: 0, overflowY: "auto",
+              scrollSnapAlign: "start", WebkitOverflowScrolling: "touch" },
+  paneList: { display: "flex", flexDirection: "column", gap: 12, padding: "12px 16px 160px" },
 
   videoScreen:  { position: "fixed", inset: 0, background: "#000", display: "flex", flexDirection: "column", zIndex: 1000 },
   imageScreen:  { position: "fixed", inset: 0, background: "#000", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", zIndex: 1000 },

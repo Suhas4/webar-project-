@@ -52,12 +52,12 @@
     <!-- Outfit is the interface font for every screen, so it stays on the
          critical path — deferring it would flash unstyled text app-wide. -->
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;800&display=swap" rel="stylesheet">
-    <!-- The five display faces are only used by the AI Poster Studio's text
-         overlay picker, which most sessions never open. Loaded with
-         media="print" so the browser fetches them at low priority without
+    <!-- Display faces, used by the AI Poster Studio's text overlay picker and
+         the catalog title styles — neither of which most sessions open. Loaded
+         with media="print" so the browser fetches them at low priority without
          blocking render, then flipped to all once they arrive. -->
     <link rel="stylesheet" media="print" onload="this.media='all'"
-      href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Bebas+Neue&family=Pacifico&family=Anton&family=Cinzel:wght@700;900&display=swap">
+      href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Bebas+Neue&family=Pacifico&family=Anton&family=Cinzel:wght@700;900&family=Archivo+Black&family=Caveat:wght@700&family=Orbitron:wght@800&family=Poppins:wght@800&display=swap">
 
     <!--
       Import map — MUST be first in <head>, before any <script type="module">.

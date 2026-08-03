@@ -8,22 +8,16 @@ import { rebuildPublicMindInBackground } from '../utils/rebuildPublicMind.js';
 import { assessMarkerQuality } from '../utils/assessMarkerQuality.js';
 import { useLanguage } from '../context/LanguageContext.jsx';
 import { useTheme } from '../context/ThemeContext.jsx';
+import { AR_EFFECTS } from '../config/arEffects.js';
 
 const ASPECT_MAP = { '16:9': 0.5625, '4:3': 0.75, '1:1': 1.0, '9:16': 1.7778 };
 const MODEL_EXTENSIONS = ['.glb', '.gltf', '.obj', '.fbx'];
 
-// Entrance animations the uploaded 3D model can play in AR when it first appears
-// after a successful scan. 'popIn' is the default — a friendly, safe-feeling
-// overshoot scale that works for almost any model shape.
-const MODEL_ANIMATIONS = [
-  { id: 'popIn',   icon: '🎈', label: 'Bounce In',  desc: 'Scales up with a springy overshoot' },
-  { id: 'fadeIn',  icon: '✨', label: 'Fade In',     desc: 'Gently fades into view' },
-  { id: 'spinIn',  icon: '🌀', label: 'Spin In',     desc: 'Rotates a full turn while scaling up' },
-  { id: 'riseUp',  icon: '⬆️', label: 'Rise Up',     desc: 'Slides up from below into place' },
-  { id: 'zoomIn',  icon: '💫', label: 'Zoom In',     desc: 'Grows from a tiny point' },
-  { id: 'rotate',  icon: '🔄', label: 'Auto-Rotate', desc: 'Keeps slowly spinning in place' },
-  { id: 'float',   icon: '🌊', label: 'Float',       desc: 'Gentle continuous up-down bob' },
-];
+// Entrance animations the uploaded 3D model can play in AR when it first
+// appears after a successful scan. Shared with the catalog image picker — see
+// config/arEffects.js. 'popIn' is the default: a friendly overshoot scale that
+// works for almost any model shape.
+const MODEL_ANIMATIONS = AR_EFFECTS;
 
 function emptyCard(absoluteNumber, imageFile = null, imagePreviewUrl = null) {
   return {
