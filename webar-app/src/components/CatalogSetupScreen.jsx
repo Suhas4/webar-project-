@@ -72,7 +72,66 @@ async function renderTitleImage(text, font, colorHex) {
 
 function emptyItem() {
   return { id: Date.now() + Math.random().toString(36).slice(2), title: '', price: '', description: '',
-    urlLink: '', imageFile: null, imagePreview: null, fontId: 'outfit', extras: [], effect: DEFAULT_EFFECT };
+    urlLink: '', imageFile: null, imagePreview: null, fontId: 'outfit', extras: [], effect: DEFAULT_EFFECT,
+    // Kinetic text laid over the photo itself — the headline treatment, as
+    // opposed to `extras`, which are plain caption lines under the item.
+    imageText: '', textFontId: 'bebas', textColor: '#FFFFFF', textPos: 'bottom', textEffect: 'riseUp' };
+}
+
+const TEXT_POSITIONS = [
+  { id: 'top',    label: 'Top' },
+  { id: 'middle', label: 'Middle' },
+  { id: 'bottom', label: 'Bottom' },
+];
+const TEXT_COLOURS = ['#FFFFFF', '#141414', '#00C9A7', '#C9A84C', '#FF6B6B'];
+
+// Bakes the kinetic text onto the photo so the PDF carries it. The animation
+// itself cannot survive into a static document — what lands in the PDF is the
+// final frame, which is what the text is *for*. Returns the same shape as
+// imageFileToDataURL so the PDF path can use either interchangeably.
+async function composeItemImage(file, item, maxW = 900) {
+  const base = await imageFileToDataURL(file, maxW);
+  const text = String(item.imageText || '').trim();
+  if (!text) return base;
+
+  const font = fontById(item.textFontId);
+  const img = await new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = rej;
+    im.src = base.dataUrl;
+  });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = base.w;
+  canvas.height = base.h;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(img, 0, 0, base.w, base.h);
+
+  // Scale with the photo so the caption looks the same at any resolution.
+  const size = Math.max(18, Math.round(base.w * 0.085));
+  const spec = `${font.weight} ${size}px "${font.family}"`;
+  try { await document.fonts?.load(spec, text); } catch { /* falls back below */ }
+  ctx.font = `${spec}, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const y = item.textPos === 'top' ? base.h * 0.14
+          : item.textPos === 'middle' ? base.h * 0.5
+          : base.h * 0.86;
+
+  // A scrim behind the text, because a caption that vanishes over a light
+  // patch of the photo is worse than no caption.
+  const m = ctx.measureText(text);
+  const padX = size * 0.5, padY = size * 0.42;
+  ctx.fillStyle = item.textColor === '#141414' ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.42)';
+  ctx.fillRect(base.w / 2 - m.width / 2 - padX, y - size * 0.62 - padY / 2,
+    m.width + padX * 2, size * 1.24 + padY);
+
+  ctx.fillStyle = item.textColor || '#FFFFFF';
+  ctx.fillText(text, base.w / 2, y);
+
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.85), w: base.w, h: base.h };
 }
 
 // Resize + re-encode to a JPEG data URL so large phone photos don't bloat the
@@ -148,7 +207,7 @@ async function generateCatalogPdf(name, items, themeColor, titleFont) {
     let imgH = 0;
 
     if (item.imageFile) {
-      const { dataUrl, w, h } = await imageFileToDataURL(item.imageFile);
+      const { dataUrl, w, h } = await composeItemImage(item.imageFile, item);
       const scale = Math.min(imgMaxW / w, imgMaxH / h, 1);
       const drawW = w * scale;
       const drawH = h * scale;
@@ -228,6 +287,35 @@ async function generateCatalogPdf(name, items, themeColor, titleFont) {
   return blob;
 }
 
+// The kinetic caption, drawn over a photo. Keyed on every property that changes
+// its look so the entrance replays as you tune it — seeing the animation is the
+// whole point of choosing one. `scale` shrinks it for the small editor
+// thumbnail without needing a second set of sizes.
+function KineticText({ item, scale = 1 }) {
+  const text = String(item.imageText || '').trim();
+  if (!text) return null;
+  const font = fontById(item.textFontId);
+  const pos = item.textPos === 'top' ? { top: '8%' } : item.textPos === 'middle' ? { top: '43%' } : { bottom: '8%' };
+  const light = item.textColor === '#141414';
+  return (
+    <div
+      key={`${item.textEffect}|${item.textFontId}|${item.textColor}|${item.textPos}|${text}`}
+      className={`fx-${item.textEffect || 'riseUp'}`}
+      style={{ position:'absolute', left:0, right:0, ...pos,
+        display:'flex', justifyContent:'center', pointerEvents:'none' }}>
+      <span style={{
+        fontFamily:`"${font.family}", ${FONT}`, fontWeight:font.weight,
+        fontSize: Math.round(22 * scale), lineHeight:1.15, color:item.textColor || '#FFFFFF',
+        background: light ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.42)',
+        padding:`${Math.round(5 * scale)}px ${Math.round(11 * scale)}px`,
+        borderRadius:Math.round(6 * scale), maxWidth:'92%',
+        overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+        {text}
+      </span>
+    </div>
+  );
+}
+
 function ItemCard({ item, index, onChange, onRemove, onPickImage, canRemove }) {
   return (
     <div style={{ background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:16, padding:14, display:'flex', flexDirection:'column', gap:10 }}>
@@ -242,11 +330,93 @@ function ItemCard({ item, index, onChange, onRemove, onPickImage, canRemove }) {
         background: item.imagePreview ? '#000' : 'rgba(255,255,255,0.06)', border:'1px dashed rgba(255,255,255,0.2)',
         display:'flex', alignItems:'center', justifyContent:'center' }}>
         {item.imagePreview
-          ? <img key={item.effect} src={item.imagePreview} alt=""
-              className={`fx-${item.effect || DEFAULT_EFFECT}`}
-              style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+          ? <div style={{ position:'relative', width:'100%', height:'100%' }}>
+              <img key={item.effect} src={item.imagePreview} alt=""
+                className={`fx-${item.effect || DEFAULT_EFFECT}`}
+                style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+              <KineticText item={item} scale={0.5} />
+            </div>
           : <span style={{ fontSize:12, color:'rgba(255,255,255,0.45)' }}>Tap to add photo</span>}
       </div>
+
+      {/* Kinetic text — typed straight onto the photo, in a display face, with
+          its own entrance. Only offered once there is a photo to put it on. */}
+      {item.imagePreview && (
+        <div style={{ borderTop:'1px solid rgba(255,255,255,0.08)', paddingTop:11, display:'flex', flexDirection:'column', gap:9 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:TEAL, fontFamily:FONT, letterSpacing:'0.05em' }}>
+            KINETIC TEXT ON IMAGE
+          </div>
+          <input value={item.imageText} onChange={(e) => onChange({ imageText: e.target.value })}
+            placeholder="Type text to lay over the photo…"
+            style={{ ...inputStyle, fontFamily:`"${fontById(item.textFontId).family}", ${FONT}`,
+              fontWeight: fontById(item.textFontId).weight,
+              fontSize: item.textFontId === 'bebas' || item.textFontId === 'caveat' ? 17 : 13 }} />
+
+          {item.imageText.trim() && (
+            <>
+              <div style={{ display:'flex', gap:6, overflowX:'auto', paddingBottom:2 }}>
+                {TITLE_FONTS.filter((f) => f.id !== 'outfit').map((f) => {
+                  const on = item.textFontId === f.id;
+                  return (
+                    <button key={f.id} onClick={() => onChange({ textFontId: f.id })} title={f.name}
+                      style={{ flexShrink:0, padding:'6px 11px', borderRadius:10, cursor:'pointer',
+                        background: on ? 'rgba(0,201,167,0.16)' : 'rgba(255,255,255,0.05)',
+                        border:`1px solid ${on ? TEAL : 'rgba(255,255,255,0.12)'}`,
+                        color: on ? TEAL : 'rgba(255,255,255,0.6)',
+                        fontFamily:`"${f.family}", ${FONT}`, fontWeight:f.weight,
+                        fontSize: f.id === 'bebas' || f.id === 'caveat' ? 14 : 11.5, whiteSpace:'nowrap' }}>
+                      {f.name}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+                {TEXT_COLOURS.map((c) => (
+                  <button key={c} onClick={() => onChange({ textColor: c })} aria-label={`Text colour ${c}`}
+                    style={{ width:26, height:26, borderRadius:'50%', background:c, cursor:'pointer', padding:0,
+                      border: item.textColor === c ? `2.5px solid ${TEAL}` : '1.5px solid rgba(255,255,255,0.25)' }} />
+                ))}
+                <div style={{ display:'flex', gap:6, marginLeft:'auto' }}>
+                  {TEXT_POSITIONS.map((p) => {
+                    const on = item.textPos === p.id;
+                    return (
+                      <button key={p.id} onClick={() => onChange({ textPos: p.id })}
+                        style={{ padding:'6px 10px', borderRadius:9, cursor:'pointer', fontSize:11, fontWeight:700,
+                          fontFamily:FONT,
+                          background: on ? 'rgba(0,201,167,0.16)' : 'rgba(255,255,255,0.05)',
+                          border:`1px solid ${on ? TEAL : 'rgba(255,255,255,0.12)'}`,
+                          color: on ? TEAL : 'rgba(255,255,255,0.55)' }}>
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div style={{ fontSize:10.5, color:'rgba(255,255,255,0.4)', fontFamily:FONT }}>
+                Text animation
+              </div>
+              <div style={{ display:'flex', gap:6, overflowX:'auto', paddingBottom:2 }}>
+                {AR_EFFECTS.map((fx) => {
+                  const on = item.textEffect === fx.id;
+                  return (
+                    <button key={fx.id} onClick={() => onChange({ textEffect: fx.id })} title={fx.desc}
+                      style={{ flexShrink:0, padding:'6px 10px', borderRadius:10, cursor:'pointer',
+                        display:'flex', alignItems:'center', gap:4, whiteSpace:'nowrap',
+                        background: on ? 'rgba(201,168,76,0.18)' : 'rgba(255,255,255,0.05)',
+                        border:`1px solid ${on ? GOLD : 'rgba(255,255,255,0.12)'}`,
+                        color: on ? GOLD : 'rgba(255,255,255,0.6)',
+                        fontSize:11, fontWeight:700, fontFamily:FONT }}>
+                      <span aria-hidden="true">{fx.icon}</span>{fx.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Only asked once there is a photo to animate — an effect picker above an
           empty drop zone is a question about nothing. */}
@@ -403,10 +573,12 @@ function CatalogPreview({ name, themeColor, items, markerPreview, activeId, titl
               transition:'background .18s ease',
             }}>
               {item.imagePreview && (
-                <img key={item.effect} src={item.imagePreview} alt=""
-                  className={`fx-${item.effect || DEFAULT_EFFECT}`}
-                  style={{ width:'100%', maxHeight:190, objectFit:'cover',
-                    display:'block', borderRadius:4, marginBottom:12 }} />
+                <div style={{ position:'relative', marginBottom:12, borderRadius:4, overflow:'hidden' }}>
+                  <img key={item.effect} src={item.imagePreview} alt=""
+                    className={`fx-${item.effect || DEFAULT_EFFECT}`}
+                    style={{ width:'100%', maxHeight:190, objectFit:'cover', display:'block' }} />
+                  <KineticText item={item} />
+                </div>
               )}
               <div style={{ display:'flex', alignItems:'baseline', gap:12 }}>
                 <div key={item.fontId} style={{ flex:1, wordBreak:'break-word',
